@@ -5,6 +5,35 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>ZeroKitchen</title>
 
+<!-- PWA -->
+<meta name="theme-color" content="#0a0a0a">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ZeroKitchen">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230a0a0a'/%3E%3Ctext x='50' y='68' text-anchor='middle' font-size='56' fill='%2300e5a0'%3E🍳%3C/text%3E%3C/svg%3E">
+<link id="manifest-link" rel="manifest">
+<script>
+  // 매니페스트 동적 생성 (단일 파일 PWA)
+  const manifest = {
+    name: "ZeroKitchen",
+    short_name: "ZeroKitchen",
+    description: "음성 기반 재고 확인 Agent",
+    start_url: "/",
+    display: "standalone",
+    background_color: "#0a0a0a",
+    theme_color: "#0a0a0a",
+    orientation: "portrait",
+    icons: [{
+      src: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='20' fill='%230a0a0a'/%3E%3Ctext x='50' y='68' text-anchor='middle' font-size='56' fill='%2300e5a0'%3E%F0%9F%8D%B3%3C/text%3E%3C/svg%3E",
+      sizes: "192x192",
+      type: "image/svg+xml"
+    }]
+  };
+  const blob = new Blob([JSON.stringify(manifest)], { type: 'application/json' });
+  document.getElementById('manifest-link').href = URL.createObjectURL(blob);
+</script>
+
 <!-- ⚠️ 여기에 본인 키를 넣으세요 -->
 <script>
   const SUPABASE_URL = 'https://pmdkmiayyZailcnmjhyo.supabase.co';
@@ -1025,6 +1054,65 @@ async function rejectItem(id) {
 document.getElementById('textInput').addEventListener('keydown', e => {
   if (e.key === 'Enter') handleSend();
 });
+
+/* ════════════════════════════════
+   PWA 서비스워커 등록
+════════════════════════════════ */
+if ('serviceWorker' in navigator) {
+  // 인라인 서비스워커 (단일 파일)
+  const swCode = `
+    const CACHE = 'zerokitchen-v1';
+    self.addEventListener('install', e => {
+      self.skipWaiting();
+    });
+    self.addEventListener('activate', e => {
+      e.waitUntil(
+        caches.keys().then(keys =>
+          Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
+        )
+      );
+    });
+    self.addEventListener('fetch', e => {
+      // Supabase API는 캐시 안 함
+      if (e.request.url.includes('supabase.co')) return;
+      e.respondWith(
+        caches.match(e.request).then(cached => cached || fetch(e.request))
+      );
+    });
+  `;
+  const swBlob = new Blob([swCode], { type: 'application/javascript' });
+  const swUrl  = URL.createObjectURL(swBlob);
+  navigator.serviceWorker.register(swUrl).catch(() => {});
+}
+
+/* ════════════════════════════════
+   iOS 홈 화면 추가 배너 (Safari)
+════════════════════════════════ */
+function checkIOSInstall() {
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isStandalone = window.navigator.standalone;
+  const dismissed = localStorage.getItem('zk_ios_banner');
+  if (!isIOS || isStandalone || dismissed) return;
+
+  const banner = document.createElement('div');
+  banner.style.cssText = `
+    position:fixed; bottom:0; left:0; right:0;
+    background:#1e1e1e; border-top:1px solid #2a2a2a;
+    padding:16px 20px; display:flex; align-items:center;
+    gap:12px; z-index:200; font-family:'Noto Sans KR',sans-serif;
+  `;
+  banner.innerHTML = `
+    <span style="font-size:22px">📲</span>
+    <div style="flex:1">
+      <div style="font-size:14px;font-weight:700;color:#f0f0f0">홈 화면에 추가하기</div>
+      <div style="font-size:12px;color:#666;margin-top:2px">Safari 하단 공유 버튼 → "홈 화면에 추가"</div>
+    </div>
+    <button onclick="this.parentElement.remove();localStorage.setItem('zk_ios_banner','1')"
+      style="background:none;border:none;color:#666;font-size:20px;cursor:pointer;padding:4px">✕</button>
+  `;
+  document.body.appendChild(banner);
+}
+setTimeout(checkIOSInstall, 1500);
 </script>
 </body>
 </html>
