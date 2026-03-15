@@ -568,33 +568,34 @@ function initSpeech() {
   if (!SpeechRecognition) return null;
   const r = new SpeechRecognition();
   r.lang = 'ko-KR';
-  r.continuous = true;       // 말하는 중간에 끊기지 않음
-  r.interimResults = true;   // 중간 결과 실시간 표시
-
-  let finalText = '';
+  r.continuous = false;      // 한 문장씩 받기 (중복 누적 방지)
+  r.interimResults = false;  // 최종 결과만 사용
 
   r.onresult = (e) => {
-    let interim = '';
-    finalText = '';
-    for (let i = 0; i < e.results.length; i++) {
-      if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
-      else interim += e.results[i][0].transcript;
-    }
-    // 입력창에 실시간으로 보여줌
-    document.getElementById('textInput').value = finalText || interim;
+    // 이번 인식 결과만 가져옴
+    const newText = e.results[e.results.length - 1][0].transcript.trim();
+    if (!newText) return;
+
+    const input = document.getElementById('textInput');
+    const existing = input.value.trim();
+    // 기존 텍스트에 이어붙임 (냉장고 돌면서 계속 말하는 경우)
+    input.value = existing ? existing + ' ' + newText : newText;
   };
   r.onerror = (e) => {
-    if (e.error === 'no-speech') return; // 무음은 무시
+    if (e.error === 'no-speech') {
+      // 무음 → 그냥 재시작
+      if (isRecording) { try { r.start(); } catch(_) {} }
+      return;
+    }
     stopMic();
     showToast('음성 인식 오류. 직접 입력해 주세요.');
   };
   r.onend = () => {
-    // continuous 모드에서 끊기면 자동 재시작 (녹음 중일 때만)
+    // 녹음 중이면 자동 재시작 (타이머 끝나기 전까지)
     if (isRecording) {
       try { r.start(); } catch(_) {}
     }
   };
-  r._getFinalText = () => finalText;
   return r;
 }
 
