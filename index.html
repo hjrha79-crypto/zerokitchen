@@ -741,6 +741,16 @@ function parseEntries(text) {
       const mode   = isFix ? 'FIX' : isAdd ? 'ADD' : 'SET';
       let qty = /^\d+(\.\d+)?$/.test(qtyRaw) ? Number(qtyRaw) : (numMap[qtyRaw] || 0);
       if (!item || (qty === 0 && qtyRaw !== '0')) { s = s.slice(mm[0].length || 1); continue; }
+
+      // ✅ 품목명 필터
+      // 1) 수량 단어 자체가 품목명으로 파싱되는 경우 차단
+      const numWords = ['하나','한','둘','두','셋','세','넷','네','내','다섯','여섯','일곱','여덟','아홉','열',
+                        '열한','열두','열세','열네','열다섯','스무','스물','없음','약간'];
+      if (numWords.includes(item)) { s = s.slice(mm[0].length || 1); continue; }
+
+      // 2) 1글자 품목명 차단 (소음/오인식)
+      if (item.length < 2) { s = s.slice(mm[0].length || 1); continue; }
+
       results.push({ item, qty, unit, cmd, mode });
       s = s.slice(mm[0].length);
       continue;
