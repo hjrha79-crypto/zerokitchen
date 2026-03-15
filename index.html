@@ -425,6 +425,20 @@
   }
   #toast.show { transform: translateX(-50%) translateY(0); }
 
+  /* 되돌리기 버튼 */
+  .undo-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 14px;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .undo-btn:hover { border-color: var(--warn); color: var(--warn); }
+
   /* 녹음 시간 선택 */
   .mic-duration-row {
     display: flex;
@@ -578,8 +592,11 @@ function initSpeech() {
 
     const input = document.getElementById('textInput');
     const existing = input.value.trim();
-    // 기존 텍스트에 이어붙임 (냉장고 돌면서 계속 말하는 경우)
+    // 기존 텍스트에 이어붙임
     input.value = existing ? existing + ' ' + newText : newText;
+
+    // ✅ 말이 들어오면 타이머 리셋
+    resetMicTimer();
   };
   r.onerror = (e) => {
     if (e.error === 'no-speech') {
@@ -614,7 +631,15 @@ function toggleMic() {
   document.getElementById('micStatus').classList.add('recording');
   recognition.start();
 
-  // 카운트다운 타이머
+  // 카운트다운 타이머 시작
+  resetMicTimer();
+}
+
+function resetMicTimer() {
+  if (!isRecording) return;
+  // 기존 타이머 제거
+  if (micTimer) { clearInterval(micTimer); micTimer = null; }
+
   let remaining = micDuration;
   updateMicStatus(remaining);
   micTimer = setInterval(() => {
@@ -958,10 +983,16 @@ async function handleSend() {
                  : mode === 'FIX'     ? '✏️'
                  : mode === 'ADD'     ? '➕'
                  : '✅';
-      msgs.push({ text: `${icon} ${matched.item_name} ${ent.qty}${ent.unit} → ${newQty}${matched.unit} (${modeLabel})`, type: 'ok' });
+      msgs.push({
+        text:     `${icon} ${matched.item_name} ${ent.qty}${ent.unit} → ${newQty}${matched.unit} (${modeLabel})`,
+        type:     'ok',
+        itemId:   matched.id,
+        itemName: matched.item_name,
+        prevQty:  cur   // 되돌리기용 이전 값
+      });
     }
 
-    msgs.forEach(m => addResult(rawText, m.text, m.type));
+    msgs.forEach(m => addResult(rawText, m.text, m.type, m.itemId, m.itemName, m.prevQty));
     input.value = '';
 
   } catch(err) {
@@ -972,22 +1003,47 @@ async function handleSend() {
   }
 }
 
-function addResult(raw, msg, type) {
-  const list = document.getElementById('resultList');
-  const now  = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+let resultIdCounter = 0;
 
-  // 기존 헤더 제외한 첫 번째 위치에 삽입
+function addResult(raw, msg, type, itemId, itemName, prevQty) {
+  const list   = document.getElementById('resultList');
+  const now    = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+  const rid    = 'r' + (++resultIdCounter);
   const header = list.querySelector('.result-header');
-  const div = document.createElement('div');
+  const div    = document.createElement('div');
   div.className = `result-item ${type}`;
+  div.id = rid;
+
+  // 삭제(되돌리기) 버튼 — 재고 반영된 항목만
+  const canUndo = type === 'ok' && itemId && prevQty !== undefined;
+  const undoBtn = canUndo
+    ? `<button class="undo-btn" onclick="undoEntry('${rid}', ${itemId}, ${prevQty}, '${itemName}')">↩️</button>`
+    : '';
+
   div.innerHTML = `
-    <div>
+    <div style="flex:1">
       <div class="result-raw">${raw}</div>
       <div class="result-msg">${msg}</div>
     </div>
-    <div class="result-time">${now}</div>
+    <div style="display:flex;align-items:center;gap:8px">
+      ${undoBtn}
+      <div class="result-time">${now}</div>
+    </div>
   `;
   header.after(div);
+}
+
+async function undoEntry(rid, itemId, prevQty, itemName) {
+  if (!confirm(`"${itemName}" 재고를 ${prevQty}로 되돌릴까요?`)) return;
+  try {
+    await db.from('items')
+      .update({ current_qty: prevQty, updated_at: new Date().toISOString() })
+      .eq('id', itemId);
+    document.getElementById(rid).remove();
+    showToast(`↩️ ${itemName} 재고 ${prevQty}로 복구됨`);
+  } catch(e) {
+    showToast('되돌리기 실패: ' + e.message);
+  }
 }
 
 /* ════════════════════════════════
