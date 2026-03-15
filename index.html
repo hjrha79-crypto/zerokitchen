@@ -425,6 +425,34 @@
   }
   #toast.show { transform: translateX(-50%) translateY(0); }
 
+  /* 녹음 시간 선택 */
+  .mic-duration-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 4px;
+  }
+  .mic-duration-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .mic-duration-btns { display: flex; gap: 6px; }
+  .dur-btn {
+    padding: 5px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .dur-btn:hover  { border-color: var(--accent); color: var(--accent); }
+  .dur-btn.active { border-color: var(--accent); background: var(--accent-dim); color: var(--accent); }
+
   /* 로딩 */
   .spinner {
     display: inline-block;
@@ -453,7 +481,16 @@
 <div id="tab-input" class="tab-content active">
   <div class="mic-zone">
     <button class="mic-btn" id="micBtn" onclick="toggleMic()">🎤</button>
-    <div class="mic-status" id="micStatus">탭하면 음성 입력</div>
+    <div class="mic-status" id="micStatus">탭하면 음성 입력 (15초)</div>
+    <div class="mic-duration-row">
+      <span class="mic-duration-label">녹음 시간</span>
+      <div class="mic-duration-btns">
+        <button class="dur-btn" onclick="setDuration(10)">10초</button>
+        <button class="dur-btn active" onclick="setDuration(15)">15초</button>
+        <button class="dur-btn" onclick="setDuration(30)">30초</button>
+        <button class="dur-btn" onclick="setDuration(60)">60초</button>
+      </div>
+    </div>
   </div>
 
   <div class="input-row">
@@ -523,43 +560,95 @@ function showToast(msg, duration = 2000) {
 ════════════════════════════════ */
 let recognition = null;
 let isRecording = false;
+let micTimer = null;
+let micDuration = 15; // 기본 15초
 
 function initSpeech() {
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SpeechRecognition) return null;
   const r = new SpeechRecognition();
   r.lang = 'ko-KR';
-  r.continuous = false;
-  r.interimResults = false;
+  r.continuous = true;       // 말하는 중간에 끊기지 않음
+  r.interimResults = true;   // 중간 결과 실시간 표시
+
+  let finalText = '';
 
   r.onresult = (e) => {
-    const transcript = e.results[0][0].transcript;
-    document.getElementById('textInput').value = transcript;
-    stopMic();
-    handleSend();
+    let interim = '';
+    finalText = '';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    // 입력창에 실시간으로 보여줌
+    document.getElementById('textInput').value = finalText || interim;
   };
-  r.onerror = () => { stopMic(); showToast('음성 인식 실패. 직접 입력해 주세요.'); };
-  r.onend   = () => { stopMic(); };
+  r.onerror = (e) => {
+    if (e.error === 'no-speech') return; // 무음은 무시
+    stopMic();
+    showToast('음성 인식 오류. 직접 입력해 주세요.');
+  };
+  r.onend = () => {
+    // continuous 모드에서 끊기면 자동 재시작 (녹음 중일 때만)
+    if (isRecording) {
+      try { r.start(); } catch(_) {}
+    }
+  };
+  r._getFinalText = () => finalText;
   return r;
 }
 
 function toggleMic() {
-  if (isRecording) { stopMic(); return; }
+  if (isRecording) {
+    // 수동으로 멈추면 바로 입력 처리
+    const text = document.getElementById('textInput').value.trim();
+    stopMic();
+    if (text) handleSend();
+    return;
+  }
   recognition = initSpeech();
   if (!recognition) { showToast('이 브라우저는 음성 인식을 지원하지 않습니다.'); return; }
   isRecording = true;
   document.getElementById('micBtn').classList.add('recording');
-  document.getElementById('micStatus').textContent = '듣는 중...';
   document.getElementById('micStatus').classList.add('recording');
   recognition.start();
+
+  // 카운트다운 타이머
+  let remaining = micDuration;
+  updateMicStatus(remaining);
+  micTimer = setInterval(() => {
+    remaining--;
+    updateMicStatus(remaining);
+    if (remaining <= 0) {
+      const text = document.getElementById('textInput').value.trim();
+      stopMic();
+      if (text) handleSend();
+    }
+  }, 1000);
+}
+
+function updateMicStatus(remaining) {
+  const el = document.getElementById('micStatus');
+  el.textContent = `듣는 중... ${remaining}초 (탭하면 즉시 입력)`;
 }
 
 function stopMic() {
   isRecording = false;
+  if (micTimer) { clearInterval(micTimer); micTimer = null; }
   document.getElementById('micBtn').classList.remove('recording');
-  document.getElementById('micStatus').textContent = '탭하면 음성 입력';
+  document.getElementById('micStatus').textContent = `탭하면 음성 입력 (${micDuration}초)`;
   document.getElementById('micStatus').classList.remove('recording');
   if (recognition) { try { recognition.stop(); } catch(_) {} }
+}
+
+function setDuration(sec) {
+  micDuration = sec;
+  document.querySelectorAll('.dur-btn').forEach(b => {
+    b.classList.toggle('active', b.textContent === sec + '초');
+  });
+  if (!isRecording) {
+    document.getElementById('micStatus').textContent = `탭하면 음성 입력 (${sec}초)`;
+  }
 }
 
 /* ════════════════════════════════
