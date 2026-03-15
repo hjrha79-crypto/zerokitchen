@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ZeroKitchen</title>
+
+<!-- ⚠️ 여기에 본인 키를 넣으세요 -->
+<script>
+  const SUPABASE_URL = 'https://pmdkmiayyZailcnmjhyo.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_bkRZfA2drD_M6dMQjRiriQ_EP3lCqO8';
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600&display=swap');
+
+  :root {
+    --bg: #0a0a0a;
+    --surface: #141414;
+    --surface2: #1e1e1e;
+    --border: #2a2a2a;
+    --text: #f0f0f0;
+    --text-dim: #666;
+    --text-muted: #444;
+    --accent: #00e5a0;
+    --accent-dim: rgba(0, 229, 160, 0.12);
+    --warn: #ff6b35;
+    --warn-dim: rgba(255, 107, 53, 0.12);
+    --radius: 12px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    font-family: 'Noto Sans KR', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── 상단 헤더 ── */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+    background: var(--bg);
+    z-index: 10;
+  }
+  .logo {
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: -0.5px;
+    color: var(--accent);
+  }
+  .logo span { color: var(--text-dim); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  .nav-btns { display: flex; gap: 8px; }
+  .nav-btn {
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-dim);
+    transition: all 0.15s;
+  }
+  .nav-btn:hover, .nav-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-dim);
+  }
+
+  /* ── 탭 콘텐츠 ── */
+  .tab-content { display: none; flex: 1; flex-direction: column; }
+  .tab-content.active { display: flex; }
+
+  /* ══════════════════════════
+     탭1: 입력
+  ══════════════════════════ */
+  #tab-input {
+    padding: 20px;
+    gap: 16px;
+  }
+
+  /* 마이크 영역 */
+  .mic-zone {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 32px 20px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+  }
+  .mic-btn {
+    width: 88px;
+    height: 88px;
+    border-radius: 50%;
+    border: none;
+    background: var(--surface2);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    transition: all 0.2s;
+    border: 2px solid var(--border);
+    position: relative;
+  }
+  .mic-btn:hover { border-color: var(--accent); background: var(--accent-dim); }
+  .mic-btn.recording {
+    border-color: var(--warn);
+    background: var(--warn-dim);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(255,107,53,0.4); }
+    50% { box-shadow: 0 0 0 12px rgba(255,107,53,0); }
+  }
+  .mic-status {
+    font-size: 14px;
+    color: var(--text-dim);
+    font-weight: 500;
+    min-height: 20px;
+  }
+  .mic-status.recording { color: var(--warn); }
+
+  /* 텍스트 입력 */
+  .input-row {
+    display: flex;
+    gap: 8px;
+  }
+  .text-input {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    font-size: 16px;
+    font-family: inherit;
+    color: var(--text);
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .text-input:focus { border-color: var(--accent); }
+  .text-input::placeholder { color: var(--text-muted); }
+  .send-btn {
+    padding: 14px 20px;
+    background: var(--accent);
+    color: #000;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 15px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    transition: opacity 0.15s;
+    white-space: nowrap;
+  }
+  .send-btn:hover { opacity: 0.85; }
+  .send-btn:disabled { opacity: 0.4; cursor: default; }
+
+  /* 결과 목록 */
+  .result-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .result-header {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0 4px;
+  }
+  .result-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    animation: slideIn 0.2s ease;
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(-6px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  .result-item.ok   { border-left: 3px solid var(--accent); }
+  .result-item.warn { border-left: 3px solid var(--warn); }
+  .result-item.err  { border-left: 3px solid #888; }
+  .result-raw {
+    font-size: 13px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 4px;
+  }
+  .result-msg { font-size: 15px; font-weight: 500; }
+  .result-time { font-size: 12px; color: var(--text-muted); white-space: nowrap; }
+
+  /* ══════════════════════════
+     탭2: 발주
+  ══════════════════════════ */
+  #tab-order {
+    padding: 20px;
+    gap: 16px;
+    overflow-y: auto;
+  }
+  .order-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .order-title { font-size: 17px; font-weight: 700; }
+  .refresh-btn {
+    padding: 8px 14px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-dim);
+    font-family: inherit;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  .vendor-section { display: flex; flex-direction: column; gap: 8px; }
+  .vendor-name {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.05em;
+    padding: 0 4px;
+    margin-top: 8px;
+  }
+  .order-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .order-item-name { flex: 1; font-size: 15px; font-weight: 500; }
+  .order-item-stock {
+    font-size: 13px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    white-space: nowrap;
+  }
+  .order-qty-wrap { display: flex; align-items: center; gap: 6px; }
+  .order-qty {
+    width: 60px;
+    text-align: center;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font-size: 15px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 600;
+    color: var(--accent);
+    outline: none;
+  }
+  .order-qty:focus { border-color: var(--accent); }
+  .order-unit { font-size: 13px; color: var(--text-dim); }
+  .no-order {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  /* ══════════════════════════
+     탭3: NEW_ITEMS
+  ══════════════════════════ */
+  #tab-new {
+    padding: 20px;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .new-item-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    animation: slideIn 0.2s ease;
+  }
+  .new-item-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+  }
+  .new-item-candidate {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--warn);
+  }
+  .new-item-raw {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+    margin-top: 2px;
+  }
+  .new-item-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 8px;
+    border-radius: 4px;
+    background: var(--warn-dim);
+    color: var(--warn);
+    white-space: nowrap;
+  }
+  .new-item-memo {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text);
+    outline: none;
+    resize: none;
+  }
+  .new-item-memo:focus { border-color: var(--accent); }
+  .new-item-memo::placeholder { color: var(--text-muted); }
+  .new-item-actions { display: flex; gap: 8px; }
+  .btn-approve {
+    flex: 1;
+    padding: 10px;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-approve:hover { background: var(--accent); color: #000; }
+  .btn-reject {
+    padding: 10px 16px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .btn-reject:hover { border-color: #888; color: var(--text-dim); }
+  .no-pending {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
+  /* ── 토스트 ── */
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 20px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--text);
+    transition: transform 0.25s ease;
+    z-index: 100;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  #toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* 로딩 */
+  .spinner {
+    display: inline-block;
+    width: 16px; height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    vertical-align: middle;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">ZeroKitchen <span>경기광주점</span></div>
+  <div class="nav-btns">
+    <button class="nav-btn active" onclick="switchTab('input', this)">입력</button>
+    <button class="nav-btn" onclick="switchTab('order', this)">발주</button>
+    <button class="nav-btn" onclick="switchTab('new', this)">신규</button>
+  </div>
+</header>
+
+<!-- ══ 탭1: 입력 ══ -->
+<div id="tab-input" class="tab-content active">
+  <div class="mic-zone">
+    <button class="mic-btn" id="micBtn" onclick="toggleMic()">🎤</button>
+    <div class="mic-status" id="micStatus">탭하면 음성 입력</div>
+  </div>
+
+  <div class="input-row">
+    <input
+      class="text-input"
+      id="textInput"
+      type="text"
+      placeholder="예: 브로콜리 세 봉지 새우 두 팩"
+      autocomplete="off"
+      enterkeyhint="send"
+    >
+    <button class="send-btn" id="sendBtn" onclick="handleSend()">입력</button>
+  </div>
+
+  <div class="result-list" id="resultList">
+    <div class="result-header">처리 결과</div>
+  </div>
+</div>
+
+<!-- ══ 탭2: 발주 ══ -->
+<div id="tab-order" class="tab-content">
+  <div class="order-header">
+    <div class="order-title">오늘 발주 목록</div>
+    <button class="refresh-btn" onclick="loadOrderList()">새로고침</button>
+  </div>
+  <div id="orderList"><div class="no-order">로딩 중...</div></div>
+</div>
+
+<!-- ══ 탭3: NEW_ITEMS ══ -->
+<div id="tab-new" class="tab-content">
+  <div id="newItemList"><div class="no-pending">로딩 중...</div></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+/* ════════════════════════════════
+   Supabase 초기화
+════════════════════════════════ */
+const { createClient } = supabase;
+const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+/* ════════════════════════════════
+   탭 전환
+════════════════════════════════ */
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  btn.classList.add('active');
+  if (name === 'order') loadOrderList();
+  if (name === 'new')   loadNewItems();
+}
+
+/* ════════════════════════════════
+   토스트
+════════════════════════════════ */
+function showToast(msg, duration = 2000) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  setTimeout(() => t.classList.remove('show'), duration);
+}
+
+/* ════════════════════════════════
+   음성 입력 (Web Speech API)
+════════════════════════════════ */
+let recognition = null;
+let isRecording = false;
+
+function initSpeech() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) return null;
+  const r = new SpeechRecognition();
+  r.lang = 'ko-KR';
+  r.continuous = false;
+  r.interimResults = false;
+
+  r.onresult = (e) => {
+    const transcript = e.results[0][0].transcript;
+    document.getElementById('textInput').value = transcript;
+    stopMic();
+    handleSend();
+  };
+  r.onerror = () => { stopMic(); showToast('음성 인식 실패. 직접 입력해 주세요.'); };
+  r.onend   = () => { stopMic(); };
+  return r;
+}
+
+function toggleMic() {
+  if (isRecording) { stopMic(); return; }
+  recognition = initSpeech();
+  if (!recognition) { showToast('이 브라우저는 음성 인식을 지원하지 않습니다.'); return; }
+  isRecording = true;
+  document.getElementById('micBtn').classList.add('recording');
+  document.getElementById('micStatus').textContent = '듣는 중...';
+  document.getElementById('micStatus').classList.add('recording');
+  recognition.start();
+}
+
+function stopMic() {
+  isRecording = false;
+  document.getElementById('micBtn').classList.remove('recording');
+  document.getElementById('micStatus').textContent = '탭하면 음성 입력';
+  document.getElementById('micStatus').classList.remove('recording');
+  if (recognition) { try { recognition.stop(); } catch(_) {} }
+}
+
+/* ════════════════════════════════
+   전처리 & 파서 (Apps Script에서 이식)
+════════════════════════════════ */
+const QTY_TINY        = 0.1;
+const QTY_ALMOST_NONE = 0.2;
+
+function preprocessInput(t) {
+  let s = String(t || '');
+  s = s.replace(/[.,·•:;!?'"()\[\]{}<>\\/|@#%^&*_+=~`]/g, ' ');
+  s = s.replace(/\s+/g, ' ').trim();
+  s = s.replace(/(하나|한|둘|두|셋|세|넷|네|내|다섯|여섯|일곱|여덟|아홉|열)(개|게)(요|를|을|가|이|만|랑|하고|도)?/g, '$1 $2');
+  s = s.replace(/\b반\s*(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '0.5$1');
+  s = s.replace(/([가-힣A-Za-z])\s*반\s*(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '$1 0.5$2');
+  s = s.replace(/([가-힣A-Za-z])반(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '$1 0.5$2');
+  s = s.replace(/삼분의일\s*(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '0.333$1');
+  s = s.replace(/사분의일\s*(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '0.25$1');
+  s = s.replace(/오분의일\s*(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '0.2$1');
+  s = s.replace(/\b아주약간\b/g, String(QTY_TINY));
+  s = s.replace(/\b거의없음\b/g, String(QTY_ALMOST_NONE));
+  s = s.replace(/\b없음\b/g, '0');
+  return s;
+}
+
+function parseEntries(text) {
+  let s = String(text || '').replace(/\s+/g, '');
+  const numMap = {
+    '한':1,'하나':1,'두':2,'둘':2,'세':3,'셋':3,'네':4,'넷':4,'내':4,
+    '다섯':5,'여섯':6,'일곱':7,'여덟':8,'아홉':9,'열':10,
+    '열한':11,'열두':12,'열세':13,'열네':14,'열다섯':15,'스무':20,'스물':20
+  };
+  const unitRe  = '(?:kg|g|봉지|봉|개|팩|통|박스|병|캔|권)';
+  const kwordRe = '(?:열한|열두|열세|열네|열다섯|스무|스물|하나|둘|셋|넷|다섯|여섯|일곱|여덟|아홉|열|한|두|세|네|내)';
+  const qtyRe   = '(?:\\d+(?:\\.\\d+)?|' + kwordRe + ')';
+  const cmdRe   = '(?:발주|주문|구매|시켜줘|입고|입구|입고오|입고요|입고로|구매완료|사용|출고)';
+  const addRe   = '(?:추가로|추가|더해|더|한번더)';
+  // 수정 패턴: "브로콜리 두 봉지로 수정" / "브로콜리 두 봉지 수정"
+  const fixRe   = '(?:로수정|수정|으로수정|로바꿔|로변경)';
+  const cmdAlias = {
+    '발주':'발주','주문':'발주','구매':'발주','시켜줘':'발주',
+    '입고':'입고','입구':'입고','입고오':'입고','입고요':'입고','입고로':'입고','구매완료':'입고',
+    '사용':'사용','출고':'사용'
+  };
+  const reNorm = new RegExp('^([가-힣A-Za-z]+?)(' + qtyRe + ')(' + unitRe + ')?(' + fixRe + '|' + cmdRe + ')?(' + addRe + ')?');
+  const results = [];
+  let iter = 0;
+  while (s.length > 0) {
+    if (++iter > 400) break;
+    const addMatch = s.match(new RegExp('^' + addRe));
+    if (addMatch) { s = s.slice(addMatch[0].length); continue; }
+    const mm = s.match(reNorm);
+    if (mm) {
+      const item   = mm[1];
+      const qtyRaw = mm[2];
+      const unit   = mm[3] || '개';
+      const cmdRaw = mm[4] || '';  // fixRe | cmdRe
+      const addRaw = mm[5] || '';  // addRe (추가/추가로/더 등)
+      // 수정 키워드 감지 (mm[4]에 잡힘)
+      const isFix = /수정|바꿔|변경/.test(cmdRaw);
+      // 추가 키워드 감지 (mm[5]에 잡힘)
+      const isAdd = /추가|더해|더|한번더/.test(addRaw);
+      const cmd    = isFix ? '재고' : (cmdAlias[cmdRaw] || '재고');
+      const mode   = isFix ? 'FIX' : isAdd ? 'ADD' : 'SET';
+      let qty = /^\d+(\.\d+)?$/.test(qtyRaw) ? Number(qtyRaw) : (numMap[qtyRaw] || 0);
+      if (!item || (qty === 0 && qtyRaw !== '0')) { s = s.slice(mm[0].length || 1); continue; }
+      results.push({ item, qty, unit, cmd, mode });
+      s = s.slice(mm[0].length);
+      continue;
+    }
+    s = s.slice(1);
+  }
+  return results;
+}
+
+
+// 같은 발화 내 동일 품목 합산
+// - SET 모드: 같은 품목 여러 번 → 합산 (외부 냉장고 + 내부 냉장고)
+// - FIX 모드: 마지막 값으로 덮어쓰기
+// - ADD 모드: 그대로 유지 (나중에 DB값에 합산)
+function mergeSameUtterance(entries) {
+  const map = new Map();
+  for (const e of entries) {
+    const key = normalizeKey(e.item) + '|||' + e.cmd + '|||' + e.unit;
+    const prev = map.get(key);
+    if (!prev) {
+      map.set(key, { ...e });
+    } else {
+      if (e.mode === 'FIX') {
+        // 수정은 마지막 값으로
+        prev.qty  = e.qty;
+        prev.mode = 'FIX';
+      } else if (e.mode === 'SET') {
+        // 재고 조사 중 같은 품목 다시 나오면 합산
+        prev.qty += e.qty;
+      } else if (e.mode === 'ADD') {
+        prev.qty += e.qty;
+      }
+    }
+  }
+  return Array.from(map.values());
+}
+
+// 편집 거리(Levenshtein Distance)
+function editDistance(a, b) {
+  const m = a.length, n = b.length;
+  const dp = [];
+  for (let i = 0; i <= m; i++) {
+    dp[i] = new Array(n + 1).fill(0);
+    dp[i][0] = i;
+  }
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+    }
+  }
+  return dp[m][n];
+}
+
+function normalizeKey(x) {
+  return String(x || '').replace(/\s+/g, '').trim().toLowerCase();
+}
+
+function applyTypoRules(text, rules) {
+  let s = String(text || '');
+  for (const rule of rules) {
+    if (!rule.enabled) continue;
+    if (rule.rule_type === 'EXACT') {
+      const f = rule.from_text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      s = s.replace(new RegExp('(^|\\s)' + f + '(?=\\s|$)', 'g'), '$1' + rule.to_text);
+    } else if (rule.rule_type === 'CONTAINS') {
+      s = s.split(rule.from_text).join(rule.to_text);
+    }
+  }
+  return s;
+}
+
+/* ════════════════════════════════
+   메인 입력 처리
+════════════════════════════════ */
+async function handleSend() {
+  const input = document.getElementById('textInput');
+  const rawText = input.value.trim();
+  if (!rawText) return;
+
+  const sendBtn = document.getElementById('sendBtn');
+  sendBtn.disabled = true;
+  sendBtn.innerHTML = '<span class="spinner"></span>';
+
+  try {
+    // 오타사전 로드
+    const { data: typoRules } = await db
+      .from('typo_dict')
+      .select('*')
+      .eq('enabled', true)
+      .order('priority');
+
+    // 전처리 + 오타 교정
+    const corrected = applyTypoRules(rawText, typoRules || []);
+    const cleaned   = preprocessInput(corrected);
+
+    // 파싱
+    const entries = parseEntries(cleaned);
+    if (entries.length === 0) {
+      addResult(rawText, '❌ 분리 실패 — 품목명과 수량을 확인해 주세요', 'err');
+      return;
+    }
+
+    // 같은 발화 내 동일 품목 합산
+    // 규칙: SET 모드에서 같은 품목이 여러 번 나오면 합산 (냉장고 두 곳에서 발견한 경우)
+    // FIX 모드는 마지막 값으로 덮어쓰기
+    const mergedEntries = mergeSameUtterance(entries);
+
+    // 품목 목록 가져오기
+    const { data: items } = await db.from('items').select('*');
+    const itemMap = new Map();
+    (items || []).forEach(it => itemMap.set(normalizeKey(it.item_name), it));
+
+    // 처리
+    const msgs = [];
+    for (const ent of mergedEntries) {
+      const key      = normalizeKey(ent.item);
+      const matched  = itemMap.get(key);
+
+      if (!matched) {
+        // ── 유사 품목 체크 (오타 의심 시에만 NEW_ITEMS로 보냄) ──
+        // 기존 품목명 중 입력값을 포함하거나, 입력값이 기존 품목명을 포함하는 경우 → 오타 의심
+        const similar = (items || []).find(it => {
+          const a = normalizeKey(it.item_name);
+          const b = normalizeKey(ent.item);
+          if (a === b) return false;
+          if (Math.abs(a.length - b.length) >= 3) return false;
+          if (a.includes(b) || b.includes(a)) return true;
+          return editDistance(a, b) <= 2;
+        });
+
+        if (similar) {
+          // 오타 의심 → NEW_ITEMS로 보내서 확인
+          const { data: existingQ } = await db
+            .from('new_items_queue')
+            .select('id')
+            .eq('candidate_item', ent.item)
+            .eq('status', 'PENDING')
+            .limit(1);
+
+          if (!existingQ || existingQ.length === 0) {
+            await db.from('new_items_queue').insert({
+              raw_text:       rawText,
+              candidate_item: ent.item,
+              parsed_qty:     ent.qty,
+              unit:           ent.unit,
+              cmd:            ent.cmd,
+              status:         'PENDING'
+            });
+          }
+          msgs.push({
+            text: `🔍 "${ent.item}" → 혹시 "${similar.item_name}"? 신규 탭에서 확인`,
+            type: 'warn'
+          });
+          continue;
+        }
+
+        // 완전히 새로운 품목 → 바로 등록 + 재고 반영
+        const initQty = ent.cmd === '입고' ? ent.qty
+                      : ent.cmd === '사용' ? -ent.qty
+                      : ent.cmd === '발주' ? 0
+                      : ent.qty; // 재고(SET)
+
+        const { data: newItem } = await db.from('items').insert({
+          item_name:   ent.item,
+          unit:        ent.unit,
+          pack_factor: 1,
+          target_qty:  0,
+          current_qty: initQty
+        }).select().single();
+
+        // 이력 기록
+        if (newItem) {
+          await db.from('inventory_log').insert({
+            item_id:   newItem.id,
+            item_name: newItem.item_name,
+            qty:       ent.qty,
+            unit:      ent.unit,
+            cmd:       ent.cmd,
+            actor:     'owner',
+            raw_text:  rawText
+          });
+        }
+
+        msgs.push({ text: `🆕 ${ent.item} ${ent.qty}${ent.unit} — 신규 등록 완료`, type: 'ok' });
+        continue;
+      }
+
+      const cur  = Number(matched.current_qty) || 0;
+      const mode = ent.mode || 'SET';
+      let newQty = cur;
+      let modeLabel = '';
+
+      if (ent.cmd === '입고') {
+        newQty = cur + ent.qty;
+        modeLabel = '입고';
+      } else if (ent.cmd === '사용') {
+        newQty = cur - ent.qty;
+        modeLabel = '사용';
+      } else if (ent.cmd === '발주') {
+        newQty = cur;
+        modeLabel = '발주';
+      } else if (mode === 'FIX') {
+        // 수정 → 무조건 덮어쓰기
+        newQty = ent.qty;
+        modeLabel = '수정';
+      } else if (mode === 'ADD') {
+        // 추가 → 합산
+        newQty = cur + ent.qty;
+        modeLabel = '추가';
+      } else {
+        // 기본 재고(SET) → 덮어쓰기
+        newQty = ent.qty;
+        modeLabel = '재고';
+      }
+
+      // 재고 업데이트
+      if (ent.cmd !== '발주') {
+        await db.from('items')
+          .update({ current_qty: newQty, updated_at: new Date().toISOString() })
+          .eq('id', matched.id);
+      }
+
+      // 이력 기록
+      await db.from('inventory_log').insert({
+        item_id:   matched.id,
+        item_name: matched.item_name,
+        qty:       ent.qty,
+        unit:      ent.unit,
+        cmd:       modeLabel,
+        actor:     'owner',
+        raw_text:  rawText
+      });
+
+      const icon = ent.cmd === '입고' ? '📦'
+                 : ent.cmd === '사용' ? '🍳'
+                 : ent.cmd === '발주' ? '🧾'
+                 : mode === 'FIX'     ? '✏️'
+                 : mode === 'ADD'     ? '➕'
+                 : '✅';
+      msgs.push({ text: `${icon} ${matched.item_name} ${ent.qty}${ent.unit} → ${newQty}${matched.unit} (${modeLabel})`, type: 'ok' });
+    }
+
+    msgs.forEach(m => addResult(rawText, m.text, m.type));
+    input.value = '';
+
+  } catch(err) {
+    addResult(rawText, '❌ 오류: ' + err.message, 'err');
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = '입력';
+  }
+}
+
+function addResult(raw, msg, type) {
+  const list = document.getElementById('resultList');
+  const now  = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+
+  // 기존 헤더 제외한 첫 번째 위치에 삽입
+  const header = list.querySelector('.result-header');
+  const div = document.createElement('div');
+  div.className = `result-item ${type}`;
+  div.innerHTML = `
+    <div>
+      <div class="result-raw">${raw}</div>
+      <div class="result-msg">${msg}</div>
+    </div>
+    <div class="result-time">${now}</div>
+  `;
+  header.after(div);
+}
+
+/* ════════════════════════════════
+   발주 화면
+════════════════════════════════ */
+async function loadOrderList() {
+  const el = document.getElementById('orderList');
+  el.innerHTML = '<div class="no-order"><span class="spinner"></span></div>';
+
+  const { data: items } = await db
+    .from('items')
+    .select('*, vendors(vendor_name)')
+    .order('vendor_id');
+
+  if (!items || items.length === 0) {
+    el.innerHTML = '<div class="no-order">등록된 품목이 없습니다.</div>';
+    return;
+  }
+
+  // 발주 필요 품목만 (current < target)
+  const needOrder = items.filter(it => Number(it.current_qty) < Number(it.target_qty));
+  if (needOrder.length === 0) {
+    el.innerHTML = '<div class="no-order">✅ 발주 필요 품목 없음</div>';
+    return;
+  }
+
+  // 거래처별 그룹
+  const groups = {};
+  needOrder.forEach(it => {
+    const v = it.vendors?.vendor_name || '거래처 미지정';
+    if (!groups[v]) groups[v] = [];
+    groups[v].push(it);
+  });
+
+  let html = '<div class="vendor-section">';
+  for (const [vendor, list] of Object.entries(groups)) {
+    html += `<div class="vendor-name">📦 ${vendor}</div>`;
+    list.forEach(it => {
+      const suggest = Math.max(0, Number(it.target_qty) - Number(it.current_qty));
+      html += `
+        <div class="order-item">
+          <div class="order-item-name">${it.item_name}</div>
+          <div class="order-item-stock">현재 ${it.current_qty}/${it.target_qty}</div>
+          <div class="order-qty-wrap">
+            <input class="order-qty" type="number" value="${suggest}" min="0" id="qty_${it.id}">
+            <span class="order-unit">${it.unit}</span>
+          </div>
+        </div>`;
+    });
+  }
+  html += '</div>';
+  el.innerHTML = html;
+}
+
+/* ════════════════════════════════
+   NEW_ITEMS 화면
+════════════════════════════════ */
+async function loadNewItems() {
+  const el = document.getElementById('newItemList');
+  el.innerHTML = '<div class="no-pending"><span class="spinner"></span></div>';
+
+  const { data: pending } = await db
+    .from('new_items_queue')
+    .select('*')
+    .eq('status', 'PENDING')
+    .order('created_at', { ascending: false });
+
+  if (!pending || pending.length === 0) {
+    el.innerHTML = '<div class="no-pending">✅ 미등록 품목 없음</div>';
+    return;
+  }
+
+  el.innerHTML = pending.map(item => `
+    <div class="new-item-card" id="card_${item.id}">
+      <div class="new-item-top">
+        <div>
+          <div class="new-item-candidate">${item.candidate_item}</div>
+          <div class="new-item-raw">${item.raw_text || ''}</div>
+        </div>
+        <div class="new-item-badge">PENDING</div>
+      </div>
+      <input
+        class="new-item-memo"
+        id="memo_${item.id}"
+        placeholder="품목명 수정 (맞으면 그대로)"
+        value="${item.candidate_item}"
+      >
+      <div class="new-item-actions">
+        <button class="btn-approve" onclick="approveItem(${item.id})">✅ 승인 + 등록</button>
+        <button class="btn-reject"  onclick="rejectItem(${item.id})">거절</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+async function approveItem(id) {
+  const memo = document.getElementById('memo_' + id).value.trim();
+  if (!memo) { showToast('품목명을 입력해 주세요.'); return; }
+
+  // 오타사전 자동학습 (원본 후보와 다를 때)
+  const { data: row } = await db.from('new_items_queue').select('*').eq('id', id).single();
+  if (row && row.candidate_item !== memo) {
+    const { data: existing } = await db
+      .from('typo_dict')
+      .select('id')
+      .eq('from_text', row.candidate_item)
+      .eq('to_text', memo)
+      .limit(1);
+    if (!existing || existing.length === 0) {
+      await db.from('typo_dict').insert({
+        from_text: row.candidate_item,
+        to_text:   memo,
+        rule_type: 'EXACT',
+        enabled:   true,
+        priority:  50,
+        note:      'NEW_ITEMS 승인 자동학습'
+      });
+    }
+  }
+
+  // 발주기준(items)에 등록
+  const { data: existing } = await db.from('items').select('id').eq('item_name', memo).limit(1);
+  if (!existing || existing.length === 0) {
+    await db.from('items').insert({
+      item_name:   memo,
+      unit:        row?.unit || '개',
+      pack_factor: 1,
+      target_qty:  1,
+      current_qty: Number(row?.parsed_qty) || 0
+    });
+  }
+
+  // 상태 DONE으로 변경
+  await db.from('new_items_queue').update({ status: 'DONE', memo }).eq('id', id);
+
+  document.getElementById('card_' + id).remove();
+  showToast(`✅ "${memo}" 등록 완료`);
+
+  const remaining = document.querySelectorAll('[id^="card_"]').length;
+  if (remaining === 0) {
+    document.getElementById('newItemList').innerHTML = '<div class="no-pending">✅ 미등록 품목 없음</div>';
+  }
+}
+
+async function rejectItem(id) {
+  await db.from('new_items_queue').update({ status: 'REJECTED' }).eq('id', id);
+  document.getElementById('card_' + id).remove();
+  showToast('거절 처리됨');
+}
+
+/* ════════════════════════════════
+   엔터키 입력
+════════════════════════════════ */
+document.getElementById('textInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') handleSend();
+});
+</script>
+</body>
+</html>
