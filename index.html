@@ -678,158 +678,438 @@ function setDuration(sec) {
 }
 
 /* ════════════════════════════════
-   전처리 & 파서 (Apps Script에서 이식)
+   전처리 & 파서  v2  (2026-03-16)
+   변경: 품목경계분리 / 최장일치매칭 / 조사제거 / 유사도개선
 ════════════════════════════════ */
-const QTY_TINY        = 0.1;
-const QTY_ALMOST_NONE = 0.2;
+// ============================================================
+// ZeroKitchen — 파서 v2 (2026-03-16)
+// 수정 내용:
+//   1. preprocessInput() — 경계 분리 강화, 조사 제거 확장
+//   2. parseEntries()    — 최장 일치 매칭, 수량 없는 품목 처리
+// ============================================================
 
-function preprocessInput(t) {
-  let s = String(t || '');
-  s = s.replace(/[.,·•:;!?'"()\[\]{}<>\\/|@#%^&*_+=~`]/g, ' ');
-  s = s.replace(/\s+/g, ' ').trim();
-  s = s.replace(/(하나|한|둘|두|셋|세|넷|네|내|다섯|여섯|일곱|여덟|아홉|열)(개|게)(요|를|을|가|이|만|랑|하고|도)?/g, '$1 $2');
+// ─────────────────────────────────────────────────────────────
+// 상수 정의
+// ─────────────────────────────────────────────────────────────
 
-  // ✅ 수량단어+단위 붙여쓰기 분리
-  const numW = '(하나|한|둘|두|셋|세|넷|네|내|다섯|여섯|일곱|여덟|아홉|열|열한|열두|열세|열네|열다섯|스무|스물)';
-  const unitW = '(봉지|봉|박스|팩|캔|병|개|통|권|kg|g)';
-  s = s.replace(new RegExp(numW + unitW, 'g'), '$1 $2');
+// 수량 단어 → 숫자
+const QTY_WORDS = {
+  '영': 0, '없음': 0, '없어': 0, '없고': 0,
+  '거의없음': 0.2, '거의없어': 0.2,
+  '아주약간': 0.1, '약간': 0.5,
+  '한': 1, '하나': 1, '일': 1,
+  '두': 2, '둘': 2, '이': 2,
+  '세': 3, '셋': 3, '삼': 3,
+  '네': 4, '넷': 4, '사': 4,
+  '다섯': 5, '오': 5,
+  '여섯': 6, '육': 6,
+  '일곱': 7, '칠': 7,
+  '여덟': 8, '팔': 8,
+  '아홉': 9, '구': 9,
+  '열': 10, '십': 10,
+  '열한': 11, '열두': 12, '열세': 13,
+  '스물': 20, '이십': 20,
+  '서른': 30, '삼십': 30,
+};
 
-  // ✅ 숫자+단위 붙여쓰기 분리
-  s = s.replace(/(\d+(?:\.\d+)?)(봉지|봉|박스|팩|캔|병|개|통|권|kg|g)/g, '$1 $2');
+// 단위 목록
+const UNITS = [
+  '박스', '케이스', '봉지', '봉', '팩', '캔', '통', '병',
+  '개', '마리', '장', '롤', '킬로', 'kg',
+  '리터', 'L', '밀리', '매',
+  '묶음', '다발', '판', '줄', '세트'
+];
 
-  // ✅ 단위 뒤에 한글/영문이 바로 오면 구분자(|) 삽입
-  // 예: "봉지페퍼로니" → "봉지|페퍼로니" → 파서가 별도 항목으로 처리
-  s = s.replace(/(봉지|봉|박스|팩|캔|병|개|통|권|kg|g)\s*([가-힣A-Za-z])/g, '$1|$2');
-  s = s.replace(/\b반\s*(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '0.5$1');
-  s = s.replace(/([가-힣A-Za-z])\s*반\s*(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '$1 0.5$2');
-  s = s.replace(/([가-힣A-Za-z])반(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '$1 0.5$2');
-  s = s.replace(/삼분의일\s*(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '0.333$1');
-  s = s.replace(/사분의일\s*(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '0.25$1');
-  s = s.replace(/오분의일\s*(봉지|봉|박스|팩|캔|병|개|kg|g|통)\b/g, '0.2$1');
-  s = s.replace(/\b아주약간\b/g, String(QTY_TINY));
-  s = s.replace(/\b거의없음\b/g, String(QTY_ALMOST_NONE));
-  s = s.replace(/\b없음\b/g, '0');
+// 조사 + 접속사 (품목명 끝에 붙었을 때 제거 대상)
+const JOSA = ['은', '는', '이', '가', '을', '를', '의', '씩', '씀', '도', '만', '서', '에서'];
+
+// 경계 접속사 (앞 품목을 끊는 신호)
+// → 이 단어가 나오면 앞 품목 파싱 종료, 해당 단어는 다음 발화로
+const BOUNDARY_CONJUNCTIONS = [
+  '그리고', '하고', '랑', '이랑', '과', '와',
+];
+
+// 재고 0 처리 접속사 (앞 품목이 없음 = 0)
+// "버섯 없고" → 버섯 재고 0
+const ZERO_SIGNALS = ['없고', '없어', '없음', '없어요', '다없어', '다 없어', '떨어졌어', '떨어짐'];
+
+// 명령어 키워드
+const CMD_MAP = {
+  '재고': 'SET', '있어': 'SET', '있음': 'SET',
+  '입고': 'ADD', '들어왔어': 'ADD', '들어옴': 'ADD',
+  '사용': 'USE', '썼어': 'USE', '소진': 'USE',
+  '발주': 'ORDER',
+  '추가': 'ADD',
+  '수정': 'FIX', '고쳐': 'FIX',
+};
+
+// ─────────────────────────────────────────────────────────────
+// 유틸리티
+// ─────────────────────────────────────────────────────────────
+
+function normalizeKey(str) {
+  return str.replace(/\s+/g, '').toLowerCase();
+}
+
+function editDistance(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) =>
+    Array.from({ length: n + 1 }, (_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= m; i++)
+    for (let j = 1; j <= n; j++)
+      dp[i][j] = a[i-1] === b[j-1]
+        ? dp[i-1][j-1]
+        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
+  return dp[m][n];
+}
+
+// 품목명 길이별 동적 임계값
+function dynamicThreshold(len) {
+  if (len <= 3) return 1;
+  if (len <= 6) return 2;
+  return 3;
+}
+
+// 분수 표현 → 숫자
+function parseFraction(str) {
+  const m = str.match(/(\S+)분의(\S+)/);
+  if (m) {
+    const denom = QTY_WORDS[m[1]] ?? parseFloat(m[1]);
+    const numer = QTY_WORDS[m[2]] ?? parseFloat(m[2]);
+    if (!isNaN(denom) && !isNaN(numer) && denom !== 0) return numer / denom;
+  }
+  return null;
+}
+
+// "반" 처리
+function parseHalf(str) {
+  if (str === '반') return 0.5;
+  const m = str.match(/^(.+)반$/);
+  if (m) {
+    const base = QTY_WORDS[m[1]] ?? parseFloat(m[1]);
+    if (!isNaN(base)) return base + 0.5;
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────
+// 1. preprocessInput(text)
+// 변경사항:
+//   - ZERO_SIGNALS 감지 → 앞 토큰에 재고=0 마킹 + 분리
+//   - 경계 접속사 감지 → 구분자 | 삽입
+//   - 조사 제거 목록 확장
+//   - 붙여쓰기 분리 강화 (단위 앞 공백 삽입)
+// ─────────────────────────────────────────────────────────────
+
+function preprocessInput(text) {
+  let s = text.trim();
+
+  // 1-1. 숫자+단위 붙여쓰기 분리: "3봉지" → "3 봉지"
+  s = s.replace(/(\d)(봉지|봉|박스|케이스|팩|캔|통|병|개|킬로|kg|리터|롤|묶음|다발|판|장)/g, '$1 $2');
+
+  // 1-2. 단위 뒤 품목명 경계 삽입 (붙여쓰기 + 공백 모두 처리)
+  const unitPattern = UNITS.join('|');
+  // 붙여쓰기: 단위+한글
+  s = s.replace(new RegExp(`(${unitPattern})([가-힣]{2,})`, 'g'), '$1 | $2');
+  // 공백 있는 경우: 단위 + 공백 + 한글명사 (수량단어/단위 제외)
+  const qtyWordsSet = new Set(Object.keys(QTY_WORDS));
+  const unitsSet = new Set(UNITS);
+  s = s.replace(
+    new RegExp(`(${unitPattern}) ([가-힣]{2,})`, 'g'),
+    (match, u, next) => {
+      if (qtyWordsSet.has(next) || unitsSet.has(next)) return match;
+      return u + ' | ' + next;
+    }
+  );
+
+  // 1-3. 수량 단어+품목 붙여쓰기 분리: "두봉지" → "두 봉지", "세개" → "세 개"
+  const qtyWordPattern = Object.keys(QTY_WORDS)
+    .filter(k => k.length >= 2)
+    .sort((a, b) => b.length - a.length)
+    .join('|');
+  s = s.replace(
+    new RegExp(`(${qtyWordPattern})(봉지|봉|박스|케이스|팩|캔|통|병|개|킬로|kg|리터|롤|묶음)`, 'g'),
+    '$1 $2'
+  );
+
+  // 1-4. ZERO_SIGNALS 처리: "버섯 없고 새우칠리소스" → "버섯 없고 | 새우칠리소스"
+  //      "없고" 뒤에 한글이 오면 경계 삽입
+  for (const zs of ZERO_SIGNALS) {
+    // "없고 품목명" 패턴 → 경계 삽입
+    s = s.replace(
+      new RegExp(`(${zs})\\s+([가-힣])`, 'g'),
+      `$1 | $2`
+    );
+  }
+
+  // 1-5. 경계 접속사 → 구분자로 치환
+  for (const conj of BOUNDARY_CONJUNCTIONS) {
+    s = s.replace(new RegExp(`\\s*${conj}\\s*`, 'g'), ' | ');
+  }
+
+  // 1-6. 조사 제거: 품목명 끝에 붙은 조사 strip
+  //      단, 수량 단어나 단위 뒤에 붙은 건 제거하지 않음
+  for (const josa of JOSA) {
+    // "스파게티는" → "스파게티" (단위/수량 아닌 한글 뒤)
+    s = s.replace(
+      new RegExp(`([가-힣]{2,})${josa}(\\s|\\||$)`, 'g'),
+      (match, word, tail) => {
+        // 수량 단어면 그대로 유지
+        if (QTY_WORDS[word] !== undefined) return match;
+        // 단위면 그대로 유지
+        if (UNITS.includes(word)) return match;
+        return `${word}${tail}`;
+      }
+    );
+  }
+
+  // 1-6b. 단위 뒤 수량+단위 패턴 → 경계 삽입
+  //         '세 봉지 한 개' → '세 봉지 | 한 개'  (같은 품목 단위 중복 방지)
+  {
+    const _up = UNITS.join('|');
+    const _qp = Object.keys(QTY_WORDS).filter(k => k.length >= 1).sort((a,b)=>b.length-a.length).join('|');
+    s = s.replace(
+      new RegExp('(' + _up + ') (' + _qp + '|\d+(?:\.\d+)?) (' + _up + ')', 'g'),
+      (match, u1, qty, u2) => u1 + ' | ' + qty + ' ' + u2
+    );
+  }
+  // 1-7. 다중 공백 정리
+  s = s.replace(/\s{2,}/g, ' ').trim();
+
   return s;
 }
 
-function parseEntries(text) {
-  // ✅ 전처리에서 삽입된 구분자(|)로 먼저 분할 후 각각 파싱하여 합산
-  if (String(text || '').includes('|')) {
-    const segments = String(text || '').split('|').filter(x => x.trim());
-    const all = [];
-    for (const seg of segments) {
-      all.push(...parseEntries(seg));
-    }
-    return all;
-  }
-  let s = String(text || '').replace(/\s+/g, '');
-  const numMap = {
-    '한':1,'하나':1,'두':2,'둘':2,'세':3,'셋':3,'네':4,'넷':4,'내':4,
-    '다섯':5,'여섯':6,'일곱':7,'여덟':8,'아홉':9,'열':10,
-    '열한':11,'열두':12,'열세':13,'열네':14,'열다섯':15,'스무':20,'스물':20
-  };
-  const unitRe  = '(?:kg|g|봉지|봉|개|팩|통|박스|병|캔|권)';
-  const kwordRe = '(?:열한|열두|열세|열네|열다섯|스무|스물|하나|둘|셋|넷|다섯|여섯|일곱|여덟|아홉|열|한|두|세|네|내)';
-  const qtyRe   = '(?:\\d+(?:\\.\\d+)?|' + kwordRe + ')';
-  const cmdRe   = '(?:발주|주문|구매|시켜줘|입고|입구|입고오|입고요|입고로|구매완료|사용|출고)';
-  const addRe   = '(?:추가로|추가|더해|더|한번더)';
-  // 수정 패턴: "브로콜리 두 봉지로 수정" / "브로콜리 두 봉지 수정"
-  const fixRe   = '(?:로수정|수정|으로수정|로바꿔|로변경)';
-  const cmdAlias = {
-    '발주':'발주','주문':'발주','구매':'발주','시켜줘':'발주',
-    '입고':'입고','입구':'입고','입고오':'입고','입고요':'입고','입고로':'입고','구매완료':'입고',
-    '사용':'사용','출고':'사용'
-  };
-  const reNorm = new RegExp('^([가-힣A-Za-z]+?)(' + qtyRe + ')(' + unitRe + ')?(' + fixRe + '|' + cmdRe + ')?(' + addRe + ')?');
+// ─────────────────────────────────────────────────────────────
+// 2. parseEntries(text, itemList)
+// 변경사항:
+//   - ZERO_SIGNALS → 해당 품목 qty=0, cmd=SET
+//   - 최장 일치 매칭: itemList(품목 DB)를 prefix로 비교
+//   - 단위 기반 suffix 자동 부여
+//   - 수량 단어 품목명 오파싱 방지 강화
+// ─────────────────────────────────────────────────────────────
+
+// 단위 → 품목 suffix 매핑
+const UNIT_SUFFIX_MAP = {
+  '봉지': '소분', '봉': '소분',
+  '캔': '캔', '통': '캔',
+  '팩': '팩',
+  '박스': '박스', '케이스': '박스',
+  '병': '병',
+  // 개, 킬로, kg 등은 suffix 없음
+};
+
+function parseEntries(rawText, itemList = []) {
+  const preprocessed = preprocessInput(rawText);
+  const segments = preprocessed.split('|').map(s => s.trim()).filter(Boolean);
+
   const results = [];
-  let iter = 0;
-  while (s.length > 0) {
-    if (++iter > 400) break;
-    const addMatch = s.match(new RegExp('^' + addRe));
-    if (addMatch) { s = s.slice(addMatch[0].length); continue; }
-    const mm = s.match(reNorm);
-    if (mm) {
-      const item   = mm[1];
-      const qtyRaw = mm[2];
-      const unit   = mm[3] || '개';
-      const cmdRaw = mm[4] || '';  // fixRe | cmdRe
-      const addRaw = mm[5] || '';  // addRe (추가/추가로/더 등)
-      // 수정 키워드 감지 (mm[4]에 잡힘)
-      const isFix = /수정|바꿔|변경/.test(cmdRaw);
-      // 추가 키워드 감지 (mm[5]에 잡힘)
-      const isAdd = /추가|더해|더|한번더/.test(addRaw);
-      const cmd    = isFix ? '재고' : (cmdAlias[cmdRaw] || '재고');
-      const mode   = isFix ? 'FIX' : isAdd ? 'ADD' : 'SET';
-      let qty = /^\d+(\.\d+)?$/.test(qtyRaw) ? Number(qtyRaw) : (numMap[qtyRaw] || 0);
-      if (!item || (qty === 0 && qtyRaw !== '0')) { s = s.slice(mm[0].length || 1); continue; }
 
-      // ✅ 품목명 필터
-      // 1) 수량 단어 자체가 품목명으로 파싱되는 경우 차단
-      const numWords = ['하나','한','둘','두','셋','세','넷','네','내','다섯','여섯','일곱','여덟','아홉','열',
-                        '열한','열두','열세','열네','열다섯','스무','스물','없음','약간'];
-      if (numWords.includes(item)) { s = s.slice(mm[0].length || 1); continue; }
+  for (const seg of segments) {
+    const tokens = seg.split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) continue;
 
-      // 2) 1글자 품목명 차단 (소음/오인식)
-      if (item.length < 2) { s = s.slice(mm[0].length || 1); continue; }
-
-      results.push({ item, qty, unit, cmd, mode });
-      s = s.slice(mm[0].length);
-      continue;
+    // 명령어 추출
+    let cmd = 'SET';
+    const filteredTokens = [];
+    for (const t of tokens) {
+      if (CMD_MAP[t]) { cmd = CMD_MAP[t]; }
+      else { filteredTokens.push(t); }
     }
-    s = s.slice(1);
+
+    // ZERO_SIGNAL 감지: "버섯 없고" → qty=0, cmd=SET
+    const hasZeroSignal = filteredTokens.some(t => ZERO_SIGNALS.includes(t));
+    const cleanTokens = filteredTokens.filter(t => !ZERO_SIGNALS.includes(t));
+
+    if (cleanTokens.length === 0) continue;
+
+    // 토큰 순회하며 품목명 + 수량 + 단위 추출
+    let itemName = '';
+    let qty = hasZeroSignal ? 0 : null;
+    let unit = '';
+    let fromDB = false;
+    let i = 0;
+
+    while (i < cleanTokens.length) {
+      const token = cleanTokens[i];
+
+      // 단위 감지
+      if (UNITS.includes(token)) {
+        unit = token;
+        i++;
+        continue;
+      }
+
+      // 수량 감지 (숫자)
+      const num = parseFloat(token);
+      if (!isNaN(num)) {
+        qty = num;
+        i++;
+        continue;
+      }
+
+      // 수량 감지 (단어)
+      if (QTY_WORDS[token] !== undefined && itemName !== '') {
+        // 이미 품목명이 있을 때만 수량으로 해석
+        qty = QTY_WORDS[token];
+        i++;
+        continue;
+      }
+
+      // 분수 표현
+      const frac = parseFraction(token);
+      if (frac !== null) {
+        qty = frac;
+        i++;
+        continue;
+      }
+
+      // 반 표현
+      const half = parseHalf(token);
+      if (half !== null && itemName !== '') {
+        qty = half;
+        i++;
+        continue;
+      }
+
+      // 품목명 최장 일치 매칭
+      const matched = longestMatchFromDB(cleanTokens, i, itemList);
+      if (matched) {
+        // 이전 품목 저장 (DB 매칭 또는 누적 중인 품목 모두)
+        if (itemName !== '') {
+          results.push(buildEntry(itemName, qty, unit, cmd, seg, hasZeroSignal));
+          qty = null; unit = ''; fromDB = false;
+        }
+        itemName = matched.name;
+        fromDB = !matched.fuzzy; // 정확 매칭이면 DB 출처 표시
+        i += matched.tokenCount;
+        continue;
+      }
+
+      // DB 매칭 실패
+      if (itemName === '' && QTY_WORDS[token] !== undefined) {
+        // 품목명 없을 때 수량 단어 → 수량으로 해석
+        qty = QTY_WORDS[token];
+      } else if (fromDB && itemName !== '') {
+        // DB 매칭으로 확정된 품목이 있는데 새 미매칭 토큰 → 현재 품목 저장 후 새 품목 시작
+        results.push(buildEntry(itemName, qty, unit, cmd, seg, hasZeroSignal));
+        qty = null; unit = ''; fromDB = false;
+        itemName = token;
+      } else {
+        itemName += token;
+      }
+      i++;
+    }
+
+    // 마지막 품목 저장
+    if (itemName !== '') {
+      results.push(buildEntry(itemName, qty, unit, cmd, seg, hasZeroSignal));
+    }
   }
+
   return results;
 }
 
+// 품목 DB에서 최장 일치 탐색 (1~5토큰 조합 시도)
+function longestMatchFromDB(tokens, startIdx, itemList) {
+  if (!itemList || itemList.length === 0) return null;
 
-// 같은 발화 내 동일 품목 합산
-// - SET 모드: 같은 품목 여러 번 → 합산 (외부 냉장고 + 내부 냉장고)
-// - FIX 모드: 마지막 값으로 덮어쓰기
-// - ADD 모드: 그대로 유지 (나중에 DB값에 합산)
+  const MAX_COMBINE = 5;
+  let best = null;
+
+  // 1. 정확 매칭: 긴 조합부터 시도 (최장 일치 우선)
+  for (let take = Math.min(MAX_COMBINE, tokens.length - startIdx); take >= 1; take--) {
+    const candidate = normalizeKey(tokens.slice(startIdx, startIdx + take).join(''));
+    for (const item of itemList) {
+      if (normalizeKey(item.item_name) === candidate) {
+        if (!best || take > best.tokenCount) {
+          best = { name: item.item_name, tokenCount: take, fuzzy: false };
+        }
+        break;
+      }
+    }
+    if (best && best.tokenCount === take) return best; // 이 길이에서 찾았으면 반환
+  }
+  if (best) return best;
+
+  // 2. 유사도 매칭 (단일 토큰, 정확 매칭 실패 시)
+  const singleToken = normalizeKey(tokens[startIdx]);
+  if (singleToken.length >= 3) { // 3자 미만 토큰은 유사도 매칭 skip (오탐 방지)
+    let fuzzyBest = null;
+    for (const item of itemList) {
+      const target = normalizeKey(item.item_name);
+      const threshold = dynamicThreshold(target.length);
+      const dist = editDistance(singleToken, target);
+      if (dist > 0 && dist <= threshold) {
+        if (!fuzzyBest || dist < fuzzyBest.dist) {
+          fuzzyBest = { name: item.item_name, tokenCount: 1, fuzzy: true, dist };
+        }
+      }
+    }
+    if (fuzzyBest) return fuzzyBest;
+  }
+
+  return null;
+}
+
+// 단위 suffix 자동 부여
+function applyUnitSuffix(itemName, unit, itemList) {
+  if (!unit) return itemName;
+  const suffix = UNIT_SUFFIX_MAP[unit];
+  if (!suffix) return itemName; // 개/kg 등은 suffix 없음
+
+  const withSuffix = `${itemName} ${suffix}`;
+
+  // DB에 suffix 붙인 품목이 실제 존재하면 그걸 사용
+  if (itemList && itemList.some(it => normalizeKey(it.item_name) === normalizeKey(withSuffix))) {
+    return withSuffix;
+  }
+  // 존재하지 않으면 원본 유지 (신규 등록 흐름으로)
+  return itemName;
+}
+
+function buildEntry(itemName, qty, unit, cmd, rawText, isZero) {
+  const finalQty = isZero ? 0 : (qty ?? 1);
+  const finalCmd = isZero ? 'SET' : cmd;
+
+  // handleSend 호환: cmd(한글) + mode(동작) 분리
+  const CMD_TO_LABEL = { SET:'재고', ADD:'입고', USE:'사용', ORDER:'발주', FIX:'재고' };
+  const CMD_TO_MODE  = { SET:'SET', ADD:'ADD', USE:'SET', ORDER:'SET', FIX:'FIX' };
+
+  return {
+    item:      itemName.trim(),       // handleSend 호환 (ent.item)
+    item_name: itemName.trim(),       // 동일값, 신규 코드용
+    qty:       finalQty,
+    unit:      unit || '',
+    cmd:       CMD_TO_LABEL[finalCmd] || '재고',  // '재고'|'입고'|'사용'|'발주'
+    mode:      CMD_TO_MODE[finalCmd]  || 'SET',   // 'SET'|'ADD'|'FIX'
+    raw_text:  rawText,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────
+// 3. mergeSameUtterance(entries)
+// 동일 발화 내 같은 품목명 합산 (SET은 마지막 값 우선)
+// ─────────────────────────────────────────────────────────────
+
 function mergeSameUtterance(entries) {
   const map = new Map();
-  for (const e of entries) {
-    const key = normalizeKey(e.item) + '|||' + e.cmd + '|||' + e.unit;
-    const prev = map.get(key);
-    if (!prev) {
-      map.set(key, { ...e });
+  for (const entry of entries) {
+    const key = normalizeKey(entry.item_name);
+    if (!map.has(key)) {
+      map.set(key, { ...entry });
     } else {
-      if (e.mode === 'FIX') {
-        // 수정은 마지막 값으로
-        prev.qty  = e.qty;
-        prev.mode = 'FIX';
-      } else if (e.mode === 'SET') {
-        // 재고 조사 중 같은 품목 다시 나오면 합산
-        prev.qty += e.qty;
-      } else if (e.mode === 'ADD') {
-        prev.qty += e.qty;
+      const prev = map.get(key);
+      if (entry.cmd === 'ADD' || prev.cmd === 'ADD') {
+        prev.qty += entry.qty;
+        prev.cmd = 'ADD';
+      } else {
+        // SET: 마지막 값 우선
+        prev.qty = entry.qty;
       }
     }
   }
   return Array.from(map.values());
-}
-
-// 편집 거리(Levenshtein Distance)
-function editDistance(a, b) {
-  const m = a.length, n = b.length;
-  const dp = [];
-  for (let i = 0; i <= m; i++) {
-    dp[i] = new Array(n + 1).fill(0);
-    dp[i][0] = i;
-  }
-  for (let j = 0; j <= n; j++) dp[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = a[i-1] === b[j-1]
-        ? dp[i-1][j-1]
-        : 1 + Math.min(dp[i-1][j], dp[i][j-1], dp[i-1][j-1]);
-    }
-  }
-  return dp[m][n];
-}
-
-function normalizeKey(x) {
-  return String(x || '').replace(/\s+/g, '').trim().toLowerCase();
 }
 
 function applyTypoRules(text, rules) {
@@ -870,20 +1150,18 @@ async function handleSend() {
     const corrected = applyTypoRules(rawText, typoRules || []);
     const cleaned   = preprocessInput(corrected);
 
-    // 파싱
-    const entries = parseEntries(cleaned);
+    // 품목 목록 먼저 로드 (최장 일치 매칭에 필요)
+    const { data: items } = await db.from('items').select('*');
+
+    // 파싱 (품목 DB 전달 → 최장 일치 매칭)
+    const entries = parseEntries(cleaned, items || []);
     if (entries.length === 0) {
       addResult(rawText, '❌ 분리 실패 — 품목명과 수량을 확인해 주세요', 'err');
       return;
     }
 
     // 같은 발화 내 동일 품목 합산
-    // 규칙: SET 모드에서 같은 품목이 여러 번 나오면 합산 (냉장고 두 곳에서 발견한 경우)
-    // FIX 모드는 마지막 값으로 덮어쓰기
     const mergedEntries = mergeSameUtterance(entries);
-
-    // 품목 목록 가져오기
-    const { data: items } = await db.from('items').select('*');
     const itemMap = new Map();
     (items || []).forEach(it => itemMap.set(normalizeKey(it.item_name), it));
 
