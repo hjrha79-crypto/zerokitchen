@@ -768,47 +768,54 @@ function initSpeech() {
   if (!SpeechRecognition) return null;
   const r = new SpeechRecognition();
   r.lang = 'ko-KR';
-  r.continuous = true;       // 단일 세션 유지 → 단어 끊김 없음
+  r.continuous = true;       // 단일 세션 유지 → 단어 끊김 방지
   r.interimResults = true;   // 인식 중 실시간 텍스트 표시
 
-  let finalText = '';  // 확정된 텍스트 누적
+  // ✅ 핵심: 이미 처리한 final 결과 개수를 추적
+  //    onresult는 매번 results[0]부터 전달하므로
+  //    processedCount 이전 것은 무시해야 중복 방지
+  let finalText     = '';
+  let processedCount = 0;
 
   r.onresult = (e) => {
     let interim = '';
-    // 이번 세션의 모든 결과 순회
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const t = e.results[i][0].transcript;
+    for (let i = 0; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript.trim();
       if (e.results[i].isFinal) {
-        finalText += (finalText ? ' ' : '') + t.trim();
-        resetMicTimer();  // 확정 텍스트 들어올 때 타이머 리셋
+        // 이미 처리한 결과는 건너뜀
+        if (i >= processedCount) {
+          finalText += (finalText ? ' ' : '') + t;
+          processedCount = i + 1;
+          resetMicTimer();
+        }
       } else {
-        interim += t;
+        // interim은 마지막 것만 표시
+        if (i === e.results.length - 1) interim = t;
       }
     }
-    // 입력창: 확정 텍스트
     if (finalText) document.getElementById('textInput').value = finalText;
-    // 미리보기: 인식 중 텍스트 (흐릿하게)
     document.getElementById('micInterim').textContent = interim;
   };
 
   r.onerror = (e) => {
-    if (e.error === 'no-speech') return;  // 무음은 무시 (continuous라 자동 계속)
-    if (e.error === 'aborted') return;
+    // aborted / no-speech 는 무시 (continuous 모드에서 정상)
+    if (e.error === 'aborted' || e.error === 'no-speech') return;
     stopMic();
     showToast('음성 인식 오류. 직접 입력해 주세요.');
   };
 
   r.onend = () => {
     document.getElementById('micInterim').textContent = '';
-    // continuous 모드에서도 네트워크 등으로 끊길 수 있으므로 재시작
     if (isRecording) {
-      finalText = document.getElementById('textInput').value.trim();
-      try { r.start(); } catch(_) {}
+      // 세션 재시작 시 누적 텍스트 유지, processedCount 리셋
+      finalText      = document.getElementById('textInput').value.trim();
+      processedCount = 0;
+      setTimeout(() => { try { r.start(); } catch(_) {} }, 80);
     }
   };
 
-  // 세션 시작 시 기존 입력창 텍스트를 finalText 기준으로 설정
-  finalText = document.getElementById('textInput').value.trim();
+  finalText      = document.getElementById('textInput').value.trim();
+  processedCount = 0;
   return r;
 }
 
