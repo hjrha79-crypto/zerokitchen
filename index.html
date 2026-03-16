@@ -768,38 +768,37 @@ function initSpeech() {
   if (!SpeechRecognition) return null;
   const r = new SpeechRecognition();
   r.lang = 'ko-KR';
-  r.continuous = true;       // 단일 세션 유지 → 단어 끊김 방지
-  r.interimResults = true;   // 인식 중 실시간 텍스트 표시
+  r.continuous     = false;  // 단문 세션 → Android 중복 누적 구조적 차단
+  r.interimResults = true;   // 실시간 미리보기 유지
 
-  // ✅ 핵심: 이미 처리한 final 결과 개수를 추적
-  //    onresult는 매번 results[0]부터 전달하므로
-  //    processedCount 이전 것은 무시해야 중복 방지
-  let finalText     = '';
-  let processedCount = 0;
+  // 직전 확정 문장 저장 → 세션 재시작 직후 동일 문장 재입력 방지
+  let lastTranscript = '';
 
   r.onresult = (e) => {
-    let interim = '';
-    for (let i = 0; i < e.results.length; i++) {
+    let finalT  = '';
+    let interimT = '';
+
+    for (let i = e.resultIndex; i < e.results.length; i++) {
       const t = e.results[i][0].transcript.trim();
-      if (e.results[i].isFinal) {
-        // 이미 처리한 결과는 건너뜀
-        if (i >= processedCount) {
-          finalText += (finalText ? ' ' : '') + t;
-          processedCount = i + 1;
-          resetMicTimer();
-        }
-      } else {
-        // interim은 마지막 것만 표시
-        if (i === e.results.length - 1) interim = t;
-      }
+      if (e.results[i].isFinal) finalT  = t;   // 마지막 확정 결과만 사용
+      else                       interimT = t;  // 미리보기
     }
-    if (finalText) document.getElementById('textInput').value = finalText;
-    document.getElementById('micInterim').textContent = interim;
+
+    // 실시간 미리보기
+    document.getElementById('micInterim').textContent = interimT;
+
+    if (finalT && finalT !== lastTranscript) {
+      lastTranscript = finalT;
+      const input    = document.getElementById('textInput');
+      const existing = input.value.trim();
+      input.value    = existing ? existing + ' ' + finalT : finalT;
+      resetMicTimer();
+    }
   };
 
   r.onerror = (e) => {
-    // aborted / no-speech 는 무시 (continuous 모드에서 정상)
-    if (e.error === 'aborted' || e.error === 'no-speech') return;
+    document.getElementById('micInterim').textContent = '';
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
     stopMic();
     showToast('음성 인식 오류. 직접 입력해 주세요.');
   };
@@ -807,15 +806,13 @@ function initSpeech() {
   r.onend = () => {
     document.getElementById('micInterim').textContent = '';
     if (isRecording) {
-      // 세션 재시작 시 누적 텍스트 유지, processedCount 리셋
-      finalText      = document.getElementById('textInput').value.trim();
-      processedCount = 0;
-      setTimeout(() => { try { r.start(); } catch(_) {} }, 80);
+      // 단문 세션 종료 → 즉시 재시작 (끊김 없는 연속 인식)
+      lastTranscript = '';  // 새 세션 시작 시 중복 체크 리셋
+      setTimeout(() => { try { r.start(); } catch(_) {} }, 50);
     }
   };
 
-  finalText      = document.getElementById('textInput').value.trim();
-  processedCount = 0;
+  lastTranscript = '';
   return r;
 }
 
