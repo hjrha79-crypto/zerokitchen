@@ -478,6 +478,180 @@
     vertical-align: middle;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── 실시간 음성 미리보기 ── */
+  .mic-interim {
+    font-size: 13px;
+    color: var(--accent);
+    min-height: 18px;
+    font-style: italic;
+    text-align: center;
+    opacity: 0.8;
+    transition: opacity 0.2s;
+  }
+
+  /* ── 결과 항목 수정 모드 ── */
+  .result-edit-row {
+    display: flex;
+    gap: 6px;
+    margin-top: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .edit-input {
+    background: var(--surface2);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 5px 8px;
+    font-size: 13px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text);
+    outline: none;
+    width: 80px;
+  }
+  .edit-input.wide { width: 130px; }
+  .edit-label { font-size: 11px; color: var(--text-muted); }
+  .btn-edit-save {
+    padding: 5px 12px;
+    background: var(--accent-dim);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 700;
+    font-family: inherit;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn-edit-save:hover { background: var(--accent); color: #000; }
+  .btn-edit-cancel {
+    padding: 5px 10px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .edit-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .edit-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* ── 목록 탭 ── */
+  #tab-list {
+    padding: 16px;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .list-toolbar {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 4px;
+  }
+  .list-search {
+    flex: 1;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 15px;
+    font-family: inherit;
+    color: var(--text);
+    outline: none;
+  }
+  .list-search:focus { border-color: var(--accent); }
+  .list-search::placeholder { color: var(--text-muted); }
+  .list-count {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .item-row {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: border-color 0.15s;
+  }
+  .item-row:hover { border-color: var(--border); }
+  .item-row.editing { border-color: var(--accent); }
+  .item-name-cell { flex: 1; font-size: 15px; font-weight: 500; }
+  .item-qty-cell {
+    font-size: 14px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--accent);
+    min-width: 52px;
+    text-align: right;
+  }
+  .item-unit-cell {
+    font-size: 13px;
+    color: var(--text-dim);
+    min-width: 28px;
+  }
+  .item-edit-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.15s;
+  }
+  .item-edit-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .item-del-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 9px;
+    font-size: 13px;
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all 0.15s;
+  }
+  .item-del-btn:hover { border-color: var(--warn); color: var(--warn); }
+  .item-edit-row {
+    display: none;
+    gap: 6px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+  }
+  .item-edit-row.open { display: flex; }
+  .item-edit-input {
+    background: var(--surface2);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-size: 14px;
+    font-family: inherit;
+    color: var(--text);
+    outline: none;
+  }
+  .item-edit-input.name { flex: 1; min-width: 120px; }
+  .item-edit-input.qty  { width: 70px; font-family: 'JetBrains Mono', monospace; }
+  .item-edit-input.unit { width: 60px; }
+  .no-items {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-muted);
+    font-size: 14px;
+  }
+
 </style>
 </head>
 <body>
@@ -488,6 +662,7 @@
     <button class="nav-btn active" onclick="switchTab('input', this)">입력</button>
     <button class="nav-btn" onclick="switchTab('order', this)">발주</button>
     <button class="nav-btn" onclick="switchTab('new', this)">신규</button>
+    <button class="nav-btn" onclick="switchTab('list', this)">목록</button>
   </div>
 </header>
 
@@ -496,6 +671,7 @@
   <div class="mic-zone">
     <button class="mic-btn" id="micBtn" onclick="toggleMic()">🎤</button>
     <div class="mic-status" id="micStatus">탭하면 음성 입력 (15초)</div>
+    <div class="mic-interim" id="micInterim"></div>
     <div class="mic-duration-row">
       <span class="mic-duration-label">녹음 시간</span>
       <div class="mic-duration-btns">
@@ -538,6 +714,15 @@
   <div id="newItemList"><div class="no-pending">로딩 중...</div></div>
 </div>
 
+<!-- ══ 탭4: 목록 ══ -->
+<div id="tab-list" class="tab-content">
+  <div class="list-toolbar">
+    <input class="list-search" id="listSearch" type="search" placeholder="품목명 검색..." oninput="filterList(this.value)">
+    <span class="list-count" id="listCount"></span>
+  </div>
+  <div id="itemListBody"></div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -557,6 +742,7 @@ function switchTab(name, btn) {
   btn.classList.add('active');
   if (name === 'order') loadOrderList();
   if (name === 'new')   loadNewItems();
+  if (name === 'list')  loadItemList();
 }
 
 /* ════════════════════════════════
@@ -582,37 +768,47 @@ function initSpeech() {
   if (!SpeechRecognition) return null;
   const r = new SpeechRecognition();
   r.lang = 'ko-KR';
-  r.continuous = false;      // 한 문장씩 받기 (중복 누적 방지)
-  r.interimResults = false;  // 최종 결과만 사용
+  r.continuous = true;       // 단일 세션 유지 → 단어 끊김 없음
+  r.interimResults = true;   // 인식 중 실시간 텍스트 표시
+
+  let finalText = '';  // 확정된 텍스트 누적
 
   r.onresult = (e) => {
-    // 이번 인식 결과만 가져옴
-    const newText = e.results[e.results.length - 1][0].transcript.trim();
-    if (!newText) return;
-
-    const input = document.getElementById('textInput');
-    const existing = input.value.trim();
-    // 기존 텍스트에 이어붙임
-    input.value = existing ? existing + ' ' + newText : newText;
-
-    // ✅ 말이 들어오면 타이머 리셋
-    resetMicTimer();
-  };
-  r.onerror = (e) => {
-    if (e.error === 'no-speech') {
-      // 무음 → 그냥 재시작
-      if (isRecording) { try { r.start(); } catch(_) {} }
-      return;
+    let interim = '';
+    // 이번 세션의 모든 결과 순회
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) {
+        finalText += (finalText ? ' ' : '') + t.trim();
+        resetMicTimer();  // 확정 텍스트 들어올 때 타이머 리셋
+      } else {
+        interim += t;
+      }
     }
+    // 입력창: 확정 텍스트
+    if (finalText) document.getElementById('textInput').value = finalText;
+    // 미리보기: 인식 중 텍스트 (흐릿하게)
+    document.getElementById('micInterim').textContent = interim;
+  };
+
+  r.onerror = (e) => {
+    if (e.error === 'no-speech') return;  // 무음은 무시 (continuous라 자동 계속)
+    if (e.error === 'aborted') return;
     stopMic();
     showToast('음성 인식 오류. 직접 입력해 주세요.');
   };
+
   r.onend = () => {
-    // 녹음 중이면 자동 재시작 (타이머 끝나기 전까지)
+    document.getElementById('micInterim').textContent = '';
+    // continuous 모드에서도 네트워크 등으로 끊길 수 있으므로 재시작
     if (isRecording) {
+      finalText = document.getElementById('textInput').value.trim();
       try { r.start(); } catch(_) {}
     }
   };
+
+  // 세션 시작 시 기존 입력창 텍스트를 finalText 기준으로 설정
+  finalText = document.getElementById('textInput').value.trim();
   return r;
 }
 
@@ -665,6 +861,7 @@ function stopMic() {
   document.getElementById('micStatus').textContent = `탭하면 음성 입력 (${micDuration}초)`;
   document.getElementById('micStatus').classList.remove('recording');
   if (recognition) { try { recognition.stop(); } catch(_) {} }
+  const im = document.getElementById('micInterim'); if(im) im.textContent = '';
 }
 
 function setDuration(sec) {
@@ -1297,11 +1494,13 @@ async function handleSend() {
         type:     'ok',
         itemId:   matched.id,
         itemName: matched.item_name,
-        prevQty:  cur   // 되돌리기용 이전 값
+        prevQty:  cur,
+        newQty:   newQty,
+        unit:     matched.unit
       });
     }
 
-    msgs.forEach(m => addResult(rawText, m.text, m.type, m.itemId, m.itemName, m.prevQty));
+    msgs.forEach(m => addResult(rawText, m.text, m.type, m.itemId, m.itemName, m.prevQty, m.newQty, m.unit));
     input.value = '';
 
   } catch(err) {
@@ -1314,7 +1513,7 @@ async function handleSend() {
 
 let resultIdCounter = 0;
 
-function addResult(raw, msg, type, itemId, itemName, prevQty) {
+function addResult(raw, msg, type, itemId, itemName, prevQty, newQty, unit) {
   const list   = document.getElementById('resultList');
   const now    = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
   const rid    = 'r' + (++resultIdCounter);
@@ -1323,23 +1522,70 @@ function addResult(raw, msg, type, itemId, itemName, prevQty) {
   div.className = `result-item ${type}`;
   div.id = rid;
 
-  // 삭제(되돌리기) 버튼 — 재고 반영된 항목만
-  const canUndo = type === 'ok' && itemId && prevQty !== undefined;
-  const undoBtn = canUndo
-    ? `<button class="undo-btn" onclick="undoEntry('${rid}', ${itemId}, ${prevQty}, '${itemName}')">↩️</button>`
-    : '';
+  const canEdit = type === 'ok' && itemId !== undefined;
+  const canUndo = canEdit && prevQty !== undefined;
+
+  const actionBtns = canEdit ? `
+    <button class="edit-btn" onclick="toggleResultEdit('${rid}', ${itemId}, '${(itemName||'').replace(/'/g,"\\'")}', ${newQty??0}, '${unit||''}', ${prevQty??0})">✏️</button>
+    ${canUndo ? `<button class="undo-btn" onclick="undoEntry('${rid}', ${itemId}, ${prevQty}, '${(itemName||'').replace(/'/g,"\\'")}')">↩️</button>` : ''}
+  ` : '';
 
   div.innerHTML = `
     <div style="flex:1">
       <div class="result-raw">${raw}</div>
-      <div class="result-msg">${msg}</div>
+      <div class="result-msg" id="${rid}-msg">${msg}</div>
+      <div class="result-edit-row" id="${rid}-edit"></div>
     </div>
-    <div style="display:flex;align-items:center;gap:8px">
-      ${undoBtn}
+    <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+      ${actionBtns}
       <div class="result-time">${now}</div>
     </div>
   `;
   header.after(div);
+}
+
+function toggleResultEdit(rid, itemId, itemName, curQty, unit, prevQty) {
+  const row = document.getElementById(rid + '-edit');
+  if (row.children.length > 0) {
+    row.innerHTML = '';
+    return;
+  }
+  row.innerHTML = `
+    <span class="edit-label">품목명</span>
+    <input class="edit-input wide" id="${rid}-ename" value="${itemName}">
+    <span class="edit-label">수량</span>
+    <input class="edit-input" id="${rid}-eqty" type="number" value="${curQty}" style="width:64px">
+    <input class="edit-input" id="${rid}-eunit" value="${unit}" style="width:52px">
+    <button class="btn-edit-save" onclick="saveResultEdit('${rid}', ${itemId}, ${prevQty})">저장</button>
+    <button class="btn-edit-cancel" onclick="document.getElementById('${rid}-edit').innerHTML=''">취소</button>
+  `;
+  document.getElementById(rid + '-ename').focus();
+}
+
+async function saveResultEdit(rid, itemId, prevQty) {
+  const newName = document.getElementById(rid + '-ename').value.trim();
+  const newQty  = parseFloat(document.getElementById(rid + '-eqty').value);
+  const newUnit = document.getElementById(rid + '-eunit').value.trim();
+  if (!newName) { showToast('품목명을 입력해 주세요.'); return; }
+  try {
+    await db.from('items').update({
+      item_name:   newName,
+      current_qty: newQty,
+      unit:        newUnit,
+      updated_at:  new Date().toISOString()
+    }).eq('id', itemId);
+    await db.from('inventory_log').insert({
+      item_id: itemId, item_name: newName,
+      qty: newQty, unit: newUnit,
+      cmd: '수정', actor: 'owner', raw_text: '결과화면 수정'
+    });
+    document.getElementById(rid + '-msg').textContent = `✏️ ${newName} → ${newQty}${newUnit} (수정됨)`;
+    document.getElementById(rid + '-edit').innerHTML = '';
+    document.getElementById(rid).className = 'result-item ok';
+    showToast(`✅ ${newName} 수정 완료`);
+  } catch(e) {
+    showToast('수정 실패: ' + e.message);
+  }
 }
 
 async function undoEntry(rid, itemId, prevQty, itemName) {
@@ -1538,6 +1784,108 @@ if ('serviceWorker' in navigator) {
   const swBlob = new Blob([swCode], { type: 'application/javascript' });
   const swUrl  = URL.createObjectURL(swBlob);
   navigator.serviceWorker.register(swUrl).catch(() => {});
+}
+
+
+/* ════════════════════════════════
+   목록 탭 — 전체 상품 조회 / 수정 / 삭제
+════════════════════════════════ */
+let _allItems = [];
+
+async function loadItemList() {
+  const body = document.getElementById('itemListBody');
+  body.innerHTML = '<div class="no-items"><span class="spinner"></span></div>';
+  const { data, error } = await db.from('items').select('*').order('item_name');
+  if (error || !data) { body.innerHTML = '<div class="no-items">로드 실패</div>'; return; }
+  _allItems = data;
+  renderItemList(_allItems);
+}
+
+function renderItemList(items) {
+  const body  = document.getElementById('itemListBody');
+  const count = document.getElementById('listCount');
+  count.textContent = items.length + '개';
+  if (items.length === 0) {
+    body.innerHTML = '<div class="no-items">품목 없음</div>';
+    return;
+  }
+  body.innerHTML = items.map(it => `
+    <div class="item-row" id="irow_${it.id}">
+      <div style="flex:1">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="item-name-cell" id="iname_${it.id}">${it.item_name}</span>
+          <span class="item-qty-cell">${it.current_qty ?? 0}</span>
+          <span class="item-unit-cell">${it.unit || ''}</span>
+        </div>
+        <div class="item-edit-row" id="iedit_${it.id}">
+          <input class="item-edit-input name" id="ie_name_${it.id}" value="${it.item_name}" placeholder="품목명">
+          <input class="item-edit-input qty"  id="ie_qty_${it.id}"  value="${it.current_qty ?? 0}" type="number" placeholder="수량">
+          <input class="item-edit-input unit" id="ie_unit_${it.id}" value="${it.unit || ''}" placeholder="단위">
+          <button class="btn-edit-save"   onclick="saveItemEdit(${it.id})">저장</button>
+          <button class="btn-edit-cancel" onclick="closeItemEdit(${it.id})">취소</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="item-edit-btn" onclick="openItemEdit(${it.id})">✏️</button>
+        <button class="item-del-btn"  onclick="deleteItem(${it.id}, '${it.item_name.replace(/'/g,"\\'")}')">🗑</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+function filterList(q) {
+  const filtered = q.trim()
+    ? _allItems.filter(it => it.item_name.includes(q.trim()))
+    : _allItems;
+  renderItemList(filtered);
+}
+
+function openItemEdit(id) {
+  document.getElementById('iedit_' + id).classList.add('open');
+  document.getElementById('irow_'  + id).classList.add('editing');
+  document.getElementById('ie_name_' + id).focus();
+}
+
+function closeItemEdit(id) {
+  document.getElementById('iedit_' + id).classList.remove('open');
+  document.getElementById('irow_'  + id).classList.remove('editing');
+}
+
+async function saveItemEdit(id) {
+  const newName = document.getElementById('ie_name_' + id).value.trim();
+  const newQty  = parseFloat(document.getElementById('ie_qty_'  + id).value) || 0;
+  const newUnit = document.getElementById('ie_unit_' + id).value.trim();
+  if (!newName) { showToast('품목명을 입력해 주세요.'); return; }
+  try {
+    await db.from('items').update({
+      item_name: newName, current_qty: newQty, unit: newUnit,
+      updated_at: new Date().toISOString()
+    }).eq('id', id);
+    // 로컬 데이터 갱신
+    const it = _allItems.find(x => x.id === id);
+    if (it) { it.item_name = newName; it.current_qty = newQty; it.unit = newUnit; }
+    document.getElementById('iname_' + id).textContent = newName;
+    document.getElementById('irow_'  + id).querySelector('.item-qty-cell').textContent = newQty;
+    document.getElementById('irow_'  + id).querySelector('.item-unit-cell').textContent = newUnit;
+    closeItemEdit(id);
+    showToast('✅ ' + newName + ' 수정 완료');
+  } catch(e) {
+    showToast('수정 실패: ' + e.message);
+  }
+}
+
+async function deleteItem(id, name) {
+  if (!confirm('"' + name + '"을 삭제할까요?\n재고 이력은 유지됩니다.')) return;
+  try {
+    await db.from('items').delete().eq('id', id);
+    _allItems = _allItems.filter(x => x.id !== id);
+    document.getElementById('irow_' + id)?.remove();
+    const count = document.getElementById('listCount');
+    count.textContent = _allItems.length + '개';
+    showToast('🗑 ' + name + ' 삭제됨');
+  } catch(e) {
+    showToast('삭제 실패: ' + e.message);
+  }
 }
 
 /* ════════════════════════════════
