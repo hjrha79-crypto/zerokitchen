@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>ZeroKitchen</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg:#f0f4f1;--surface:#ffffff;--surface2:#e8ede9;--border:#d4ddd6;
+  --text:#1a2b1e;--text-dim:#4a6650;--text-muted:#8aa090;
+  --accent:#1a7a4a;--accent-dim:rgba(26,122,74,.10);--accent-lt:#e6f4ec;
+  --warn:#c0540a;--warn-dim:rgba(192,84,10,.10);--red:#d93025;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;display:flex;flex-direction:column;overflow:hidden}
+.hdr{background:var(--surface);border-bottom:1px solid var(--border);padding:0 14px;display:flex;align-items:center;gap:8px;height:52px;flex-shrink:0;position:sticky;top:0;z-index:10}
+.logo{font-size:18px;font-weight:700;color:var(--accent);letter-spacing:-.5px}
+.store-nm{font-size:12px;color:var(--text-muted);font-weight:500}
+.navs{display:flex;gap:5px;margin-left:auto}
+.nav{padding:6px 11px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--text-dim);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
+.nav.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.tab-wrap{flex:1;overflow:hidden;position:relative}
+.tab{display:none;height:100%;overflow-y:auto;padding:14px 14px 88px;flex-direction:column;gap:12px}
+.tab.active{display:flex}
+/* 마이크존 */
+.mic-zone{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:22px 16px 18px;display:flex;flex-direction:column;align-items:center;gap:10px}
+.mic-btn{width:78px;height:78px;border-radius:50%;border:2.5px solid var(--border);background:var(--surface2);font-size:30px;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center}
+.mic-btn.rec{border-color:var(--warn);background:var(--warn-dim);animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(192,84,10,.3)}50%{box-shadow:0 0 0 12px rgba(192,84,10,0)}}
+.mic-st{font-size:13px;color:var(--text-muted);font-weight:500;text-align:center}
+.mic-st.rec{color:var(--warn)}
+.mic-im{font-size:13px;color:var(--accent);font-style:italic;min-height:18px;text-align:center}
+.dur-row{display:flex;align-items:center;gap:8px}
+.dur-lbl{font-size:12px;color:var(--text-muted)}
+.dur-btns{display:flex;gap:5px}
+.dur{padding:5px 11px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text-dim);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
+.dur.active{border-color:var(--accent);background:var(--accent-lt);color:var(--accent)}
+/* 입력창 */
+.inp-row{display:flex;gap:8px}
+.txt-inp{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px 13px;font-size:15px;font-family:inherit;color:var(--text);outline:none;transition:border-color .15s}
+.txt-inp:focus{border-color:var(--accent)}
+.txt-inp::placeholder{color:var(--text-muted);font-size:13px}
+.send-btn{padding:12px 18px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity .15s}
+.send-btn:disabled{opacity:.5}
+/* 결과 */
+.res-hdr{font-size:12px;font-weight:700;color:var(--text-muted);letter-spacing:.05em;padding:2px 0}
+.res-card{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--border);border-radius:12px;padding:11px 13px}
+.res-card.ok{border-left-color:var(--accent)}.res-card.warn{border-left-color:var(--warn)}.res-card.err{border-left-color:var(--red)}
+.res-raw{font-size:11px;color:var(--text-muted);margin-bottom:3px;font-family:'JetBrains Mono',monospace}
+.res-msg{font-size:14px;font-weight:600;line-height:1.4}
+.res-time{font-size:11px;color:var(--text-muted);margin-top:3px;text-align:right}
+/* 목록 그리드 */
+#itemListBody{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.itm-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 11px;display:flex;flex-direction:column;gap:5px;position:relative}
+.itm-card.low{border-left:3px solid var(--warn)}.itm-card.zero{border-left:3px solid var(--red)}
+.itm-name{font-size:14px;font-weight:600;line-height:1.3;padding-right:60px}
+.itm-qty-row{display:flex;align-items:baseline;gap:4px}
+.itm-qty{font-size:24px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent)}
+.itm-qty.low{color:var(--warn)}.itm-qty.zero{color:var(--red)}
+.itm-unit{font-size:13px;color:var(--text-dim)}
+.itm-vendor{font-size:11px;color:var(--text-muted);background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:1px 6px;width:fit-content}
+.itm-acts{position:absolute;top:8px;right:8px;display:flex;gap:3px}
+.bi{width:27px;height:27px;border-radius:5px;border:1px solid var(--border);background:var(--surface2);color:var(--text-muted);font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.bi:hover{border-color:var(--accent);color:var(--accent)}
+.edt-form{display:none;flex-direction:column;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border)}
+.edt-form.open{display:flex}
+.ei{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:13px;font-family:inherit;color:var(--text);outline:none;width:100%}
+.ei:focus{border-color:var(--accent)}
+.ei-row{display:flex;gap:5px}.ei-row .ei{flex:1}
+.esel{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 7px;font-size:12px;font-family:inherit;color:var(--text);outline:none;width:100%}
+.e-acts{display:flex;gap:6px}
+.e-save{flex:1;padding:8px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer}
+.e-cancel{padding:8px 10px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text-muted);font-family:inherit;font-size:12px;cursor:pointer}
+/* 툴바 */
+.lst-tb{display:flex;gap:7px;align-items:center}
+.lst-srch{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit;color:var(--text);outline:none}
+.lst-srch:focus{border-color:var(--accent)}
+.lst-cnt{font-size:12px;color:var(--text-muted);white-space:nowrap}
+.flt-row{display:flex;gap:5px;flex-wrap:wrap}
+.lsel{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:7px 9px;font-size:13px;font-family:inherit;color:var(--text);outline:none;cursor:pointer;flex:1;min-width:0}
+.srt-btns{display:flex;gap:4px;flex-wrap:wrap}
+.srt{padding:6px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);color:var(--text-dim);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;transition:all .15s}
+.srt.active{border-color:var(--accent);background:var(--accent-lt);color:var(--accent)}
+.vg-lbl{grid-column:1/-1;font-size:11px;font-weight:700;color:var(--accent);letter-spacing:.08em;padding:8px 4px 2px;display:flex;align-items:center;gap:6px}
+.vg-lbl::after{content:'';flex:1;height:1px;background:var(--border)}
+/* 발주 */
+.ord-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px}
+.ord-name{font-size:15px;font-weight:600}
+.ord-qty{font-size:13px;color:var(--text-dim);margin-top:2px}
+.ord-v{font-size:12px;color:var(--text-muted);margin-top:3px}
+.no-item{text-align:center;padding:40px;color:var(--text-muted);font-size:14px;grid-column:1/-1}
+/* 신규 */
+.q-card{background:var(--surface);border:1px solid var(--warn);border-left:3px solid var(--warn);border-radius:12px;padding:13px}
+.q-name{font-size:15px;font-weight:600}
+.q-raw{font-size:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:3px}
+.q-acts{display:flex;gap:7px;margin-top:11px}
+.q-inp{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:8px 9px;font-size:14px;font-family:inherit;color:var(--text);outline:none}
+.q-inp:focus{border-color:var(--accent)}
+.q-ok{flex:1;padding:9px;background:var(--accent);border:none;border-radius:8px;color:#fff;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.q-no{padding:9px 13px;background:transparent;border:1px solid var(--border);border-radius:8px;color:var(--text-muted);font-family:inherit;font-size:13px;cursor:pointer}
+/* 커맨드 바 */
+#cmdBar{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border);padding:10px 14px 14px;z-index:20;display:none;flex-direction:column;gap:5px}
+#cmdBar.show{display:flex}
+.cmd-row{display:flex;gap:8px;align-items:center}
+.cmd-inp{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:20px;padding:10px 15px;font-size:14px;font-family:inherit;color:var(--text);outline:none;transition:border-color .15s}
+.cmd-inp:focus{border-color:var(--accent)}
+.cmd-inp::placeholder{color:var(--text-muted);font-size:13px}
+.cmd-mic{width:44px;height:44px;border-radius:50%;border:2px solid var(--border);background:var(--surface2);font-size:20px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
+.cmd-mic.rec{border-color:var(--warn);background:var(--warn-dim);animation:pulse 1.2s ease-in-out infinite}
+.cmd-send{width:44px;height:44px;border-radius:50%;border:none;background:var(--accent);color:#fff;font-size:20px;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center}
+.cmd-send:disabled{opacity:.4}
+#cmdIm{font-size:12px;color:var(--accent);font-style:italic;display:none;padding:0 4px}
+#cmdIm.on{display:block}
+/* 미리보기 */
+#pvOv{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:flex-end}
+#pvOv.open{display:flex}
+#pvPanel{width:100%;max-height:80dvh;background:var(--surface);border-radius:16px 16px 0 0;display:flex;flex-direction:column;overflow:hidden;animation:sUp .22s ease}
+@keyframes sUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+.pv-hdr{display:flex;justify-content:space-between;align-items:flex-start;padding:15px 18px 11px;border-bottom:1px solid var(--border)}
+.pv-title{font-size:15px;font-weight:700}
+.pv-raw{font-size:11px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;margin-top:2px}
+.pv-close{background:none;border:none;color:var(--text-muted);font-size:22px;cursor:pointer}
+.pv-list{overflow-y:auto;flex:1;padding:11px 15px;display:flex;flex-direction:column;gap:7px}
+.pv-item{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:11px 13px;display:flex;align-items:flex-start;gap:9px}
+.pv-item.known{border-left:3px solid var(--accent)}.pv-item.new-it{border-left:3px solid var(--warn)}
+.pv-info{flex:1}
+.pv-name{font-size:15px;font-weight:600;display:flex;align-items:center;gap:5px}
+.pv-detail{font-size:12px;color:var(--text-dim);margin-top:2px}
+.bdg{font-size:11px;font-weight:700;padding:2px 7px;border-radius:4px;white-space:nowrap}
+.bdg-ok{background:var(--accent-dim);color:var(--accent)}
+.bdg-new{background:var(--warn-dim);color:var(--warn)}
+.bdg-fz{background:rgba(150,150,150,.15);color:#888}
+.btn-fn{font-size:11px;padding:3px 8px;border-radius:5px;border:1px solid var(--warn);background:transparent;color:var(--warn);cursor:pointer;margin-top:4px;font-family:inherit;font-weight:600}
+.pv-del{background:none;border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:14px;cursor:pointer;color:var(--text-muted)}
+.pv-ft{padding:11px 15px;border-top:1px solid var(--border);display:flex;gap:9px}
+.btn-conf{flex:1;padding:14px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;font-family:inherit;cursor:pointer}
+.btn-pcancel{padding:14px 18px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text-dim);font-family:inherit;font-size:14px;cursor:pointer}
+/* 토스트 */
+#toast{position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--text);border-radius:10px;padding:11px 18px;font-size:13px;font-weight:500;color:var(--bg);transition:transform .25s ease;z-index:300;white-space:nowrap;pointer-events:none}
+#toast.show{transform:translateX(-50%) translateY(0)}
+.spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:rot .6s linear infinite;vertical-align:middle}
+.spin.dk{border-color:var(--border);border-top-color:var(--accent)}
+@keyframes rot{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <span class="logo">ZeroKitchen</span>
+  <span class="store-nm" id="storeNm">로딩 중...</span>
+  <div class="navs">
+    <button class="nav active" onclick="switchTab('input',this)">입력</button>
+    <button class="nav" onclick="switchTab('order',this)">발주</button>
+    <button class="nav" onclick="switchTab('new',this)">신규</button>
+    <button class="nav" onclick="switchTab('list',this)">목록</button>
+  </div>
+</div>
+
+<div class="tab-wrap">
+
+<div id="tab-input" class="tab active">
+  <div class="mic-zone">
+    <button class="mic-btn" id="micBtn" onclick="toggleMic()">🎤</button>
+    <div class="mic-st" id="micSt">탭하면 음성 입력 (15초)</div>
+    <div class="mic-im" id="micIm"></div>
+    <div class="dur-row">
+      <span class="dur-lbl">녹음 시간</span>
+      <div class="dur-btns">
+        <button class="dur" onclick="setDur(10)">10초</button>
+        <button class="dur active" onclick="setDur(15)">15초</button>
+        <button class="dur" onclick="setDur(30)">30초</button>
+        <button class="dur" onclick="setDur(60)">60초</button>
+      </div>
+    </div>
+  </div>
+  <div class="inp-row">
+    <input class="txt-inp" id="mainInp" type="text"
+      placeholder="예: 브로콜리 세 봉지 새우 두 팩" autocomplete="off" enterkeyhint="send">
+    <button class="send-btn" id="mainSend" onclick="handleSend()">입력</button>
+  </div>
+  <div class="res-hdr">처리 결과</div>
+  <div id="resList"></div>
+</div>
+
+<div id="tab-order" class="tab">
+  <div id="orderList"><div class="no-item">로딩 중...</div></div>
+</div>
+
+<div id="tab-new" class="tab">
+  <div id="newList"><div class="no-item">로딩 중...</div></div>
+</div>
+
+<div id="tab-list" class="tab">
+  <div class="lst-tb">
+    <input class="lst-srch" id="lstSrch" type="search" placeholder="품목명 검색..." oninput="applyFilter()">
+    <span class="lst-cnt" id="lstCnt"></span>
+  </div>
+  <div class="flt-row">
+    <select class="lsel" id="vFilter" onchange="applyFilter()"><option value="">전체 거래처</option></select>
+    <select class="lsel" id="sFilter" onchange="applyFilter()" style="max-width:110px">
+      <option value="">전체 재고</option>
+      <option value="low">부족</option>
+      <option value="zero">없음</option>
+    </select>
+  </div>
+  <div class="srt-btns">
+    <button class="srt active" id="sort-name"     onclick="setSort('name')">가나다</button>
+    <button class="srt"        id="sort-vendor"   onclick="setSort('vendor')">거래처</button>
+    <button class="srt"        id="sort-qty-asc"  onclick="setSort('qty-asc')">재고↑</button>
+    <button class="srt"        id="sort-qty-desc" onclick="setSort('qty-desc')">재고↓</button>
+    <button class="srt"        id="sort-updated"  onclick="setSort('updated')">최근</button>
+  </div>
+  <div id="itemListBody"></div>
+</div>
+
+</div>
+
+<!-- 미리보기 -->
+<div id="pvOv" onclick="if(event.target===this)closePv()">
+  <div id="pvPanel">
+    <div class="pv-hdr">
+      <div><div class="pv-title">저장 전 확인</div><div class="pv-raw" id="pvRaw"></div></div>
+      <button class="pv-close" onclick="closePv()">✕</button>
+    </div>
+    <div class="pv-list" id="pvList"></div>
+    <div class="pv-ft">
+      <button class="btn-pcancel" onclick="closePv()">취소</button>
+      <button class="btn-conf" id="confBtn" onclick="confirmPv()">✅ 저장하기</button>
+    </div>
+  </div>
+</div>
+
+<!-- 커맨드 바 -->
+<div id="cmdBar">
+  <div id="cmdIm"></div>
+  <div class="cmd-row">
+    <button class="cmd-mic" id="cmdMic" onclick="toggleMic()">🎤</button>
+    <input class="cmd-inp" id="cmdInp"
+      placeholder="말하거나 입력  예) 꼬리새우 5개로 수정 / A거래처를 식봄으로">
+    <button class="cmd-send" id="cmdSend" onclick="handleSend()">↑</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const SUPABASE_URL='https://pmdkmiayyZailcnmjhyo.supabase.co';
+const SUPABASE_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBtZGttaWF5eVphaWxjbm1qaHlvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzk4NDg4NDUsImV4cCI6MjA1NTQyNDg0NX0.3g7E3_WysBpWqppmrFTUDFXbHs5kPVLjBYuq_AJpWJ4';
+</script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const{createClient}=supabase;
+const db=createClient(SUPABASE_URL,SUPABASE_KEY);
+
+/* ─ 전역 상태 ─ */
+let SID=null,_items=[],_vendors=[],_typos=[],_curSort='name',_pvData=null;
+
+/* ─ 초기화 ─ */
+async function init(){
+  const{data:st}=await db.from('stores').select('*').limit(1);
+  if(st?.length){SID=st[0].store_id;document.getElementById('storeNm').textContent=st[0].store_name;}
+  await loadAll();
+}
+
+async function loadAll(){
+  const[r1,r2,r3]=await Promise.allSettled([
+    db.from('items').select('*').eq('store_id',SID).order('item_name'),
+    db.from('vendors').select('*').eq('store_id',SID).order('vendor_name'),
+    db.from('typo_dict').select('*').eq('store_id',SID).eq('enabled',true).order('priority')
+  ]);
+  if(r1.status==='fulfilled'&&r1.value.data?.length)_items=r1.value.data;
+  if(r2.status==='fulfilled'&&r2.value.data)_vendors=r2.value.data;
+  if(r3.status==='fulfilled'&&r3.value.data)_typos=r3.value.data;
+  console.log('로드:',[_items.length,'품목',_vendors.length,'거래처',_typos.length,'오타'].join(' '));
+}
+
+/* ─ 탭 ─ */
+function switchTab(n,btn){
+  document.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
+  document.querySelectorAll('.nav').forEach(e=>e.classList.remove('active'));
+  document.getElementById('tab-'+n).classList.add('active');
+  btn.classList.add('active');
+  document.getElementById('cmdBar').classList.toggle('show',n!=='input');
+  if(n==='order')renderOrder();
+  if(n==='new')loadNew();
+  if(n==='list'){loadAll().then(()=>renderList());}
+}
+
+/* ─ 토스트 ─ */
+let _tt=null;
+function showToast(m,ms=2500){const t=document.getElementById('toast');t.textContent=m;t.classList.add('show');clearTimeout(_tt);_tt=setTimeout(()=>t.classList.remove('show'),ms);}
+
+/* ─ 음성 ─ */
+let rec=null,isRec=false,mTimer=null,mDur=15,_lastT='',_sesT=new Set();
+
+function initSpeech(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR)return null;
+  const r=new SR();r.lang='ko-KR';r.continuous=false;r.interimResults=true;
+  r.onresult=(e)=>{
+    let fT='',iT='';
+    for(let i=e.resultIndex;i<e.results.length;i++){const t=e.results[i][0].transcript.trim();if(e.results[i].isFinal)fT=t;else iT=t;}
+    const atab=document.querySelector('.tab.active')?.id;
+    const imEl=document.getElementById(atab==='tab-input'?'micIm':'cmdIm');
+    if(imEl){imEl.textContent=iT;imEl.classList.toggle('on',!!iT);}
+    if(fT&&fT!==_lastT&&!_sesT.has(fT)){
+      _lastT=fT;_sesT.add(fT);
+      const inpEl=document.getElementById(atab==='tab-input'?'mainInp':'cmdInp');
+      if(inpEl){const ex=inpEl.value.trim();inpEl.value=ex?ex+' '+fT:fT;}
+      resetMTimer();
+    }
+  };
+  r.onerror=(e)=>{clearIm();if(e.error==='no-speech'||e.error==='aborted')return;stopMic();showToast('음성 인식 오류');};
+  r.onend=()=>{clearIm();if(isRec)setTimeout(()=>{try{r.start();}catch(_){}},80);};
+  return r;
+}
+
+function clearIm(){['micIm','cmdIm'].forEach(id=>{const el=document.getElementById(id);if(el){el.textContent='';el.classList.remove('on');}});}
+
+function toggleMic(){
+  if(isRec){
+    const atab=document.querySelector('.tab.active')?.id;
+    const text=document.getElementById(atab==='tab-input'?'mainInp':'cmdInp')?.value.trim();
+    stopMic();if(text)handleSend();return;
+  }
+  _lastT='';_sesT=new Set();
+  rec=initSpeech();if(!rec){showToast('음성 인식 미지원');return;}
+  isRec=true;
+  document.getElementById('micBtn').classList.add('rec');
+  document.getElementById('cmdMic').classList.add('rec');
+  const ms=document.getElementById('micSt');ms.textContent='듣는 중... '+mDur+'초';ms.classList.add('rec');
+  rec.start();resetMTimer();
+}
+
+function stopMic(){
+  isRec=false;clearTimeout(mTimer);mTimer=null;
+  ['micBtn','cmdMic'].forEach(id=>document.getElementById(id)?.classList.remove('rec'));
+  const ms=document.getElementById('micSt');if(ms){ms.textContent='탭하면 음성 입력 ('+mDur+'초)';ms.classList.remove('rec');}
+  clearIm();if(rec){try{rec.stop();}catch(_){}}
+}
+
+function resetMTimer(){
+  clearTimeout(mTimer);let rem=mDur;
+  const ms=document.getElementById('micSt');
+  mTimer=setInterval(()=>{
+    rem--;if(ms&&isRec)ms.textContent='듣는 중... '+rem+'초';
+    if(rem<=0){
+      const atab=document.querySelector('.tab.active')?.id;
+      const text=document.getElementById(atab==='tab-input'?'mainInp':'cmdInp')?.value.trim();
+      stopMic();if(text)handleSend();
+    }
+  },1000);
+}
+
+function setDur(s){mDur=s;document.querySelectorAll('.dur').forEach(b=>b.classList.toggle('active',b.textContent===s+'초'));document.getElementById('micSt').textContent='탭하면 음성 입력 ('+s+'초)';}
+
+/* ─ handleSend ─ */
+async function handleSend(){
+  const atab=document.querySelector('.tab.active')?.id;
+  const inpEl=document.getElementById(atab==='tab-input'?'mainInp':'cmdInp');
+  const raw=inpEl?.value.trim();if(!raw)return;
+  const sbtn=document.getElementById(atab==='tab-input'?'mainSend':'cmdSend');
+  if(sbtn){sbtn.disabled=true;sbtn.innerHTML='<span class="spin"></span>';}
+  try{
+    if(!_items.length)await loadAll();
+    const mgmt=await handleMgmt(raw);
+    if(mgmt){inpEl.value='';addRes(raw,mgmt.text,mgmt.type);if(atab!=='tab-input')showToast(mgmt.text,3000);return;}
+    const corr=applyTypo(applyTypo(raw,_typos),_typos);
+    const clean=applyTypo(preprocess(corr),_typos);
+    const entries=parseEntries(clean,_items);
+    if(!entries.length){addRes(raw,'❌ 분리 실패','err');return;}
+    const imap=new Map(_items.map(it=>[nk(it.item_name),it]));
+    showPv(raw,mergeSame(entries),imap,_items);
+    inpEl.value='';
+  }catch(e){addRes(raw,'❌ '+e.message,'err');}
+  finally{if(sbtn){sbtn.disabled=false;sbtn.textContent=atab==='tab-input'?'입력':'↑';}}
+}
+
+/* ─ 관리 명령 ─ */
+async function handleMgmt(s){
+  // 재고 수정
+  const fq=s.match(/^(.+?)(?:을|를)?\s+(\d+|하나|둘|셋|넷|다섯|여섯|일곱|여덟|아홉|열)\s*(?:개|봉지|봉|박스|팩|캔|통|병|킬로|kg)?(?:으로|로)(?:\s+(?:수정해\s*주세요|바꿔\s*주세요|수정해줘|바꿔줘|고쳐줘|수정|변경))?$/);
+  if(fq){
+    const[,ir,qr]=fq;const qm={하나:1,둘:2,셋:3,넷:4,다섯:5,여섯:6,일곱:7,여덟:8,아홉:9,열:10};
+    const qty=qm[qr]??parseInt(qr);const found=findItem(ir.trim());
+    if(found.length===1){
+      const it=found[0];
+      await db.from('items').update({current_qty:qty,updated_at:new Date().toISOString()}).eq('item_id',it.item_id);
+      await db.from('kitchen_operations').insert({store_id:SID,item_id:it.item_id,item_name:it.item_name,action_type:'adjust',quantity:qty,unit:it.unit,qty_after:qty,input_method:'voice',raw_text:s});
+      const loc=_items.find(x=>x.item_id===it.item_id);if(loc)loc.current_qty=qty;
+      return{text:'✅ "'+it.item_name+'" 재고 → '+qty+' 수정 완료',type:'ok'};
+    }else if(found.length>1)return{text:'⚠️ "'+ir.trim()+'" 품목이 '+found.length+'개. 더 정확히 말씀해 주세요.',type:'warn'};
+  }
+  // 거래처 변경
+  const rv=s.match(/^(.+?)(?:을|를)?\s+(.+?)(?:으로|로)(?:\s+(?:수정해\s*주세요|바꿔\s*주세요|수정해줘|바꿔줘|고쳐줘|수정|변경|바꿔|고쳐))?$/);
+  if(rv){
+    const[,fr,to]=rv;const fn=fr.trim(),fns=fn.replace(/거래처$/,'').trim();
+    const t=_vendors.find(v=>{const n=nk(v.vendor_name),ns=nk(v.vendor_name.replace(/거래처$/,''));return n===nk(fn)||n===nk(fns)||ns===nk(fn)||ns===nk(fns)||edist(n,nk(fn))<=1;});
+    if(t){const old=t.vendor_name;await db.from('vendors').update({vendor_name:to}).eq('vendor_id',t.vendor_id);t.vendor_name=to;loadAll();return{text:'✅ 거래처 "'+old+'" → "'+to+'" 변경 완료',type:'ok'};}
+    else if(_vendors.length)return{text:'⚠️ "'+fr+'" 거래처를 못 찾았습니다. 현재: '+_vendors.map(v=>v.vendor_name).join(', '),type:'warn'};
+  }
+  // 거래처 설정
+  const sv=s.match(/^(.+?)\s+(?:거래처|1순위)\s+(.+)$/);
+  if(sv){const[,ir,vr]=sv;const found=findItem(ir.trim());const vt=_vendors.find(v=>nk(v.vendor_name)===nk(vr.trim())||v.vendor_name.includes(vr.trim()));
+    if(found.length===1&&vt){await db.from('items').update({vendor_id:vt.vendor_id}).eq('item_id',found[0].item_id);const loc=_items.find(x=>x.item_id===found[0].item_id);if(loc)loc.vendor_id=vt.vendor_id;return{text:'✅ "'+found[0].item_name+'" 거래처 → "'+vt.vendor_name+'"',type:'ok'};}}
+  // 박스당
+  const sp=s.match(/^(.+?)\s+(?:박스당|1박스|케이스당)\s+(\d+)/);
+  if(sp){const[,ir,n]=sp;const found=findItem(ir.trim());if(found.length===1){await db.from('items').update({pack_factor:parseInt(n)}).eq('item_id',found[0].item_id);const loc=_items.find(x=>x.item_id===found[0].item_id);if(loc)loc.pack_factor=parseInt(n);return{text:'✅ "'+found[0].item_name+'" 박스당 '+n+'개',type:'ok'};}}
+  // 목표재고
+  const tg=s.match(/^(.+?)\s+(?:목표재고|목표수량|목표)\s+(\d+)/);
+  if(tg){const[,ir,n]=tg;const found=findItem(ir.trim());if(found.length===1){await db.from('items').update({target_qty:parseInt(n)}).eq('item_id',found[0].item_id);const loc=_items.find(x=>x.item_id===found[0].item_id);if(loc)loc.target_qty=parseInt(n);return{text:'✅ "'+found[0].item_name+'" 목표재고 '+n,type:'ok'};}}
+  // 거래처 추가
+  const av=s.match(/^새\s+거래처\s+(.+)$/)||s.match(/^(.+?)\s+거래처\s+추가해?$/);
+  if(av){const name=av[1].trim();if(name.length>=2&&!name.match(/\d/)){const{data:nv}=await db.from('vendors').insert({store_id:SID,vendor_name:name}).select().single();if(nv){_vendors.push(nv);return{text:'✅ 거래처 "'+name+'" 추가',type:'ok'};}}}
+  return null;
+}
+
+function findItem(q){const qn=nk(q);return _items.filter(it=>{const n=it.item_name,nn=nk(n);return n.includes(q)||nn.includes(qn)||n.includes(q.replace(/\s+/g,''))||edist(nn,qn)<=1;}).slice(0,5);}
+
+/* ─ 파서 ─ */
+const UNITS=['개','봉지','봉','박스','케이스','팩','캔','통','병','킬로','kg','인분','장','묶음','줄','롤'];
+const QW={하나:1,둘:2,셋:3,넷:4,다섯:5,여섯:6,일곱:7,여덟:8,아홉:9,열:10,한:1,두:2,세:3,네:4,스무:20};
+const CM={입고:'ADD',사용:'USE',소비:'USE',발주:'ORDER',주문:'ORDER'};
+const ZS=['없고','없어','없음','없어요','다없어','떨어졌어','떨어짐'];
+const BU=['박스','케이스','팩'];
+
+function nk(s){return String(s||'').replace(/\s+/g,'').toLowerCase();}
+function edist(a,b){const m=a.length,n=b.length;const dp=Array.from({length:m+1},(_,i)=>Array.from({length:n+1},(_,j)=>i===0?j:j===0?i:0));for(let i=1;i<=m;i++)for(let j=1;j<=n;j++)dp[i][j]=a[i-1]===b[j-1]?dp[i-1][j-1]:1+Math.min(dp[i-1][j],dp[i][j-1],dp[i-1][j-1]);return dp[m][n];}
+function dyn(l){return l<=3?1:l<=6?2:3;}
+
+function applyTypo(text,rules){
+  let s=String(text||'');
+  for(const r of rules){if(!r.enabled)continue;
+    if(r.rule_type==='EXACT'){const f=r.from_text.replace(/[.*+?^${}()|[\]\\]/g,'\\$&');s=s.replace(new RegExp('(^|\\s)'+f+'(?=\\s|$)','g'),'$1'+r.to_text);}
+    else if(r.rule_type==='CONTAINS')s=s.split(r.from_text).join(r.to_text);}
+  return s;
+}
+
+function preprocess(text){
+  let s=text.trim();
+  s=s.replace(/(\d)(봉지|봉|박스|케이스|팩|캔|통|병|개|킬로|kg|리터|롤|묶음|다발|판|장)/g,'$1 $2');
+  const qp=Object.keys(QW).sort((a,b)=>b.length-a.length).join('|');
+  s=s.replace(new RegExp('('+qp+')(봉지|봉|박스|케이스|팩|캔|통|병|개|킬로|kg|리터|롤|묶음)','g'),'$1 $2');
+  for(const z of ZS)s=s.replace(new RegExp('('+z+')\\s+([가-힣])','g'),'$1 | $2');
+  for(const c of['하고','이랑','랑','그리고'])s=s.replace(new RegExp('\\s*'+c+'\\s*','g'),' | ');
+  for(const j of['을','를','은','는','이','가','의','씩','도','만'])
+    s=s.replace(new RegExp('([가-힣]{2,})'+j+'(\\s||$)','g'),(m,w,t)=>(QW[w]!==undefined||UNITS.includes(w))?m:w+t);
+  const up=UNITS.join('|');
+  s=s.replace(new RegExp('('+up+')([가-힣]{2,})','g'),'$1 | $2');
+  s=s.replace(new RegExp('('+up+') ([가-힣]{2,})','g'),(m,u,n)=>QW[n]!==undefined||UNITS.includes(n)?m:u+' | '+n);
+  return s.replace(/\s{2,}/g,' ').trim();
+}
+
+function lmatch(tokens,start,items){
+  let best=null;
+  for(let take=Math.min(5,tokens.length-start);take>=1;take--){
+    const cand=nk(tokens.slice(start,start+take).join(''));
+    for(const it of items){if(nk(it.item_name)===cand){if(!best||take>best.tokenCount)best={name:it.item_name,tokenCount:take,fuzzy:false};break;}}
+    if(best?.tokenCount===take)return best;
+  }
+  if(best)return best;
+  const tok=nk(tokens[start]);
+  if(tok.length>=3){let fb=null;for(const it of items){const t=nk(it.item_name),thr=dyn(t.length),d=edist(tok,t);if(d>0&&d<=thr&&(!fb||d<fb.dist))fb={name:it.item_name,tokenCount:1,fuzzy:true,dist:d,spoken:tokens[start]};}if(fb)return fb;}
+  return null;
+}
+
+function parseEntries(raw,items){
+  const segs=preprocess(raw).split('|').map(s=>s.trim()).filter(Boolean);const results=[];
+  for(const seg of segs){
+    const tokens=seg.split(/\s+/).filter(Boolean);let cmd='SET',filtered=[];
+    for(const t of tokens){if(CM[t])cmd=CM[t];else filtered.push(t);}
+    const hz=filtered.some(t=>ZS.includes(t));const clean=filtered.filter(t=>!ZS.includes(t));
+    if(!clean.length)continue;
+    let iN='',sp='',qty=hz?0:null,unit='',fromDB=false,i=0;
+    while(i<clean.length){const tok=clean[i];
+      if(UNITS.includes(tok)){unit=tok;i++;continue;}
+      if(!isNaN(parseFloat(tok))){qty=parseFloat(tok);i++;continue;}
+      if(QW[tok]!==undefined&&iN){qty=QW[tok];i++;continue;}
+      const m=lmatch(clean,i,items);
+      if(m){if(iN){results.push(mkE(iN,qty,unit,cmd,seg,hz,sp));qty=null;unit='';fromDB=false;sp='';}iN=m.name;sp=m.spoken||m.name;fromDB=!m.fuzzy;i+=m.tokenCount;continue;}
+      let abs=false;
+      for(const[qw,qv]of Object.entries(QW)){if(tok.endsWith(qw)&&tok.length>qw.length){const cand=tok.slice(0,-qw.length);const db2=lmatch([cand],0,items);if(db2||iN){if(iN&&!db2){iN+=cand;}else{if(iN){results.push(mkE(iN,qty,unit,cmd,seg,hz,sp));qty=null;unit='';fromDB=false;sp='';}iN=db2?db2.name:cand;sp=db2?.spoken||iN;}qty=qv;abs=true;break;}}}
+      if(!abs){if(fromDB&&iN){results.push(mkE(iN,qty,unit,cmd,seg,hz,sp));qty=null;unit='';fromDB=false;sp='';iN=tok;}else iN+=tok;}
+      i++;
+    }
+    if(iN)results.push(mkE(iN,qty,unit,cmd,seg,hz,sp));
+  }
+  return results;
+}
+
+function mkE(name,qty,unit,cmd,raw,hz,spoken){
+  const fq=hz?0:(qty??1);const fc=hz?'SET':cmd;
+  const LBL={SET:'재고',ADD:'입고',USE:'사용',ORDER:'발주'};
+  return{item:name.trim(),spoken:(spoken||name).trim(),isFuzzy:nk(spoken||name)!==nk(name),qty:fq,unit:unit||'',cmd:LBL[fc]||'재고',mode:fc,raw_text:raw};
+}
+
+function mergeSame(entries){
+  const map=new Map();
+  for(const e of entries){const k=nk(e.item);if(!map.has(k))map.set(k,{...e});else{const p=map.get(k);if(e.cmd==='ADD'||p.cmd==='ADD'){p.qty+=e.qty;p.cmd='ADD';}else p.qty=e.qty;}}
+  return[...map.values()];
+}
+
+/* ─ 미리보기 ─ */
+function showPv(rawText,entries,imap,items){
+  _pvData={rawText,entries:[...entries],imap,items,forceNew:new Set()};
+  document.getElementById('pvRaw').textContent=rawText;
+  const list=document.getElementById('pvList');list.innerHTML='';
+  entries.forEach((ent,idx)=>{
+    const matched=imap.get(nk(ent.item));const isM=ent.isFuzzy&&matched;
+    const similar=!matched&&!isM?items.find(it=>{const a=nk(it.item_name),b=nk(ent.item);return a!==b&&(a.includes(b)||b.includes(a)||edist(a,b)<=2)&&Math.abs(a.length-b.length)<3;}):null;
+    let cls,bdg,det,ex='';
+    if(matched&&!isM){cls='known';bdg='<span class="bdg bdg-ok">기존</span>';det=ent.qty+ent.unit+' → '+ent.cmd;}
+    else if(isM){cls='new-it';bdg='<span class="bdg bdg-fz">혹시 "'+ent.item+'"?</span>';det='"'+ent.spoken+'" 입력 → '+ent.qty+ent.unit+' · ✏️로 수정 시 자동학습';
+      ex='<button class="btn-fn" id="fn_'+idx+'" onclick="forceNew('+idx+',\''+ent.item.replace(/'/g,"&#39;")+'\')">신규로 등록 ('+ent.spoken+')</button>';}
+    else if(similar){cls='new-it';bdg='<span class="bdg bdg-fz">혹시 "'+similar.item_name+'"?</span>';det='신규탭 대기 · ✏️로 수정 시 자동학습';
+      ex='<button class="btn-fn" id="fn_'+idx+'" onclick="forceNew('+idx+',\''+similar.item_name.replace(/'/g,"&#39;")+'\')">신규로 등록</button>';}
+    else{cls='new-it';bdg='<span class="bdg bdg-new">신규→대기</span>';det=ent.qty+ent.unit+' · 신규탭에서 승인 필요';}
+    const div=document.createElement('div');div.className='pv-item '+cls;div.id='pi_'+idx;
+    div.innerHTML='<div class="pv-info" style="flex:1"><div class="pv-name"><span id="pn_'+idx+'">'+ent.item+'</span><button onclick="editPN('+idx+')" style="background:none;border:1px solid var(--border);border-radius:4px;padding:1px 5px;font-size:11px;color:var(--text-muted);cursor:pointer">✏️</button></div><div class="pv-detail" id="pd_'+idx+'">'+det+'</div>'+ex+'</div>'+bdg+'<button class="pv-del" onclick="rmPv('+idx+')">✕</button>';
+    list.appendChild(div);
+  });
+  document.getElementById('pvOv').classList.add('open');
+}
+
+function editPN(idx){
+  const el=document.getElementById('pn_'+idx);if(!el)return;
+  const cur=_pvData.entries[idx]?.item||'';
+  const inp=document.createElement('input');inp.value=cur;
+  inp.style.cssText='font-size:14px;font-weight:600;border:1px solid var(--accent);border-radius:4px;padding:2px 6px;background:var(--surface2);color:var(--text);outline:none;width:140px';
+  inp.onblur=()=>{const v=inp.value.trim();if(v&&_pvData.entries[idx]){const e=_pvData.entries[idx];if(!e.originalSpoken)e.originalSpoken=e.spoken||e.item;e.item=e.item_name=v;e.isFuzzy=false;el.textContent=v;const b=document.getElementById('pi_'+idx)?.querySelector('.bdg');if(b){b.className='bdg bdg-ok';b.textContent='수정됨';}}el.style.display='';inp.remove();};
+  inp.onkeydown=e=>{if(e.key==='Enter')inp.blur();if(e.key==='Escape'){inp.value=cur;inp.blur();}};
+  el.style.display='none';el.parentNode.insertBefore(inp,el);inp.focus();inp.select();
+}
+
+function forceNew(idx,mn){
+  _pvData.forceNew.add(idx);const e=_pvData.entries[idx];
+  if(e){if(!e.originalSpoken)e.originalSpoken=e.spoken||e.item;if(e.spoken&&e.spoken!==e.item){e.item=e.item_name=e.spoken;e.isFuzzy=false;}}
+  const card=document.getElementById('pi_'+idx);const b=card?.querySelector('.bdg');
+  if(b){b.className='bdg bdg-new';b.textContent='신규 등록';}
+  const d=document.getElementById('pd_'+idx);if(d)d.textContent='"'+(e?.item||'')+'\" — 신규 품목으로 직접 등록';
+  document.getElementById('fn_'+idx)?.remove();
+}
+
+function rmPv(idx){_pvData.entries[idx]=null;_pvData.forceNew?.delete(idx);const el=document.getElementById('pi_'+idx);if(el){el.style.opacity='.3';el.querySelector('.pv-del').disabled=true;el.querySelector('[onclick*="forceNew"]')?.remove();}}
+function closePv(){document.getElementById('pvOv').classList.remove('open');_pvData=null;}
+
+async function confirmPv(){
+  if(!_pvData)return;const{rawText,entries,imap,items,forceNew}=_pvData;
+  const btn=document.getElementById('confBtn');btn.disabled=true;btn.innerHTML='<span class="spin"></span>';
+  try{
+    const active=entries.filter(e=>e!==null);const msgs=[];
+    for(const ent of active){
+      const oi=entries.indexOf(ent);const isF=forceNew?.has(oi);
+      const matched=imap.get(nk(ent.item));const isM=ent.isFuzzy&&matched;
+      if(!matched||(isM&&isF)){
+        const similar=(!isF&&!matched)?items.find(it=>{const a=nk(it.item_name),b=nk(ent.item);return a!==b&&(a.includes(b)||b.includes(a)||edist(a,b)<=2)&&Math.abs(a.length-b.length)<3;}):null;
+        if(similar&&!isF){await db.from('new_items_queue').insert({store_id:SID,raw_text:rawText,candidate_item:ent.item,parsed_qty:ent.qty,unit:ent.unit,action_type:ent.mode});msgs.push({text:'🔍 "'+ent.item+'" → 혹시 "'+similar.item_name+'"? 신규 탭에서 확인',type:'warn'});}
+        else if(isM&&!isF){await db.from('new_items_queue').insert({store_id:SID,raw_text:rawText,candidate_item:ent.item,parsed_qty:ent.qty,unit:ent.unit,action_type:ent.mode});msgs.push({text:'🔍 "'+ent.item+'" → 혹시 "'+matched.item_name+'"? 신규 탭에서 확인',type:'warn'});}
+        else{
+          const iq=ent.mode==='ADD'?ent.qty:ent.mode==='USE'?-ent.qty:ent.mode==='ORDER'?0:ent.qty;
+          const{data:ni}=await db.from('items').insert({store_id:SID,item_name:ent.item,unit:ent.unit||'개',pack_factor:1,target_qty:0,current_qty:iq}).select().single();
+          if(ni){_items.push(ni);
+            await db.from('kitchen_operations').insert({store_id:SID,item_id:ni.item_id,item_name:ni.item_name,action_type:'stock_check',quantity:iq,unit:ent.unit,qty_after:iq,input_method:'voice',raw_text:rawText});
+            const lf=ent.originalSpoken||ent.spoken,lt=ent.item;
+            if(lf&&lt&&nk(lf)!==nk(lt)){const{data:ex}=await db.from('typo_dict').select('typo_id').eq('from_text',lf).eq('to_text',lt).limit(1);
+              if(!ex?.length){const{data:nr}=await db.from('typo_dict').insert({store_id:SID,from_text:lf,to_text:lt,rule_type:'EXACT',enabled:true,priority:40,note:'미리보기 자동학습'}).select().single();if(nr)_typos.push(nr);}}
+          }
+          msgs.push({text:'🆕 '+ent.item+' '+ent.qty+(ent.unit||'')+' — 신규 등록 완료',type:'ok'});
+        }
+        continue;
+      }
+      const cur=Number(matched.current_qty)||0;const pack=Number(matched.pack_factor)||1;
+      const dc=pack>1&&BU.includes(ent.unit)&&!BU.includes(matched.unit||'');const app=dc?ent.qty*pack:ent.qty;
+      let nq=cur,lbl='',at='stock_check';
+      if(ent.cmd==='입고'){nq=cur+app;lbl='입고';at='inbound';}
+      else if(ent.cmd==='사용'){nq=cur-app;lbl='사용';at='consume';}
+      else if(ent.cmd==='발주'){nq=cur;lbl='발주';at='order';}
+      else if(ent.mode==='ADD'){nq=cur+app;lbl='추가';at='inbound';}
+      else{nq=app;lbl='재고';at='stock_check';}
+      if(ent.cmd!=='발주'){await db.from('items').update({current_qty:nq,updated_at:new Date().toISOString()}).eq('item_id',matched.item_id);const loc=_items.find(x=>x.item_id===matched.item_id);if(loc)loc.current_qty=nq;}
+      await db.from('kitchen_operations').insert({store_id:SID,item_id:matched.item_id,item_name:matched.item_name,action_type:at,quantity:ent.qty,unit:ent.unit,qty_before:cur,qty_after:nq,input_method:'voice',raw_text:rawText});
+      const cn=dc?' ('+ent.qty+ent.unit+'×'+pack+'='+app+matched.unit+')':'';
+      const icon=ent.cmd==='입고'?'📦':ent.cmd==='사용'?'🍳':ent.cmd==='발주'?'🧾':'✅';
+      msgs.push({text:icon+' '+matched.item_name+' '+ent.qty+ent.unit+cn+' → '+nq+matched.unit+' ('+lbl+')',type:'ok'});
+    }
+    closePv();msgs.forEach(m=>addRes(rawText,m.text,m.type));
+  }catch(e){showToast('저장 실패: '+e.message);}
+  finally{btn.disabled=false;btn.textContent='✅ 저장하기';}
+}
+
+/* ─ 결과 ─ */
+function addRes(raw,msg,type){
+  const list=document.getElementById('resList');const now=new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
+  const card=document.createElement('div');card.className='res-card '+(type||'ok');
+  card.innerHTML='<div class="res-raw">'+raw+'</div><div class="res-msg">'+msg+'</div><div class="res-time">'+now+'</div>';
+  list.insertBefore(card,list.firstChild);
+}
+
+/* ─ 발주 ─ */
+function renderOrder(){
+  const list=document.getElementById('orderList');
+  const targets=_items.filter(it=>Number(it.current_qty)<Number(it.target_qty));
+  if(!targets.length){list.innerHTML='<div class="no-item">발주 필요 품목 없음</div>';return;}
+  list.innerHTML=targets.map(it=>{const vn=_vendors.find(v=>v.vendor_id===it.vendor_id)?.vendor_name||'';return'<div class="ord-card"><div class="ord-name">'+it.item_name+'</div><div class="ord-qty">현재 '+it.current_qty+it.unit+' / 목표 '+it.target_qty+it.unit+'</div>'+(vn?'<div class="ord-v">📦 '+vn+'</div>':'')+'</div>';}).join('');
+}
+
+/* ─ 신규 ─ */
+async function loadNew(){
+  const el=document.getElementById('newList');el.innerHTML='<div class="no-item"><span class="spin dk"></span></div>';
+  const{data}=await db.from('new_items_queue').select('*').eq('store_id',SID).eq('status','PENDING').order('created_at',{ascending:false});
+  if(!data?.length){el.innerHTML='<div class="no-item">✅ 미등록 품목 없음</div>';return;}
+  el.innerHTML=data.map(q=>'<div class="q-card" id="qc_'+q.queue_id+'"><input class="q-inp" id="qm_'+q.queue_id+'" value="'+q.candidate_item+'"><div class="q-raw">'+(q.raw_text||'')+'</div><div class="q-acts"><button class="q-ok" onclick="approveQ('+q.queue_id+')">✅ 등록</button><button class="q-no" onclick="rejectQ('+q.queue_id+')">✕</button></div></div>').join('');
+}
+
+async function approveQ(id){
+  const memo=document.getElementById('qm_'+id)?.value.trim();if(!memo){showToast('품목명을 입력해 주세요.');return;}
+  const{data:row}=await db.from('new_items_queue').select('*').eq('queue_id',id).single();
+  if(row&&row.candidate_item!==memo){const{data:ex}=await db.from('typo_dict').select('typo_id').eq('from_text',row.candidate_item).eq('to_text',memo).limit(1);
+    if(!ex?.length){const{data:nr}=await db.from('typo_dict').insert({store_id:SID,from_text:row.candidate_item,to_text:memo,rule_type:'EXACT',enabled:true,priority:50,note:'신규탭 승인 자동학습'}).select().single();if(nr)_typos.push(nr);}}
+  const{data:ex2}=await db.from('items').select('item_id').eq('item_name',memo).eq('store_id',SID).limit(1);
+  if(!ex2?.length){const{data:ni}=await db.from('items').insert({store_id:SID,item_name:memo,unit:row?.unit||'개',pack_factor:1,target_qty:0,current_qty:Number(row?.parsed_qty)||0}).select().single();if(ni)_items.push(ni);}
+  await db.from('new_items_queue').update({status:'DONE',memo}).eq('queue_id',id);
+  document.getElementById('qc_'+id)?.remove();showToast('✅ "'+memo+'" 등록 완료');
+}
+
+async function rejectQ(id){await db.from('new_items_queue').update({status:'REJECTED'}).eq('queue_id',id);document.getElementById('qc_'+id)?.remove();showToast('거절됨');}
+
+/* ─ 목록 ─ */
+function vName(id){return _vendors.find(v=>v.vendor_id===id)?.vendor_name||'';}
+
+function renderList(){
+  const body=document.getElementById('itemListBody');
+  const q=document.getElementById('lstSrch')?.value.trim()||'';
+  const vf=document.getElementById('vFilter')?.value||'';
+  const sf=document.getElementById('sFilter')?.value||'';
+  let items=[..._items];
+  if(q)items=items.filter(it=>it.item_name.includes(q)||nk(it.item_name).includes(nk(q)));
+  if(vf)items=items.filter(it=>vName(it.vendor_id)===vf);
+  if(sf==='low')items=items.filter(it=>Number(it.current_qty)<Number(it.target_qty)&&Number(it.current_qty)>0);
+  if(sf==='zero')items=items.filter(it=>Number(it.current_qty)<=0);
+  items.sort((a,b)=>{const aq=Number(a.current_qty)||0,bq=Number(b.current_qty)||0,av=vName(a.vendor_id)||'ㅎ',bv=vName(b.vendor_id)||'ㅎ';
+    if(_curSort==='name')return a.item_name<b.item_name?-1:1;
+    if(_curSort==='vendor')return av<bv?-1:av>bv?1:(a.item_name<b.item_name?-1:1);
+    if(_curSort==='qty-asc')return aq-bq;if(_curSort==='qty-desc')return bq-aq;
+    if(_curSort==='updated')return(b.updated_at||'')>(a.updated_at||'')?1:-1;return 0;});
+  document.getElementById('lstCnt').textContent=items.length+'개';
+  // 거래처 드롭다운
+  const vsel=document.getElementById('vFilter');const cv=vsel.value;while(vsel.options.length>1)vsel.remove(1);
+  const used=new Set(items.map(it=>vName(it.vendor_id)).filter(Boolean));[...used].sort().forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n;vsel.appendChild(o);});vsel.value=cv;
+  if(!items.length){body.innerHTML='<div class="no-item">해당 품목 없음</div>';return;}
+  const byV=_curSort==='vendor';let html='',lastV=null;
+  items.forEach(it=>{
+    const qty=Number(it.current_qty)||0,tgt=Number(it.target_qty)||0;
+    const qc=qty<=0?'zero':qty<tgt?'low':'';const vn=vName(it.vendor_id);
+    const vOs=_vendors.map(v=>'<option value="'+v.vendor_id+'"'+(v.vendor_id===it.vendor_id?' selected':'')+'>'+v.vendor_name+'</option>').join('');
+    const v2Os=_vendors.map(v=>'<option value="'+v.vendor_id+'"'+(v.vendor_id===it.vendor_id_2?' selected':'')+'>'+v.vendor_name+'</option>').join('');
+    const v3Os=_vendors.map(v=>'<option value="'+v.vendor_id+'"'+(v.vendor_id===it.vendor_id_3?' selected':'')+'>'+v.vendor_name+'</option>').join('');
+    const safe=it.item_name.replace(/'/g,"&#39;");
+    if(byV&&vn!==lastV){html+='<div class="vg-lbl">📦 '+(vn||'거래처 미지정')+'</div>';lastV=vn;}
+    html+='<div class="itm-card '+qc+'" id="ic_'+it.item_id+'"><div class="itm-acts"><button class="bi" onclick="openEdt('+it.item_id+')">✏️</button><button class="bi" onclick="delItem('+it.item_id+',\''+safe+'\')" style="color:var(--red)">🗑</button></div><div class="itm-name" id="in_'+it.item_id+'">'+it.item_name+'</div><div class="itm-qty-row"><span class="itm-qty '+qc+'" id="iq_'+it.item_id+'">'+qty+'</span><span class="itm-unit">'+( it.unit||'')+'</span>'+(it.pack_factor>1?'<span style="font-size:10px;color:var(--text-muted)">×'+it.pack_factor+'</span>':'')+'</div>'+(vn?'<div class="itm-vendor">'+vn+'</div>':'')+'<div class="edt-form" id="ef_'+it.item_id+'"><input class="ei" id="en_'+it.item_id+'" value="'+it.item_name+'" placeholder="품목명"><div class="ei-row"><input class="ei" id="eq_'+it.item_id+'" value="'+qty+'" type="number" placeholder="재고"><input class="ei" id="eu_'+it.item_id+'" value="'+(it.unit||'')+'" placeholder="단위"><input class="ei" id="ep_'+it.item_id+'" value="'+(it.pack_factor||1)+'" type="number" placeholder="박스당" style="max-width:65px"></div><select class="esel" id="ev1_'+it.item_id+'"><option value="">1순위 없음</option>'+vOs+'</select><select class="esel" id="ev2_'+it.item_id+'"><option value="">2순위 없음</option>'+v2Os+'</select><select class="esel" id="ev3_'+it.item_id+'"><option value="">3순위 없음</option>'+v3Os+'</select><input class="ei" id="et_'+it.item_id+'" value="'+(it.target_qty||0)+'" type="number" placeholder="목표재고"><div class="e-acts"><button class="e-save" onclick="saveEdt('+it.item_id+')">저장</button><button class="e-cancel" onclick="closeEdt('+it.item_id+')">취소</button></div></div></div>';
+  });
+  body.innerHTML=html;
+}
+
+function applyFilter(){renderList();}
+function setSort(k){_curSort=k;document.querySelectorAll('.srt').forEach(b=>b.classList.remove('active'));document.getElementById('sort-'+k)?.classList.add('active');renderList();}
+function openEdt(id){document.getElementById('ef_'+id)?.classList.add('open');}
+function closeEdt(id){document.getElementById('ef_'+id)?.classList.remove('open');}
+
+async function saveEdt(id){
+  const name=document.getElementById('en_'+id)?.value.trim();
+  const qty=parseFloat(document.getElementById('eq_'+id)?.value)||0;
+  const unit=document.getElementById('eu_'+id)?.value.trim();
+  const pack=parseFloat(document.getElementById('ep_'+id)?.value)||1;
+  const v1=parseInt(document.getElementById('ev1_'+id)?.value)||null;
+  const v2=parseInt(document.getElementById('ev2_'+id)?.value)||null;
+  const v3=parseInt(document.getElementById('ev3_'+id)?.value)||null;
+  const tgt=parseFloat(document.getElementById('et_'+id)?.value)||0;
+  if(!name){showToast('품목명을 입력해 주세요.');return;}
+  try{
+    await db.from('items').update({item_name:name,current_qty:qty,unit,pack_factor:pack,vendor_id:v1,vendor_id_2:v2,vendor_id_3:v3,target_qty:tgt,updated_at:new Date().toISOString()}).eq('item_id',id);
+    const loc=_items.find(x=>x.item_id===id);if(loc)Object.assign(loc,{item_name:name,current_qty:qty,unit,pack_factor:pack,vendor_id:v1,vendor_id_2:v2,vendor_id_3:v3,target_qty:tgt});
+    closeEdt(id);renderList();showToast('✅ '+name+' 수정 완료');
+  }catch(e){showToast('수정 실패: '+e.message);}
+}
+
+async function delItem(id,name){
+  if(!confirm('"'+name+'"을 삭제할까요?'))return;
+  await db.from('items').delete().eq('item_id',id);
+  _items=_items.filter(x=>x.item_id!==id);renderList();showToast('🗑 삭제됨');
+}
+
+/* ─ Enter 키 ─ */
+document.addEventListener('keydown',e=>{
+  if(e.key!=='Enter')return;
+  const atab=document.querySelector('.tab.active')?.id;
+  const t=document.getElementById(atab==='tab-input'?'mainInp':'cmdInp');
+  if(document.activeElement===t)handleSend();
+});
+
+/* ─ 시작 ─ */
+setTimeout(()=>init(),800);
+</script>
+</body>
+</html>
