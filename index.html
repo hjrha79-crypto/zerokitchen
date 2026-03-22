@@ -403,7 +403,7 @@ async function processRequest(json) {
             // 캐시 업데이트
             item.current_qty = newQty;
             if (unit) item.unit = unit;
-            updated.push({ name: item.item_name, quantity: newQty, unit: item.unit });
+            updated.push({ name: item.item_name, quantity: newQty, unit: item.unit, action });
 
           } else {
             // 신규 품목 — items에 추가
@@ -423,7 +423,7 @@ async function processRequest(json) {
             });
 
             _items.push(newItem);
-            updated.push({ name, quantity: qty, unit: unit || '개', is_new: true });
+            updated.push({ name, quantity: qty, unit: unit || '개', is_new: true, action: req.action_type || json.action_type || 'stock_check' });
           }
         }
 
@@ -1063,12 +1063,14 @@ function renderReviewRows() {
 
 // 확인 모드 — 텍스트 크게, 정보 최소화
 function renderReviewRead(body) {
-  body.innerHTML = _draftItems.map((it) => `
+  body.innerHTML = _draftItems.map((it) => {
+    const a = _ACTION_LABEL[it.action] || _ACTION_LABEL['stock_check'];
+    return `
     <div class="rc-row">
       <span class="rc-item-name">${it.item_name || '?'}</span>
-      <span class="rc-item-qty">${it.quantity||1}${it.unit||'개'}</span>
-    </div>`
-  ).join('');
+      <span class="rc-item-qty">${a.prefix}${it.quantity||1}${it.unit||'개'} (${a.label})</span>
+    </div>`;
+  }).join('');
 }
 
 // 수정 모드 — 편집 가능
@@ -1215,9 +1217,10 @@ function formatResult(result) {
   if (result.status === 'error') return '❌ ' + result.message;
   switch(result.response_type) {
     case 'inventory_update_result':
-      return (result.updated_items||[]).map(it =>
-        `${it.is_new ? '🆕' : '✅'} ${it.name} ${it.quantity}${it.unit||''}`
-      ).join('\n') + (result.errors?.length ? '\n' + result.errors.map(e=>`❌ ${e.name}: ${e.reason}`).join('\n') : '');
+      return (result.updated_items||[]).map(it => {
+        const a = _ACTION_LABEL[it.action] || _ACTION_LABEL['stock_check'];
+        return `${it.is_new ? '🆕' : '✅'} ${it.name} ${a.prefix}${it.quantity}${it.unit||''} (${a.label})`;
+      }).join('\n') + (result.errors?.length ? '\n' + result.errors.map(e=>`❌ ${e.name}: ${e.reason}`).join('\n') : '');
     case 'inventory_state':
       return (result.items||[]).map(it => `📦 ${it.name}: ${it.quantity}${it.unit||''}`).join('\n') || '품목 없음';
     case 'order_suggestion':
@@ -1595,8 +1598,7 @@ async function confirmPending(id) {
   if (card) {
     if (result.status === 'success' || result.status === 'partial') {
       const lines = result.updated_items.map(it => {
-        const action = (op.req.items.find(r => r.name === it.name) || {}).action_type || 'stock_check';
-        const a = _ACTION_LABEL[action] || _ACTION_LABEL['stock_check'];
+        const a = _ACTION_LABEL[it.action] || _ACTION_LABEL['stock_check'];
         return `${it.is_new ? '🆕' : '✅'} ${it.name} ${a.prefix}${it.quantity}${it.unit} (${a.label})`;
       }).join('<br>');
       card.className = 'res-card ok';
