@@ -403,7 +403,7 @@ async function processRequest(json) {
             // 캐시 업데이트
             item.current_qty = newQty;
             if (unit) item.unit = unit;
-            updated.push({ name: item.item_name, quantity: newQty, unit: item.unit, action });
+            updated.push({ name: item.item_name, quantity: newQty, inputQty: qty, unit: item.unit, action });
 
           } else {
             // 신규 품목 — items에 추가
@@ -423,7 +423,7 @@ async function processRequest(json) {
             });
 
             _items.push(newItem);
-            updated.push({ name, quantity: qty, unit: unit || '개', is_new: true, action: req.action_type || json.action_type || 'stock_check' });
+            updated.push({ name, quantity: qty, inputQty: qty, unit: unit || '개', is_new: true, action: req.action_type || json.action_type || 'stock_check' });
           }
         }
 
@@ -810,9 +810,9 @@ const _NUM_WORDS = {
 };
 const _UNITS = ['봉지','봉','박스','케이스','팩','캔','통','병','킬로','kg','g','그램','인분','장','묶음','롤','판','다발','개'];
 const _UNIT_MAP = {'봉':'봉지','봉지':'봉지','박스':'박스','케이스':'박스','팩':'팩','캔':'캔','통':'통','병':'병','kg':'kg','킬로':'kg','g':'g','그램':'g','인분':'인분','장':'장','묶음':'묶음','롤':'롤','판':'판','다발':'다발','개':'개'};
-const _ACTION_WORDS = ['추가','입고','넣어','넣기','빼기','차감','사용','발주','주문','받았어','들어왔어','썼어','뺐어'];
+const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','빼기','차감','사용','발주','주문','받았어','들어왔어','썼어','뺐어'];
 const _ACTION_MAP = {
-  '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','받았어':'inbound','들어왔어':'inbound',
+  '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','넣었어':'inbound','받았어':'inbound','들어왔어':'inbound',
   '빼기':'consume','차감':'consume','사용':'consume','썼어':'consume','뺐어':'consume',
   '발주':'order','주문':'order',
 };
@@ -851,10 +851,10 @@ function _ruleNormalize(text) {
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
 
   // 5. 동작어 → 마커 치환 (아이템별 action 보존)
-  //    수량+단위 뒤 동작어: "\x01action\x01"로 치환
   const awSorted = _ACTION_WORDS.slice().sort((a,b)=>b.length-a.length);
+  //    수량+단위 뒤 동작어 (공백 있든 없든): "\x01action\x01"로 치환
   for (const aw of awSorted) {
-    s = s.replace(new RegExp('(\\d+\\s*(?:' + up + ')?)\\s+' + aw + '(?=\\s|$)', 'g'),
+    s = s.replace(new RegExp('(\\d+\\s*(?:' + up + ')?)\\s*' + aw + '(?=\\s|$)', 'g'),
       function(m, qty){ return qty + ' \x01' + (_ACTION_MAP[aw]||'stock_check') + '\x01'; });
   }
   //    문장 앞뒤에 단독으로 나오는 동작어도 마커 치환
@@ -1235,7 +1235,8 @@ function formatResult(result) {
     case 'inventory_update_result':
       return (result.updated_items||[]).map(it => {
         const a = _ACTION_LABEL[it.action] || _ACTION_LABEL['stock_check'];
-        return `${it.is_new ? '🆕' : '✅'} ${it.name} ${a.prefix}${it.quantity}${it.unit||''} (${a.label})`;
+        const displayQty = it.inputQty != null ? it.inputQty : it.quantity;
+        return `${it.is_new ? '🆕' : '✅'} ${it.name} ${a.prefix}${displayQty}${it.unit||''} (${a.label}) → 현재 ${it.quantity}${it.unit||''}`;
       }).join('\n') + (result.errors?.length ? '\n' + result.errors.map(e=>`❌ ${e.name}: ${e.reason}`).join('\n') : '');
     case 'inventory_state':
       return (result.items||[]).map(it => `📦 ${it.name}: ${it.quantity}${it.unit||''}`).join('\n') || '품목 없음';
@@ -1615,7 +1616,8 @@ async function confirmPending(id) {
     if (result.status === 'success' || result.status === 'partial') {
       const lines = result.updated_items.map(it => {
         const a = _ACTION_LABEL[it.action] || _ACTION_LABEL['stock_check'];
-        return `${it.is_new ? '🆕' : '✅'} ${it.name} ${a.prefix}${it.quantity}${it.unit} (${a.label})`;
+        const displayQty = it.inputQty != null ? it.inputQty : it.quantity;
+        return `${it.is_new ? '🆕' : '✅'} ${it.name} ${a.prefix}${displayQty}${it.unit} (${a.label}) → 현재 ${it.quantity}${it.unit}`;
       }).join('<br>');
       card.className = 'res-card ok';
       card.innerHTML = `<div class="res-raw">${op.raw}</div><div class="res-msg">${lines}</div><div class="res-time">${new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}</div>`;
