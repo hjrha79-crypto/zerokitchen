@@ -801,6 +801,11 @@ const _NUM_WORDS = {
 const _UNITS = ['봉지','봉','박스','케이스','팩','캔','통','병','킬로','kg','g','그램','인분','장','묶음','롤','판','다발','개'];
 const _UNIT_MAP = {'봉':'봉지','봉지':'봉지','박스':'박스','케이스':'박스','팩':'팩','캔':'캔','통':'통','병':'병','kg':'kg','킬로':'kg','g':'g','그램':'g','인분':'인분','장':'장','묶음':'묶음','롤':'롤','판':'판','다발':'다발','개':'개'};
 const _ACTION_WORDS = ['추가','입고','넣어','넣기','빼기','차감','사용','발주','주문','받았어','들어왔어','썼어','뺐어'];
+const _ACTION_MAP = {
+  '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','받았어':'inbound','들어왔어':'inbound',
+  '빼기':'consume','차감':'consume','사용':'consume','썼어':'consume','뺐어':'consume',
+  '발주':'order','주문':'order',
+};
 const _ALIAS = {
   '개깐마늘':'깐마늘','개깐 마늘':'깐마늘','까마늘':'깐마늘',
   '파마산 치즈':'파마산치즈','고르곤 졸라':'고르곤졸라','고르곤':'고르곤졸라',
@@ -835,14 +840,23 @@ function _ruleNormalize(text) {
   s = s.replace(/([가-힣]{2,})(을|를|은|는|이|가)(\s|,|$)/g,
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
 
-  // 5. 동작어 제거 — 단위/수량 뒤에 오는 동작어만 제거 (품목명 손상 방지)
+  // 5. 동작어 감지 및 제거 — 단위/수량 뒤에 오는 동작어만 제거 (품목명 손상 방지)
+  let detectedAction = 'stock_check';
   for (const aw of _ACTION_WORDS) {
     // "수량+단위 뒤 동작어" 패턴만 제거
     s = s.replace(new RegExp('(\\d+\\s*(?:' + up + ')?)\\s+' + aw + '(?=\\s|$)', 'g'),
-      function(m, qty){ return qty; });
+      function(m, qty){ detectedAction = _ACTION_MAP[aw] || 'stock_check'; return qty; });
+  }
+  // 문장 앞뒤에 단독으로 나오는 동작어도 감지
+  for (const aw of _ACTION_WORDS) {
+    const re = new RegExp('(^|\\s)' + aw + '(\\s|$)');
+    if (re.test(s)) {
+      detectedAction = _ACTION_MAP[aw] || 'stock_check';
+      s = s.replace(re, '$1$2');
+    }
   }
 
-  return s.replace(/\s{2,}/g,' ').trim();
+  return { text: s.replace(/\s{2,}/g,' ').trim(), action: detectedAction };
 }
 
 function _ruleTokenize(s) {
@@ -869,14 +883,14 @@ function _ruleMapItem(raw) {
 }
 
 function ruleEngine(text) {
-  const norm = _ruleNormalize(text);
+  const { text: norm, action: detectedAction } = _ruleNormalize(text);
   const segs = _ruleTokenize(norm);
   if (!segs.length) return { results:[], needsFallback:true };
   const results=[], fails=[];
   for (const seg of segs) {
     const name=_ruleMapItem(seg.rawName);
     if (!name||!name.trim()) { fails.push(seg); continue; }
-    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:'stock_check', confidence:'high' });
+    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:detectedAction, confidence:'high' });
   }
   const conf = results.length / Math.max(segs.length, 1);
   return { results, needsFallback: conf < 0.7 || !results.length, confidence: conf };
