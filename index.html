@@ -374,9 +374,19 @@ async function processRequest(json) {
           );
 
           if (item) {
-            // 기존 품목 — current_qty 업데이트
+            // action_type에 따라 수량 계산
+            const action = req.action_type || json.action_type || 'stock_check';
+            let newQty;
+            if (action === 'inbound') {
+              newQty = item.current_qty + qty;
+            } else if (action === 'consume') {
+              newQty = Math.max(0, item.current_qty - qty);
+            } else {
+              newQty = qty; // stock_check: 직접 설정
+            }
+
             const { error } = await db.from('items')
-              .update({ current_qty: qty, unit: unit || item.unit,
+              .update({ current_qty: newQty, unit: unit || item.unit,
                         updated_at: new Date().toISOString() })
               .eq('item_id', item.item_id);
 
@@ -385,15 +395,15 @@ async function processRequest(json) {
             // kitchen_operations 이력 기록
             await db.from('kitchen_operations').insert({
               store_id: SID, item_id: item.item_id, item_name: item.item_name,
-              action_type: json.action_type || 'stock_check', quantity: qty, unit: unit || item.unit,
-              qty_before: item.current_qty, qty_after: qty,
+              action_type: action, quantity: qty, unit: unit || item.unit,
+              qty_before: item.current_qty, qty_after: newQty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
             });
 
             // 캐시 업데이트
-            item.current_qty = qty;
+            item.current_qty = newQty;
             if (unit) item.unit = unit;
-            updated.push({ name: item.item_name, quantity: qty, unit: item.unit });
+            updated.push({ name: item.item_name, quantity: newQty, unit: item.unit });
 
           } else {
             // 신규 품목 — items에 추가
@@ -407,7 +417,7 @@ async function processRequest(json) {
             // kitchen_operations 이력 기록
             await db.from('kitchen_operations').insert({
               store_id: SID, item_id: newItem.item_id, item_name: name,
-              action_type: json.action_type || 'stock_check', quantity: qty, unit: unit || '개',
+              action_type: req.action_type || json.action_type || 'stock_check', quantity: qty, unit: unit || '개',
               qty_before: null, qty_after: qty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
             });
