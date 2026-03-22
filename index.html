@@ -1534,6 +1534,17 @@ async function runJson() {
 /* ════════════════════════════════════════════════════════
    Pending → Confirmed 10초 구조
 ════════════════════════════════════════════════════════ */
+const _ACTION_LABEL = {
+  'inbound':     { prefix: '+', label: '입고' },
+  'consume':     { prefix: '-', label: '차감' },
+  'stock_check': { prefix: '',  label: '재고설정' },
+  'order':       { prefix: '',  label: '발주요청' },
+};
+function _fmtAction(name, qty, unit, action) {
+  const a = _ACTION_LABEL[action] || _ACTION_LABEL['stock_check'];
+  return `${name} ${a.prefix}${qty}${unit} (${a.label})`;
+}
+
 function addPending(raw, req) {
   const id = ++_pendingSeq;
   const list = document.getElementById('resList');
@@ -1543,7 +1554,7 @@ function addPending(raw, req) {
   card.id = 'pc_' + id;
 
   const preview = req.items.map(it =>
-    `${it.name} ${it.quantity}${it.unit}`
+    _fmtAction(it.name, it.quantity, it.unit, it.action_type)
   ).join(', ');
 
   card.innerHTML = `
@@ -1583,9 +1594,11 @@ async function confirmPending(id) {
   const result = await processRequest(op.req);
   if (card) {
     if (result.status === 'success' || result.status === 'partial') {
-      const lines = result.updated_items.map(it =>
-        `${it.is_new ? '🆕' : '✅'} ${it.name} ${it.quantity}${it.unit}`
-      ).join('<br>');
+      const lines = result.updated_items.map(it => {
+        const action = (op.req.items.find(r => r.name === it.name) || {}).action_type || 'stock_check';
+        const a = _ACTION_LABEL[action] || _ACTION_LABEL['stock_check'];
+        return `${it.is_new ? '🆕' : '✅'} ${it.name} ${a.prefix}${it.quantity}${it.unit} (${a.label})`;
+      }).join('<br>');
       card.className = 'res-card ok';
       card.innerHTML = `<div class="res-raw">${op.raw}</div><div class="res-msg">${lines}</div><div class="res-time">${new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'})}</div>`;
     } else {
