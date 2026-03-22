@@ -816,7 +816,7 @@ function _ruleNormalize(text) {
   // 1. 품목명+한글숫자 붙여쓰기 분리
   const nk = Object.keys(_NUM_WORDS).sort((a,b)=>b.length-a.length);
   for (const nw of nk) {
-    s = s.replace(new RegExp('([가-힣])' + nw + '(' + up + '|\s|$)', 'g'),
+    s = s.replace(new RegExp('([가-힣])' + nw + '(' + up + '|\\s|$)', 'g'),
       function(m,p,t){ return p + ' ' + nw + t; });
   }
 
@@ -824,12 +824,12 @@ function _ruleNormalize(text) {
   const numEntries = Object.entries(_NUM_WORDS).sort((a,b)=>b[0].length-a[0].length);
   for (const entry of numEntries) {
     var k = entry[0], v = entry[1];
-    s = s.replace(new RegExp('(^|\s)' + k + '(\s|$)', 'g'),
+    s = s.replace(new RegExp('(^|\\s)' + k + '(\\s|$)', 'g'),
       function(m, pre, post){ return pre + String(v) + post; });
   }
 
   // 3. 숫자+단위 붙여쓰기 분리
-  s = s.replace(new RegExp('(\d+)(' + up + ')', 'g'), '$1 $2');
+  s = s.replace(new RegExp('(\\d+)(' + up + ')', 'g'), '$1 $2');
 
   // 4. 조사 제거
   s = s.replace(/([가-힣]{2,})(을|를|은|는|이|가)(\s|,|$)/g,
@@ -838,7 +838,7 @@ function _ruleNormalize(text) {
   // 5. 동작어 제거 — 단위/수량 뒤에 오는 동작어만 제거 (품목명 손상 방지)
   for (const aw of _ACTION_WORDS) {
     // "수량+단위 뒤 동작어" 패턴만 제거
-    s = s.replace(new RegExp('(\d+\s*(?:' + up + ')?)\s+' + aw + '(?=\s|$)', 'g'),
+    s = s.replace(new RegExp('(\\d+\\s*(?:' + up + ')?)\\s+' + aw + '(?=\\s|$)', 'g'),
       function(m, qty){ return qty; });
   }
 
