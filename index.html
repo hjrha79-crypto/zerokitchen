@@ -763,10 +763,11 @@ async function handleNaturalInput() {
     if (!ruleResult.needsFallback && ruleResult.results.length > 0) {
       parsed = ruleResult.results;
       document.getElementById('parseLoading')?.remove();
-      console.log('Rule Engine 처리:', parsed.length, '개 품목');
+      console.log('Rule Engine 처리:', parsed.length, '개 품목 (최저 신뢰도:', Math.round((ruleResult.confidence||0)*100)+'%)');
     } else {
-      // 2차: LLM fallback
-      console.log('LLM fallback 실행 (신뢰도:', Math.round((ruleResult.confidence||0)*100)+'%)');
+      // 2차: LLM fallback (아이템 중 하나라도 confidence < 0.8)
+      console.log('LLM fallback 실행 (최저 신뢰도:', Math.round((ruleResult.confidence||0)*100)+'%)',
+        ruleResult.results.length ? '- 항목별: ' + ruleResult.results.map(r=>r.item_name+'='+r._score).join(', ') : '');
       parsed = await parseWithClaude(raw);
       document.getElementById('parseLoading')?.remove();
     }
@@ -810,20 +811,23 @@ const _NUM_WORDS = {
 };
 const _UNITS = ['봉지','봉','박스','케이스','팩','캔','통','병','킬로','kg','g','그램','인분','장','묶음','롤','판','다발','개'];
 const _UNIT_MAP = {'봉':'봉지','봉지':'봉지','박스':'박스','케이스':'박스','팩':'팩','캔':'캔','통':'통','병':'병','kg':'kg','킬로':'kg','g':'g','그램':'g','인분':'인분','장':'장','묶음':'묶음','롤':'롤','판':'판','다발':'다발','개':'개'};
-const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','빼기','빼','차감','사용','발주','주문','받았어','받았','들어왔어','썼어','뺐어','버렸'];
+const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','빼기','빼','차감','사용','발주','주문','받았어','받았','들어왔어','썼어','뺐어','버렸','꺼냈'];
 const _ACTION_MAP = {
   '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','넣었어':'inbound','받았어':'inbound','받았':'inbound','들어왔어':'inbound',
-  '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','썼어':'consume','뺐어':'consume','버렸':'consume',
+  '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','썼어':'consume','뺐어':'consume','버렸':'consume','꺼냈':'consume',
   '발주':'order','주문':'order',
 };
 // 복합 동작어구: [regex_pattern, action_type]
 const _COMPOUND_ACTIONS = [
   ['가져다\\s*놨','inbound'],['가져다\\s*놔','inbound'],
   ['들여\\s*놨','inbound'],['들여\\s*놔','inbound'],
+  ['넣어\\s*뒀','inbound'],['넣어\\s*놨','inbound'],
   ['꺼내\\s*썼','consume'],['꺼내\\s*쓰','consume'],
   ['채워\\s*뒀','inbound'],['채워\\s*놨','inbound'],
   ['다\\s*썼','consume'],['다\\s*쓰','consume'],
 ];
+// 품목명 내 연결어 잔재 패턴 (confidence 감점 기준)
+const _NAME_JUNK = /좀|는데|인데|그리고|이랑/;
 const _ALIAS = {
   '개깐마늘':'깐마늘','개깐 마늘':'깐마늘','까마늘':'깐마늘',
   '파마산 치즈':'파마산치즈','고르곤 졸라':'고르곤졸라','고르곤':'고르곤졸라',
@@ -900,7 +904,7 @@ function _ruleTokenize(s) {
     let segAction = null;
     if (am) { segAction = am[1]; qp.lastIndex += am[0].length; }
     const { text: before, action: preAction } = _extractAction(raw);
-    if (before) segs.push({rawName:before, qty:parseFloat(m[1]), unit:m[2], action: segAction || preAction});
+    if (before) segs.push({rawName:before, qty:parseFloat(m[1]), unit:m[2], action: segAction || preAction, qtyParsed:true});
     li=qp.lastIndex;
   }
   const tail=s.slice(li).trim();
@@ -908,7 +912,7 @@ function _ruleTokenize(s) {
     const { text: cleanTail, action: tailAction } = _extractAction(tail);
     const nm=cleanTail.match(/^(\d+)$/);
     if (nm&&segs.length) segs[segs.length-1].qty=parseFloat(nm[1]);
-    else if (cleanTail) segs.push({rawName:cleanTail,qty:1,unit:'개', action: tailAction});
+    else if (cleanTail) segs.push({rawName:cleanTail,qty:1,unit:'개', action: tailAction, qtyParsed:false});
   }
   return segs;
 }
@@ -920,21 +924,40 @@ function _ruleMapItem(raw) {
   return name;
 }
 
+// 아이템별 confidence 점수 계산
+function _itemConfidence(name, seg) {
+  let score = 0;
+  // 1) 품목명에 연결어 잔재 없음: +0.3
+  if (!_NAME_JUNK.test(name)) score += 0.3;
+  // 2) 수량이 숫자로 정상 파싱됨: +0.3
+  if (seg.qtyParsed) score += 0.3;
+  // 3) 액션이 stock_check 폴백이 아님: +0.4
+  if (seg.action && seg.action !== 'stock_check') score += 0.4;
+  return Math.round(score * 100) / 100;
+}
+
 function ruleEngine(text) {
   const norm = _ruleNormalize(text);
   const segs = _ruleTokenize(norm);
-  if (!segs.length) return { results:[], needsFallback:true };
+  if (!segs.length) return { results:[], needsFallback:true, confidence:0 };
   // 전체 폴백 action: 세그먼트에 개별 action이 없을 때 사용
   const allActions = segs.map(s=>s.action).filter(Boolean);
   const fallbackAction = allActions.length ? allActions[0] : 'stock_check';
   const results=[], fails=[];
+  let minConf = 1;
   for (const seg of segs) {
     const name=_ruleMapItem(seg.rawName);
     if (!name||!name.trim()) { fails.push(seg); continue; }
-    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:seg.action||fallbackAction, confidence:'high' });
+    const action = seg.action || fallbackAction;
+    // confidence 계산용으로 최종 action 반영
+    const confSeg = { ...seg, action: action };
+    const conf = _itemConfidence(name, confSeg);
+    if (conf < minConf) minConf = conf;
+    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:action, confidence:conf >= 0.8 ? 'high' : 'low', _score:conf });
   }
-  const conf = results.length / Math.max(segs.length, 1);
-  return { results, needsFallback: conf < 0.7 || !results.length, confidence: conf };
+  // 아이템 중 하나라도 confidence < 0.8 이면 전체 LLM fallback
+  const needsFallback = !results.length || minConf < 0.8;
+  return { results, needsFallback, confidence: minConf };
 }
 
 // Claude API로 자연어 파싱

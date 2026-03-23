@@ -1,6 +1,6 @@
-// Test script: extract rule engine functions from index.html and run test cases
+// Test script: rule engine + per-item confidence scoring + LLM fallback trigger
 
-// ── Constants (copied from index.html) ──
+// ── Constants (synced with index.html) ──
 const _NUM_WORDS = {
   '하나':1,'한':1,'둘':2,'두':2,'셋':3,'세':3,'넷':4,'네':4,
   '다섯':5,'여섯':6,'일곱':7,'여덟':8,'아홉':9,'열':10,
@@ -9,19 +9,21 @@ const _NUM_WORDS = {
 };
 const _UNITS = ['봉지','봉','박스','케이스','팩','캔','통','병','킬로','kg','g','그램','인분','장','묶음','롤','판','다발','개'];
 const _UNIT_MAP = {'봉':'봉지','봉지':'봉지','박스':'박스','케이스':'박스','팩':'팩','캔':'캔','통':'통','병':'병','kg':'kg','킬로':'kg','g':'g','그램':'g','인분':'인분','장':'장','묶음':'묶음','롤':'롤','판':'판','다발':'다발','개':'개'};
-const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','빼기','빼','차감','사용','발주','주문','받았어','받았','들어왔어','썼어','뺐어','버렸'];
+const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','빼기','빼','차감','사용','발주','주문','받았어','받았','들어왔어','썼어','뺐어','버렸','꺼냈'];
 const _ACTION_MAP = {
   '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','넣었어':'inbound','받았어':'inbound','받았':'inbound','들어왔어':'inbound',
-  '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','썼어':'consume','뺐어':'consume','버렸':'consume',
+  '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','썼어':'consume','뺐어':'consume','버렸':'consume','꺼냈':'consume',
   '발주':'order','주문':'order',
 };
 const _COMPOUND_ACTIONS = [
   ['가져다\\s*놨','inbound'],['가져다\\s*놔','inbound'],
   ['들여\\s*놨','inbound'],['들여\\s*놔','inbound'],
+  ['넣어\\s*뒀','inbound'],['넣어\\s*놨','inbound'],
   ['꺼내\\s*썼','consume'],['꺼내\\s*쓰','consume'],
   ['채워\\s*뒀','inbound'],['채워\\s*놨','inbound'],
   ['다\\s*썼','consume'],['다\\s*쓰','consume'],
 ];
+const _NAME_JUNK = /좀|는데|인데|그리고|이랑/;
 const _ALIAS = {
   '개깐마늘':'깐마늘','개깐 마늘':'깐마늘','까마늘':'깐마늘',
   '파마산 치즈':'파마산치즈','고르곤 졸라':'고르곤졸라','고르곤':'고르곤졸라',
@@ -30,19 +32,17 @@ const _ALIAS = {
   '피프 소스':'비프 소스','피프소스':'비프 소스',
 };
 
-// ── Functions (copied from index.html) ──
+// ── Functions (synced with index.html) ──
 function _ruleNormalize(text) {
   let s = text.trim();
   const up = _UNITS.join('|');
 
-  // 1. 품목명+한글숫자 붙여쓰기 분리
   const nk = Object.keys(_NUM_WORDS).sort((a,b)=>b.length-a.length);
   for (const nw of nk) {
     s = s.replace(new RegExp('([가-힣])' + nw + '(' + up + '|\\s|$)', 'g'),
       function(m,p,t){ return p + ' ' + nw + t; });
   }
 
-  // 2. 한글숫자 → 아라비아
   const numEntries = Object.entries(_NUM_WORDS).sort((a,b)=>b[0].length-a[0].length);
   for (const entry of numEntries) {
     var k = entry[0], v = entry[1];
@@ -50,21 +50,17 @@ function _ruleNormalize(text) {
       function(m, pre, post){ return pre + String(v) + post; });
   }
 
-  // 3. 숫자+단위 붙여쓰기 분리
   s = s.replace(new RegExp('(\\d+)(' + up + ')', 'g'), '$1 $2');
 
-  // 4. 조사 제거
   s = s.replace(/([가-힣]{2,})(을|를|은|는|이|가)(\s|,|$)/g,
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
 
-  // 5a. 복합 동작어구 → 마커 치환
   const _SUFFIX = '(?:하고|고|어|서)?';
   for (const [pat, act] of _COMPOUND_ACTIONS) {
     s = s.replace(new RegExp(pat + _SUFFIX + '(?=\\s|,|$)', 'g'),
       '\x01' + act + '\x01');
   }
 
-  // 5b. 단일 동작어 → 마커 치환
   const awSorted = _ACTION_WORDS.slice().sort((a,b)=>b.length-a.length);
   for (const aw of awSorted) {
     s = s.replace(new RegExp('(\\d+\\s*(?:' + up + ')?)\\s*' + aw + _SUFFIX + '(?=\\s|,|$)', 'g'),
@@ -95,7 +91,7 @@ function _ruleTokenize(s) {
     let segAction = null;
     if (am) { segAction = am[1]; qp.lastIndex += am[0].length; }
     const { text: before, action: preAction } = _extractAction(raw);
-    if (before) segs.push({rawName:before, qty:parseFloat(m[1]), unit:m[2], action: segAction || preAction});
+    if (before) segs.push({rawName:before, qty:parseFloat(m[1]), unit:m[2], action: segAction || preAction, qtyParsed:true});
     li=qp.lastIndex;
   }
   const tail=s.slice(li).trim();
@@ -103,7 +99,7 @@ function _ruleTokenize(s) {
     const { text: cleanTail, action: tailAction } = _extractAction(tail);
     const nm=cleanTail.match(/^(\d+)$/);
     if (nm&&segs.length) segs[segs.length-1].qty=parseFloat(nm[1]);
-    else if (cleanTail) segs.push({rawName:cleanTail,qty:1,unit:'개', action: tailAction});
+    else if (cleanTail) segs.push({rawName:cleanTail,qty:1,unit:'개', action: tailAction, qtyParsed:false});
   }
   return segs;
 }
@@ -115,24 +111,49 @@ function _ruleMapItem(raw) {
   return name;
 }
 
+function _itemConfidence(name, seg) {
+  let score = 0;
+  if (!_NAME_JUNK.test(name)) score += 0.3;
+  if (seg.qtyParsed) score += 0.3;
+  if (seg.action && seg.action !== 'stock_check') score += 0.4;
+  return Math.round(score * 100) / 100;
+}
+
 function ruleEngine(text) {
   const norm = _ruleNormalize(text);
   const segs = _ruleTokenize(norm);
-  if (!segs.length) return { results:[], needsFallback:true };
+  if (!segs.length) return { results:[], needsFallback:true, confidence:0 };
   const allActions = segs.map(s=>s.action).filter(Boolean);
   const fallbackAction = allActions.length ? allActions[0] : 'stock_check';
   const results=[], fails=[];
+  let minConf = 1;
   for (const seg of segs) {
     const name=_ruleMapItem(seg.rawName);
     if (!name||!name.trim()) { fails.push(seg); continue; }
-    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:seg.action||fallbackAction, confidence:'high' });
+    const action = seg.action || fallbackAction;
+    const confSeg = { ...seg, action: action };
+    const conf = _itemConfidence(name, confSeg);
+    if (conf < minConf) minConf = conf;
+    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:action, confidence:conf >= 0.8 ? 'high' : 'low', _score:conf });
   }
-  const conf = results.length / Math.max(segs.length, 1);
-  return { results, needsFallback: conf < 0.7 || !results.length, confidence: conf };
+  const needsFallback = !results.length || minConf < 0.8;
+  return { results, needsFallback, confidence: minConf };
 }
 
-// ── Test Cases ──
-const tests = [
+// ══════════════════════════════════════
+//  Test Suite
+// ══════════════════════════════════════
+const ACTION_LABEL = { inbound: '입고', consume: '차감', order: '발주', stock_check: '재고설정' };
+const ACTION_PREFIX = { inbound: '+', consume: '-', order: '', stock_check: '' };
+
+let allPassed = true;
+
+// ── Part A: 기존 5개 액션 파싱 테스트 (전부 Rule Engine 처리) ──
+console.log('\n╔══════════════════════════════════════╗');
+console.log('║  Part A: 액션 파싱 테스트 (5개)       ║');
+console.log('╚══════════════════════════════════════╝');
+
+const actionTests = [
   {
     input: "치즈 두 봉 추가하고 양파 세 개 빼고 마늘빵 한 박스 주문",
     expected: [
@@ -171,22 +192,18 @@ const tests = [
   },
 ];
 
-const ACTION_LABEL = { inbound: '입고', consume: '차감', order: '발주', stock_check: '재고설정' };
-const ACTION_PREFIX = { inbound: '+', consume: '-', order: '', stock_check: '' };
-
-let allPassed = true;
-for (let i = 0; i < tests.length; i++) {
-  const t = tests[i];
-  console.log(`\n━━━ Test ${i+1}: "${t.input}"`);
-
-  const norm = _ruleNormalize(t.input);
-  console.log(`  normalized: "${norm}"`);
-
-  const { results } = ruleEngine(t.input);
-  console.log(`  results: ${JSON.stringify(results.map(r => `${ACTION_PREFIX[r.action]}${r.quantity}${r.unit}(${ACTION_LABEL[r.action]})`))}`);
+for (let i = 0; i < actionTests.length; i++) {
+  const t = actionTests[i];
+  console.log(`\n━━━ Test A${i+1}: "${t.input}"`);
+  const { results, needsFallback, confidence } = ruleEngine(t.input);
+  console.log(`  confidence: ${confidence} | needsFallback: ${needsFallback}`);
+  console.log(`  results: ${JSON.stringify(results.map(r => `${r.item_name} ${ACTION_PREFIX[r.action]}${r.quantity}${r.unit}(${ACTION_LABEL[r.action]}) score=${r._score}`))}`);
 
   let pass = true;
-  if (results.length !== t.expected.length) {
+  if (needsFallback) {
+    console.log(`  ✗ FAIL: should NOT trigger fallback but needsFallback=true`);
+    pass = false;
+  } else if (results.length !== t.expected.length) {
     console.log(`  ✗ FAIL: expected ${t.expected.length} items, got ${results.length}`);
     pass = false;
   } else {
@@ -205,6 +222,48 @@ for (let i = 0; i < tests.length; i++) {
   allPassed = allPassed && pass;
 }
 
+// ── Part B: Confidence + LLM Fallback 테스트 ──
+console.log('\n╔══════════════════════════════════════╗');
+console.log('║  Part B: Confidence / Fallback 테스트 ║');
+console.log('╚══════════════════════════════════════╝');
+
+const confTests = [
+  {
+    input: "치즈 두 봉지 넣어뒀어 양파 세 개 꺼냈어",
+    expectFallback: false,
+    label: "Rule Engine 처리 (명확한 수량+액션)"
+  },
+  {
+    input: "치즈 좀 넣어뒀는데 양파도 좀 꺼냈어",
+    expectFallback: true,
+    label: "LLM fallback (수량 없음, 연결어 잔재)"
+  },
+];
+
+for (let i = 0; i < confTests.length; i++) {
+  const t = confTests[i];
+  console.log(`\n━━━ Test B${i+1}: "${t.input}"`);
+  console.log(`  기대: ${t.label}`);
+
+  const norm = _ruleNormalize(t.input);
+  console.log(`  normalized: "${norm}"`);
+
+  const { results, needsFallback, confidence } = ruleEngine(t.input);
+  console.log(`  confidence: ${confidence} | needsFallback: ${needsFallback}`);
+  if (results.length) {
+    console.log(`  items: ${results.map(r => `${r.item_name}(score=${r._score})`).join(', ')}`);
+  }
+
+  const pass = needsFallback === t.expectFallback;
+  if (pass) {
+    console.log(`  ✓ PASS → ${t.expectFallback ? 'LLM fallback 트리거됨' : 'Rule Engine 처리 완료'}`);
+  } else {
+    console.log(`  ✗ FAIL → needsFallback=${needsFallback}, expected ${t.expectFallback}`);
+  }
+  allPassed = allPassed && pass;
+}
+
+// ── Summary ──
 console.log(`\n${'═'.repeat(40)}`);
-console.log(allPassed ? '✓ ALL 5 TESTS PASSED' : '✗ SOME TESTS FAILED');
+console.log(allPassed ? '✓ ALL 7 TESTS PASSED' : '✗ SOME TESTS FAILED');
 process.exit(allPassed ? 0 : 1);
