@@ -1528,11 +1528,11 @@ async function renderOrder() {
             const rVendor = _vendors.find(v => v.vendor_id === r.vendor_id);
             const vendorDisplay = rVendor
               ? `<span class="ord-vendor-label">${rVendor.vendor_name}</span>`
-              : `<button class="ord-vendor-assign" onclick="showVendorSelect(${r.id}, this)">거래처 지정</button>`;
+              : `<button class="ord-vendor-assign" data-vendor-assign="${r.id}">거래처 지정</button>`;
             return `
           <div class="ord-item-row">
             <div>
-              <span class="ord-item-name" data-editable onclick="startEditName(${r.id}, this)">${r.item_name}</span>
+              <span class="ord-item-name" data-editable data-order-id="${r.id}">${r.item_name}</span>
               ${vendorDisplay}
             </div>
             <div class="ord-item-right">
@@ -1635,52 +1635,64 @@ async function createOrderFromSuggest(itemId, itemName, qty, unit, vendorId) {
   renderOrder();
 }
 
-// 품목명 인라인 수정
-function startEditName(orderId, el) {
-  const current = el.textContent;
-  const input = document.createElement('input');
-  input.className = 'ord-inline-input';
-  input.value = current;
-  el.replaceWith(input);
-  input.focus();
-  input.select();
+// 이벤트 위임: orderList 컨테이너에서 클릭 처리 (재렌더링 후에도 동작)
+document.addEventListener('click', function(e) {
+  // 품목명 인라인 수정
+  const nameEl = e.target.closest('[data-editable][data-order-id]');
+  if (nameEl && nameEl.tagName !== 'INPUT') {
+    const orderId = Number(nameEl.dataset.orderId);
+    const current = nameEl.textContent;
+    const input = document.createElement('input');
+    input.className = 'ord-inline-input';
+    input.value = current;
+    nameEl.replaceWith(input);
+    input.focus();
+    input.select();
 
-  async function save() {
-    const newName = input.value.trim();
-    if (newName && newName !== current) {
-      await db.from('order_requests').update({ item_name: newName, updated_at: new Date().toISOString() }).eq('id', orderId);
-      showToast('품목명 수정됨');
+    let saved = false;
+    async function save() {
+      if (saved) return; saved = true;
+      const newName = input.value.trim();
+      if (newName && newName !== current) {
+        await db.from('order_requests').update({ item_name: newName, updated_at: new Date().toISOString() }).eq('id', orderId);
+        showToast('품목명 수정됨');
+      }
+      renderOrder();
     }
-    renderOrder();
+    input.addEventListener('blur', save);
+    input.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.value = current; input.blur(); }
+    });
+    return;
   }
-  input.addEventListener('blur', save);
-  input.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
-    if (e.key === 'Escape') { input.value = current; input.blur(); }
-  });
-}
 
-// 거래처 지정 드롭다운
-function showVendorSelect(orderId, btn) {
-  if (btn.tagName === 'SELECT') return;
-  const sel = document.createElement('select');
-  sel.className = 'ord-inline-input';
-  sel.innerHTML = `<option value="">선택...</option>` +
-    _vendors.map(v => `<option value="${v.vendor_id}">${v.vendor_name}</option>`).join('');
-  btn.replaceWith(sel);
-  sel.focus();
+  // 거래처 지정 드롭다운
+  const vendorBtn = e.target.closest('[data-vendor-assign]');
+  if (vendorBtn && vendorBtn.tagName !== 'SELECT') {
+    const orderId = Number(vendorBtn.dataset.vendorAssign);
+    const sel = document.createElement('select');
+    sel.className = 'ord-inline-input';
+    sel.innerHTML = `<option value="">선택...</option>` +
+      _vendors.map(v => `<option value="${v.vendor_id}">${v.vendor_name}</option>`).join('');
+    vendorBtn.replaceWith(sel);
+    sel.focus();
 
-  async function pick() {
-    const vid = sel.value ? parseInt(sel.value) : null;
-    if (vid) {
-      await db.from('order_requests').update({ vendor_id: vid, updated_at: new Date().toISOString() }).eq('id', orderId);
-      showToast('거래처 지정됨');
+    let picked = false;
+    async function pick() {
+      if (picked) return; picked = true;
+      const vid = sel.value ? parseInt(sel.value) : null;
+      if (vid) {
+        await db.from('order_requests').update({ vendor_id: vid, updated_at: new Date().toISOString() }).eq('id', orderId);
+        showToast('거래처 지정됨');
+      }
+      renderOrder();
     }
-    renderOrder();
+    sel.addEventListener('change', pick);
+    sel.addEventListener('blur', function() { if (!picked) renderOrder(); });
+    return;
   }
-  sel.addEventListener('change', pick);
-  sel.addEventListener('blur', function() { renderOrder(); });
-}
+});
 
 async function changeItemVendor(itemId, vendorId, sel) {
   // 이번만 사용 or 기본값으로 저장 선택
