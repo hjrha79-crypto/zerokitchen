@@ -911,6 +911,12 @@ function _ruleNormalize(text) {
       function(m,p,t){ return p + ' ' + nw + t; });
   }
 
+  // 1b. 한글숫자+단위 붙여쓰기 분리 (띄어쓰기 후: "두병" → "두 병")
+  for (const nw of nk) {
+    s = s.replace(new RegExp('(^|\\s)' + nw + '(' + up + ')', 'g'),
+      '$1' + nw + ' $2');
+  }
+
   // 2. 한글숫자 → 아라비아 (lookbehind 없이, 브라우저 호환)
   const numEntries = Object.entries(_NUM_WORDS).sort((a,b)=>b[0].length-a[0].length);
   for (const entry of numEntries) {
@@ -927,7 +933,7 @@ function _ruleNormalize(text) {
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
 
   // 5a. 복합 동작어구 → 마커 치환 (단일 동작어보다 먼저 처리)
-  const _SUFFIX = '(?:하고|고|어|서)?';
+  const _SUFFIX = '(?:하고|해줘|고|어|서|해|줘)?';
   for (const [pat, act] of _COMPOUND_ACTIONS) {
     s = s.replace(new RegExp(pat + _SUFFIX + '(?=\\s|,|$)', 'g'),
       '\x01' + act + '\x01');

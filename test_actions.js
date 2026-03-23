@@ -43,6 +43,12 @@ function _ruleNormalize(text) {
       function(m,p,t){ return p + ' ' + nw + t; });
   }
 
+  // 1b. 한글숫자+단위 붙여쓰기 분리 (띄어쓰기 후: "두병" → "두 병")
+  for (const nw of nk) {
+    s = s.replace(new RegExp('(^|\\s)' + nw + '(' + up + ')', 'g'),
+      '$1' + nw + ' $2');
+  }
+
   const numEntries = Object.entries(_NUM_WORDS).sort((a,b)=>b[0].length-a[0].length);
   for (const entry of numEntries) {
     var k = entry[0], v = entry[1];
@@ -55,7 +61,7 @@ function _ruleNormalize(text) {
   s = s.replace(/([가-힣]{2,})(을|를|은|는|이|가)(\s|,|$)/g,
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
 
-  const _SUFFIX = '(?:하고|고|어|서)?';
+  const _SUFFIX = '(?:하고|해줘|고|어|서|해|줘)?';
   for (const [pat, act] of _COMPOUND_ACTIONS) {
     s = s.replace(new RegExp(pat + _SUFFIX + '(?=\\s|,|$)', 'g'),
       '\x01' + act + '\x01');
@@ -150,7 +156,7 @@ let allPassed = true;
 
 // ── Part A: 기존 5개 액션 파싱 테스트 (전부 Rule Engine 처리) ──
 console.log('\n╔══════════════════════════════════════╗');
-console.log('║  Part A: 액션 파싱 테스트 (5개)       ║');
+console.log('║  Part A: 액션 파싱 테스트 (8개)       ║');
 console.log('╚══════════════════════════════════════╝');
 
 const actionTests = [
@@ -188,6 +194,25 @@ const actionTests = [
     expected: [
       { item: "파마산치즈", qty: 2, unit: "봉지", action: "consume" },
       { item: "피클", qty: 4, unit: "캔", action: "inbound" },
+    ]
+  },
+  // ── 붙여쓰기 + 문장 끝 동작어 테스트 ──
+  {
+    input: "핫소스 두병 발주",
+    expected: [
+      { item: "핫소스", qty: 2, unit: "병", action: "order" },
+    ]
+  },
+  {
+    input: "우유 세박스 주문",
+    expected: [
+      { item: "우유", qty: 3, unit: "박스", action: "order" },
+    ]
+  },
+  {
+    input: "냅킨 한박스 발주해줘",
+    expected: [
+      { item: "냅킨", qty: 1, unit: "박스", action: "order" },
     ]
   },
 ];
@@ -265,5 +290,5 @@ for (let i = 0; i < confTests.length; i++) {
 
 // ── Summary ──
 console.log(`\n${'═'.repeat(40)}`);
-console.log(allPassed ? '✓ ALL 7 TESTS PASSED' : '✗ SOME TESTS FAILED');
+console.log(allPassed ? '✓ ALL 10 TESTS PASSED' : '✗ SOME TESTS FAILED');
 process.exit(allPassed ? 0 : 1);
