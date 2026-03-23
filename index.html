@@ -72,13 +72,35 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ord-card{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--warn);border-radius:12px;padding:13px}
 .ord-name{font-size:15px;font-weight:600}
 .ord-detail{font-size:13px;color:var(--dim);margin-top:3px;font-family:'JetBrains Mono',monospace}
-.ord-section-title{font-size:13px;font-weight:700;color:var(--accent);padding:10px 14px 6px;letter-spacing:.5px}
-.ord-status-btns{display:flex;gap:6px;margin-left:auto}
-.ord-btn-done{padding:5px 12px;border-radius:6px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:#1a7a4a;color:#fff}
-.ord-btn-cancel{padding:5px 12px;border-radius:6px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:var(--surface2);color:var(--dim);border:1px solid var(--border)}
-.ord-btn-done:active{opacity:.7}.ord-btn-cancel:active{opacity:.7}
-.ord-pending-badge{font-size:11px;background:var(--warn);color:#fff;border-radius:10px;padding:1px 8px;margin-left:6px;font-weight:700}
-.ord-suggest-section{opacity:.7;margin-top:12px}
+.ord-section{margin-bottom:20px}
+.ord-section-title{font-size:14px;font-weight:800;padding:14px 2px 10px;display:flex;align-items:center;gap:8px}
+.ord-section-title .ord-icon{font-size:16px}
+.ord-pending-badge{font-size:11px;background:var(--accent);color:#fff;border-radius:10px;padding:2px 10px;font-weight:700}
+.ord-suggest-badge{font-size:11px;background:var(--surface2);color:var(--dim);border-radius:10px;padding:2px 10px;font-weight:600;border:1px solid var(--border)}
+.ord-vendor-group{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:10px}
+.ord-vendor-hdr{padding:11px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
+.ord-vendor-name{font-size:14px;font-weight:700}
+.ord-vendor-method{font-size:11px;color:var(--muted);margin-left:4px}
+.ord-method-badge{font-size:12px;color:var(--dim);margin-left:6px}
+.ord-method-sel{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;color:var(--text);outline:none;cursor:pointer}
+.ord-item-row{padding:10px 14px;border-top:1px solid var(--surface2);display:flex;align-items:center;gap:10px}
+.ord-item-name{font-size:14px;font-weight:600;min-width:0;flex-shrink:1}
+.ord-item-right{margin-left:auto;display:flex;align-items:center;gap:10px;flex-shrink:0}
+.ord-item-qty{font-size:13px;color:var(--dim);white-space:nowrap}
+.ord-item-qty strong{color:var(--warn);font-weight:700}
+.ord-status-btns{display:flex;gap:6px}
+.ord-btn-done{padding:6px 14px;border-radius:8px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:#1a7a4a;color:#fff;white-space:nowrap}
+.ord-btn-cancel{padding:6px 14px;border-radius:8px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:var(--surface2);color:var(--dim);border:1px solid var(--border);white-space:nowrap}
+.ord-btn-register{padding:6px 14px;border-radius:8px;border:1px solid var(--accent);font-size:12px;font-weight:700;cursor:pointer;background:var(--accent-lt);color:var(--accent);white-space:nowrap}
+.ord-btn-done:active,.ord-btn-cancel:active,.ord-btn-register:active{opacity:.7}
+.ord-action-row{padding:10px 14px;border-top:1px solid var(--border)}
+.ord-action-btn{padding:10px 20px;border-radius:8px;border:none;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.ord-action-btn.sms{background:#1a7a4a;color:#fff}
+.ord-action-btn.kakao{background:#fee500;color:#191919}
+.ord-action-btn.call{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.ord-suggest-group{opacity:.65}
+.ord-suggest-group .ord-vendor-hdr{background:transparent;border-bottom:1px solid var(--surface2)}
+.ord-empty{text-align:center;padding:24px;color:var(--muted);font-size:13px}
 /* 테스트 패널 */
 .json-inp{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--text);outline:none;resize:vertical;min-height:160px;line-height:1.5}
 .json-inp:focus{border-color:var(--accent)}
@@ -841,15 +863,7 @@ async function handleNaturalInput() {
       return;
     }
 
-    // 단일 품목 + 신뢰도 높으면 바로 실행
-    if (parsed.length === 1 && parsed[0].confidence === 'high') {
-      const req = draftToRequest(parsed);
-      addPending(raw, req);
-      inp.value = '';
-      return;
-    }
-
-    // 복합 입력 → Table Review
+    // 모든 입력 → 확인 카드(Review Panel) 거침
     _draftItems = parsed;
     inp.value = '';
     showReviewPanel(raw);
@@ -1483,8 +1497,12 @@ async function renderOrder() {
     let html = '';
 
     // ── Section A: 진행 중 발주 (order_requests pending) ──
+    html += `<div class="ord-section">`;
+    html += `<div class="ord-section-title"><span class="ord-icon">📋</span> 진행 중 발주`;
+    if (_orderRequests.length) html += ` <span class="ord-pending-badge">${_orderRequests.length}</span>`;
+    html += `</div>`;
+
     if (_orderRequests.length) {
-      // 거래처별 그룹화
       const grpMap = new Map();
       for (const r of _orderRequests) {
         const vName = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
@@ -1492,13 +1510,10 @@ async function renderOrder() {
         grpMap.get(vName).push(r);
       }
 
-      html += `<div class="ord-section-title">진행 중 발주 <span class="ord-pending-badge">${_orderRequests.length}</span></div>`;
-
       for (const [vName, rows] of grpMap) {
         const vInfo = _vendors.find(v => v.vendor_name === vName);
         const vid = vInfo?.vendor_id || '';
         const method = vInfo?.order_method || 'unset';
-        const m = ORDER_METHOD_LABEL[method] || ORDER_METHOD_LABEL.unset;
 
         const orderLines = rows.map(r => `- ${r.item_name} ${r.qty}${r.unit}`).join('\n');
         const smsBody = encodeURIComponent(`[발주 요청]\n${orderLines}\n확인 부탁드립니다.`);
@@ -1512,19 +1527,23 @@ async function renderOrder() {
           actionBtn = `<button class="ord-action-btn call" onclick="showToast('거래처 번호를 등록하면 바로 전화할 수 있습니다.')">📞 전화 발주</button>`;
         }
 
+        // 거래처 헤더: 미설정이면 아이콘/라벨 숨김
+        const methodDisplay = method !== 'unset'
+          ? `<span class="ord-vendor-method">${(ORDER_METHOD_LABEL[method]||{}).icon||''} ${(ORDER_METHOD_LABEL[method]||{}).label||''}</span>`
+          : '';
+
         html += `
         <div class="ord-vendor-group">
           <div class="ord-vendor-hdr">
             <div>
-              <span class="ord-vendor-name">📦 ${vName}</span>
-              <span class="ord-method-badge" id="mbadge_${vid}">${m.icon} ${m.label}</span>
+              <span class="ord-vendor-name">${vName}</span>${methodDisplay}
             </div>
             <select class="ord-method-sel" onchange="saveOrderMethod(${vid||0}, this.value, '${vName}')">
               <option value="app"   ${method==='app'  ?'selected':''}>📱 앱 주문</option>
               <option value="kakao" ${method==='kakao'?'selected':''}>💬 카카오톡</option>
               <option value="sms"   ${method==='sms'  ?'selected':''}>📲 문자</option>
               <option value="call"  ${method==='call' ?'selected':''}>📞 전화</option>
-              <option value="unset" ${method==='unset'?'selected':''}>⚙️ 미설정</option>
+              <option value="unset" ${method==='unset'?'selected':''}>미설정</option>
             </select>
           </div>
           ${rows.map(r => {
@@ -1534,7 +1553,7 @@ async function renderOrder() {
           <div class="ord-item-row">
             <span class="ord-item-name">${r.item_name}</span>
             <div class="ord-item-right">
-              <span class="ord-item-qty">현재 ${curQty}${r.unit} → <strong>${r.qty}${r.unit} 발주</strong></span>
+              <span class="ord-item-qty">${curQty}${r.unit} → <strong>${r.qty}${r.unit}</strong></span>
               <div class="ord-status-btns">
                 <button class="ord-btn-done" onclick="completeOrder(${r.id})">입고 완료</button>
                 <button class="ord-btn-cancel" onclick="cancelOrder(${r.id})">취소</button>
@@ -1545,7 +1564,10 @@ async function renderOrder() {
           ${actionBtn ? `<div class="ord-action-row">${actionBtn}</div>` : ''}
         </div>`;
       }
+    } else {
+      html += `<div class="ord-empty">진행 중인 발주가 없습니다</div>`;
     }
+    html += `</div>`;
 
     // ── Section B: 재고 부족 자동 제안 ──
     if (suggestItems.length) {
@@ -1556,23 +1578,25 @@ async function renderOrder() {
         suggestGrp.get(key).push(it);
       }
 
-      html += `<div class="ord-section-title ord-suggest-section">재고 부족 품목 (발주 제안)</div>`;
+      html += `<div class="ord-section">`;
+      html += `<div class="ord-section-title"><span class="ord-icon">💡</span> 재고 부족 품목 <span class="ord-suggest-badge">${suggestItems.length}개 제안</span></div>`;
       for (const [vName, items] of suggestGrp) {
         html += `
-        <div class="ord-vendor-group ord-suggest-section">
+        <div class="ord-vendor-group ord-suggest-group">
           <div class="ord-vendor-hdr">
-            <span class="ord-vendor-name">📦 ${vName}</span>
+            <span class="ord-vendor-name">${vName}</span>
           </div>
           ${items.map(it => `
           <div class="ord-item-row">
             <span class="ord-item-name">${it.name}</span>
             <div class="ord-item-right">
-              <span class="ord-item-qty">현재 ${it.current_qty}${it.unit} → <strong>${it.suggested_qty}${it.unit} 필요</strong></span>
-              <button class="ord-btn-done" onclick="createOrderFromSuggest(${it.item_id}, '${it.name}', ${it.suggested_qty}, '${it.unit}', ${it.vendor_id || 'null'})">발주 등록</button>
+              <span class="ord-item-qty">${it.current_qty}${it.unit} → <strong>${it.suggested_qty}${it.unit} 필요</strong></span>
+              <button class="ord-btn-register" onclick="createOrderFromSuggest(${it.item_id}, '${it.name}', ${it.suggested_qty}, '${it.unit}', ${it.vendor_id || 'null'})">발주 등록</button>
             </div>
           </div>`).join('')}
         </div>`;
       }
+      html += `</div>`;
     }
 
     list.innerHTML = html;
