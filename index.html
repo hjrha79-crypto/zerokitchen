@@ -101,6 +101,12 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ord-suggest-group{opacity:.65}
 .ord-suggest-group .ord-vendor-hdr{background:transparent;border-bottom:1px solid var(--surface2)}
 .ord-empty{text-align:center;padding:24px;color:var(--muted);font-size:13px}
+.ord-item-name[data-editable]{cursor:pointer;border-bottom:1px dashed var(--border)}
+.ord-item-name[data-editable]:hover{color:var(--accent)}
+.ord-inline-input{background:var(--surface2);border:1px solid var(--accent);border-radius:6px;padding:3px 8px;font-size:13px;font-family:inherit;color:var(--text);outline:none;width:auto;min-width:60px;max-width:140px}
+.ord-vendor-assign{font-size:11px;color:var(--accent);cursor:pointer;border:1px dashed var(--accent);border-radius:6px;padding:2px 8px;background:transparent;font-family:inherit;white-space:nowrap}
+.ord-vendor-assign:hover{background:var(--accent-lt)}
+.ord-vendor-label{font-size:11px;color:var(--muted);white-space:nowrap}
 /* 테스트 패널 */
 .json-inp{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--text);outline:none;resize:vertical;min-height:160px;line-height:1.5}
 .json-inp:focus{border-color:var(--accent)}
@@ -1511,47 +1517,24 @@ async function renderOrder() {
       }
 
       for (const [vName, rows] of grpMap) {
-        const vInfo = _vendors.find(v => v.vendor_name === vName);
-        const vid = vInfo?.vendor_id || '';
-        const method = vInfo?.order_method || 'unset';
-
-        const orderLines = rows.map(r => `- ${r.item_name} ${r.qty}${r.unit}`).join('\n');
-        const smsBody = encodeURIComponent(`[발주 요청]\n${orderLines}\n확인 부탁드립니다.`);
-
-        let actionBtn = '';
-        if (method === 'sms') {
-          actionBtn = `<button class="ord-action-btn sms" onclick="window.open('sms:?body=${smsBody}')">📲 문자 발주</button>`;
-        } else if (method === 'kakao') {
-          actionBtn = `<button class="ord-action-btn kakao" onclick="copyAndOpenKakao('${encodeURIComponent(`[발주 요청]\n${orderLines}\n확인 부탁드립니다.`)}')">💬 카톡 발주</button>`;
-        } else if (method === 'call') {
-          actionBtn = `<button class="ord-action-btn call" onclick="showToast('거래처 번호를 등록하면 바로 전화할 수 있습니다.')">📞 전화 발주</button>`;
-        }
-
-        // 거래처 헤더: 미설정이면 아이콘/라벨 숨김
-        const methodDisplay = method !== 'unset'
-          ? `<span class="ord-vendor-method">${(ORDER_METHOD_LABEL[method]||{}).icon||''} ${(ORDER_METHOD_LABEL[method]||{}).label||''}</span>`
-          : '';
-
         html += `
         <div class="ord-vendor-group">
           <div class="ord-vendor-hdr">
-            <div>
-              <span class="ord-vendor-name">${vName}</span>${methodDisplay}
-            </div>
-            <select class="ord-method-sel" onchange="saveOrderMethod(${vid||0}, this.value, '${vName}')">
-              <option value="app"   ${method==='app'  ?'selected':''}>📱 앱 주문</option>
-              <option value="kakao" ${method==='kakao'?'selected':''}>💬 카카오톡</option>
-              <option value="sms"   ${method==='sms'  ?'selected':''}>📲 문자</option>
-              <option value="call"  ${method==='call' ?'selected':''}>📞 전화</option>
-              <option value="unset" ${method==='unset'?'selected':''}>미설정</option>
-            </select>
+            <span class="ord-vendor-name">${vName}</span>
           </div>
           ${rows.map(r => {
             const item = _items.find(it => it.item_id === r.item_id);
             const curQty = item ? Number(item.current_qty) : '?';
+            const rVendor = _vendors.find(v => v.vendor_id === r.vendor_id);
+            const vendorDisplay = rVendor
+              ? `<span class="ord-vendor-label">${rVendor.vendor_name}</span>`
+              : `<button class="ord-vendor-assign" onclick="showVendorSelect(${r.id}, this)">거래처 지정</button>`;
             return `
           <div class="ord-item-row">
-            <span class="ord-item-name">${r.item_name}</span>
+            <div>
+              <span class="ord-item-name" data-editable onclick="startEditName(${r.id}, this)">${r.item_name}</span>
+              ${vendorDisplay}
+            </div>
             <div class="ord-item-right">
               <span class="ord-item-qty">${curQty}${r.unit} → <strong>${r.qty}${r.unit}</strong></span>
               <div class="ord-status-btns">
@@ -1561,7 +1544,6 @@ async function renderOrder() {
             </div>
           </div>`;
           }).join('')}
-          ${actionBtn ? `<div class="ord-action-row">${actionBtn}</div>` : ''}
         </div>`;
       }
     } else {
@@ -1651,6 +1633,53 @@ async function createOrderFromSuggest(itemId, itemName, qty, unit, vendorId) {
   });
   showToast(`${itemName} ${qty}${unit} 발주 등록됨`);
   renderOrder();
+}
+
+// 품목명 인라인 수정
+function startEditName(orderId, el) {
+  const current = el.textContent;
+  const input = document.createElement('input');
+  input.className = 'ord-inline-input';
+  input.value = current;
+  el.replaceWith(input);
+  input.focus();
+  input.select();
+
+  async function save() {
+    const newName = input.value.trim();
+    if (newName && newName !== current) {
+      await db.from('order_requests').update({ item_name: newName, updated_at: new Date().toISOString() }).eq('id', orderId);
+      showToast('품목명 수정됨');
+    }
+    renderOrder();
+  }
+  input.addEventListener('blur', save);
+  input.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = current; input.blur(); }
+  });
+}
+
+// 거래처 지정 드롭다운
+function showVendorSelect(orderId, btn) {
+  if (btn.tagName === 'SELECT') return;
+  const sel = document.createElement('select');
+  sel.className = 'ord-inline-input';
+  sel.innerHTML = `<option value="">선택...</option>` +
+    _vendors.map(v => `<option value="${v.vendor_id}">${v.vendor_name}</option>`).join('');
+  btn.replaceWith(sel);
+  sel.focus();
+
+  async function pick() {
+    const vid = sel.value ? parseInt(sel.value) : null;
+    if (vid) {
+      await db.from('order_requests').update({ vendor_id: vid, updated_at: new Date().toISOString() }).eq('id', orderId);
+      showToast('거래처 지정됨');
+    }
+    renderOrder();
+  }
+  sel.addEventListener('change', pick);
+  sel.addEventListener('blur', function() { renderOrder(); });
 }
 
 async function changeItemVendor(itemId, vendorId, sel) {
