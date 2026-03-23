@@ -72,6 +72,13 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ord-card{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--warn);border-radius:12px;padding:13px}
 .ord-name{font-size:15px;font-weight:600}
 .ord-detail{font-size:13px;color:var(--dim);margin-top:3px;font-family:'JetBrains Mono',monospace}
+.ord-section-title{font-size:13px;font-weight:700;color:var(--accent);padding:10px 14px 6px;letter-spacing:.5px}
+.ord-status-btns{display:flex;gap:6px;margin-left:auto}
+.ord-btn-done{padding:5px 12px;border-radius:6px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:#1a7a4a;color:#fff}
+.ord-btn-cancel{padding:5px 12px;border-radius:6px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:var(--surface2);color:var(--dim);border:1px solid var(--border)}
+.ord-btn-done:active{opacity:.7}.ord-btn-cancel:active{opacity:.7}
+.ord-pending-badge{font-size:11px;background:var(--warn);color:#fff;border-radius:10px;padding:1px 8px;margin-left:6px;font-weight:700}
+.ord-suggest-section{opacity:.7;margin-top:12px}
 /* 테스트 패널 */
 .json-inp{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--text);outline:none;resize:vertical;min-height:160px;line-height:1.5}
 .json-inp:focus{border-color:var(--accent)}
@@ -315,6 +322,25 @@ let _items = [];        // 품목 캐시
 let _pendingOps = [];   // pending 작업 큐 { id, req, timer, el }
 let _pendingSeq = 0;
 let _vendors = [];      // 거래처 캐시
+let _orderRequests = []; // 발주 요청 캐시
+
+/*  order_requests 테이블 (Supabase SQL Editor에서 실행):
+    CREATE TABLE IF NOT EXISTS order_requests (
+      id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      store_id    bigint REFERENCES stores(store_id),
+      item_id     bigint REFERENCES items(item_id),
+      item_name   text NOT NULL,
+      qty         numeric NOT NULL,
+      unit        text DEFAULT '개',
+      vendor_id   bigint REFERENCES vendors(vendor_id),
+      status      text NOT NULL DEFAULT 'pending'
+                  CHECK (status IN ('pending','done','cancelled')),
+      created_at  timestamptz DEFAULT now(),
+      updated_at  timestamptz DEFAULT now()
+    );
+    ALTER TABLE order_requests ENABLE ROW LEVEL SECURITY;
+    CREATE POLICY "order_requests_all" ON order_requests FOR ALL USING (true);
+*/
 
 /* ════════════════════════════════════════════════════════
    초기화
@@ -376,6 +402,27 @@ async function processRequest(json) {
           if (item) {
             // action_type에 따라 수량 계산
             const action = req.action_type || json.action_type || 'stock_check';
+
+            // ── 발주(order): 재고 변경 없이 order_requests에 기록 ──
+            if (action === 'order') {
+              const { error } = await db.from('order_requests').insert({
+                store_id: SID, item_id: item.item_id, item_name: item.item_name,
+                qty: qty, unit: unit || item.unit,
+                vendor_id: item.vendor_id || null, status: 'pending'
+              });
+              if (error) { errors.push({ name, reason: error.message }); continue; }
+
+              await db.from('kitchen_operations').insert({
+                store_id: SID, item_id: item.item_id, item_name: item.item_name,
+                action_type: 'order', quantity: qty, unit: unit || item.unit,
+                qty_before: item.current_qty, qty_after: item.current_qty,
+                input_method: json._source || 'api', raw_text: JSON.stringify(req)
+              });
+
+              updated.push({ name: item.item_name, quantity: item.current_qty, inputQty: qty, unit: item.unit, action: 'order' });
+              continue;
+            }
+
             let newQty;
             if (action === 'inbound') {
               newQty = item.current_qty + qty;
@@ -407,23 +454,33 @@ async function processRequest(json) {
 
           } else {
             // 신규 품목 — items에 추가
+            const newAction = req.action_type || json.action_type || 'stock_check';
+            const initQty = newAction === 'order' ? 0 : qty;
+
             const { data: newItem, error } = await db.from('items').insert({
               store_id: SID, item_name: name, unit: unit || '개',
-              pack_factor: 1, target_qty: 0, current_qty: qty
+              pack_factor: 1, target_qty: 0, current_qty: initQty
             }).select().single();
 
             if (error) { errors.push({ name, reason: error.message }); continue; }
 
-            // kitchen_operations 이력 기록
+            // 발주면 order_requests에도 기록
+            if (newAction === 'order') {
+              await db.from('order_requests').insert({
+                store_id: SID, item_id: newItem.item_id, item_name: name,
+                qty: qty, unit: unit || '개', vendor_id: null, status: 'pending'
+              });
+            }
+
             await db.from('kitchen_operations').insert({
               store_id: SID, item_id: newItem.item_id, item_name: name,
-              action_type: req.action_type || json.action_type || 'stock_check', quantity: qty, unit: unit || '개',
-              qty_before: null, qty_after: qty,
+              action_type: newAction, quantity: qty, unit: unit || '개',
+              qty_before: null, qty_after: initQty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
             });
 
             _items.push(newItem);
-            updated.push({ name, quantity: qty, inputQty: qty, unit: unit || '개', is_new: true, action: req.action_type || json.action_type || 'stock_check' });
+            updated.push({ name, quantity: initQty, inputQty: qty, unit: unit || '개', is_new: true, action: newAction });
           }
         }
 
@@ -1385,83 +1442,178 @@ async function renderOrder() {
   list.innerHTML = '<div class="no-item"><span class="spin" style="border-color:var(--border);border-top-color:var(--accent)"></span></div>';
 
   try {
-    const result = await processRequest({
-      request_type: 'order_generate',
-      criteria: 'below_threshold'
-    });
+    // 1) pending 발주 요청 로드
+    const { data: pendingRows, error: oErr } = await db.from('order_requests')
+      .select('*').eq('store_id', SID).eq('status', 'pending')
+      .order('created_at', { ascending: false });
+    if (oErr) throw oErr;
+    _orderRequests = pendingRows || [];
 
-    if (!result.items?.length) {
-      list.innerHTML = '<div class="no-item">✅ 발주 필요 품목 없음</div>';
+    // 2) 재고 부족 품목 (자동 제안용)
+    await refreshItems();
+    const pendingItemIds = new Set(_orderRequests.map(r => r.item_id));
+    const suggestItems = _items
+      .filter(it => Number(it.current_qty) < Number(it.target_qty) && !pendingItemIds.has(it.item_id))
+      .map(it => ({
+        item_id: it.item_id, name: it.item_name,
+        current_qty: Number(it.current_qty), target_qty: Number(it.target_qty),
+        suggested_qty: Number(it.target_qty) - Number(it.current_qty),
+        unit: it.unit || '', vendor_id: it.vendor_id || null,
+        vendor: _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || null
+      }));
+
+    if (!_orderRequests.length && !suggestItems.length) {
+      list.innerHTML = '<div class="no-item">발주 필요 품목 없음</div>';
       return;
     }
 
-    // by_vendor 없으면 items로 폴백 그룹화
-    const groups = result.by_vendor?.length
-      ? result.by_vendor
-      : [{ vendor: '거래처 미지정', order_method: 'unset', items: result.items }];
-
     let html = '';
-    for (const vGroup of groups) {
-      const m = ORDER_METHOD_LABEL[vGroup.order_method] || ORDER_METHOD_LABEL.unset;
-      const vInfo = _vendors.find(v => v.vendor_name === vGroup.vendor);
-      const vid = vInfo?.vendor_id || '';
 
-      // 발주 문자 포맷
-      const orderLines = vGroup.items.map(it =>
-        `- ${it.name} ${it.suggested_qty}${it.unit}`
-      ).join('\n');
-      const smsBody = encodeURIComponent(`[발주 요청]\n${orderLines}\n확인 부탁드립니다.`);
-
-      // 실행 버튼
-      let actionBtn = '';
-      if (vGroup.order_method === 'sms') {
-        actionBtn = `<button class="ord-action-btn sms" onclick="window.open('sms:?body=${smsBody}')">📲 문자 발주</button>`;
-      } else if (vGroup.order_method === 'kakao') {
-        const kakaoText = encodeURIComponent(`[발주 요청]\n${orderLines}\n확인 부탁드립니다.`);
-        actionBtn = `<button class="ord-action-btn kakao" onclick="copyAndOpenKakao('${kakaoText}')">💬 카톡 발주</button>`;
-      } else if (vGroup.order_method === 'call') {
-        actionBtn = `<button class="ord-action-btn call" onclick="showToast('거래처 번호를 등록하면 바로 전화할 수 있습니다.')">📞 전화 발주</button>`;
+    // ── Section A: 진행 중 발주 (order_requests pending) ──
+    if (_orderRequests.length) {
+      // 거래처별 그룹화
+      const grpMap = new Map();
+      for (const r of _orderRequests) {
+        const vName = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
+        if (!grpMap.has(vName)) grpMap.set(vName, []);
+        grpMap.get(vName).push(r);
       }
 
-      html += `
-      <div class="ord-vendor-group">
-        <div class="ord-vendor-hdr">
-          <div>
-            <span class="ord-vendor-name">📦 ${vGroup.vendor}</span>
-            <span class="ord-method-badge" id="mbadge_${vid}">${m.icon} ${m.label}</span>
+      html += `<div class="ord-section-title">진행 중 발주 <span class="ord-pending-badge">${_orderRequests.length}</span></div>`;
+
+      for (const [vName, rows] of grpMap) {
+        const vInfo = _vendors.find(v => v.vendor_name === vName);
+        const vid = vInfo?.vendor_id || '';
+        const method = vInfo?.order_method || 'unset';
+        const m = ORDER_METHOD_LABEL[method] || ORDER_METHOD_LABEL.unset;
+
+        const orderLines = rows.map(r => `- ${r.item_name} ${r.qty}${r.unit}`).join('\n');
+        const smsBody = encodeURIComponent(`[발주 요청]\n${orderLines}\n확인 부탁드립니다.`);
+
+        let actionBtn = '';
+        if (method === 'sms') {
+          actionBtn = `<button class="ord-action-btn sms" onclick="window.open('sms:?body=${smsBody}')">📲 문자 발주</button>`;
+        } else if (method === 'kakao') {
+          actionBtn = `<button class="ord-action-btn kakao" onclick="copyAndOpenKakao('${encodeURIComponent(`[발주 요청]\n${orderLines}\n확인 부탁드립니다.`)}')">💬 카톡 발주</button>`;
+        } else if (method === 'call') {
+          actionBtn = `<button class="ord-action-btn call" onclick="showToast('거래처 번호를 등록하면 바로 전화할 수 있습니다.')">📞 전화 발주</button>`;
+        }
+
+        html += `
+        <div class="ord-vendor-group">
+          <div class="ord-vendor-hdr">
+            <div>
+              <span class="ord-vendor-name">📦 ${vName}</span>
+              <span class="ord-method-badge" id="mbadge_${vid}">${m.icon} ${m.label}</span>
+            </div>
+            <select class="ord-method-sel" onchange="saveOrderMethod(${vid||0}, this.value, '${vName}')">
+              <option value="app"   ${method==='app'  ?'selected':''}>📱 앱 주문</option>
+              <option value="kakao" ${method==='kakao'?'selected':''}>💬 카카오톡</option>
+              <option value="sms"   ${method==='sms'  ?'selected':''}>📲 문자</option>
+              <option value="call"  ${method==='call' ?'selected':''}>📞 전화</option>
+              <option value="unset" ${method==='unset'?'selected':''}>⚙️ 미설정</option>
+            </select>
           </div>
-          <select class="ord-method-sel" id="msel_${vid||vGroup.vendor}" onchange="saveOrderMethod(${vid||0}, this.value, '${vGroup.vendor}')">
-            <option value="app"   ${vGroup.order_method==='app'  ?'selected':''}>📱 앱 주문</option>
-            <option value="kakao" ${vGroup.order_method==='kakao'?'selected':''}>💬 카카오톡</option>
-            <option value="sms"   ${vGroup.order_method==='sms'  ?'selected':''}>📲 문자</option>
-            <option value="call"  ${vGroup.order_method==='call' ?'selected':''}>📞 전화</option>
-            <option value="unset" ${vGroup.order_method==='unset'?'selected':''}>⚙️ 미설정</option>
-          </select>
-        </div>
-        ${vGroup.items.map(it => {
-          // 품목별 거래처 선택 드롭다운
-          const hasMultiVendor = it.vendors && it.vendors.length > 1;
-          const vendorSel = hasMultiVendor ? `
-            <select class="item-vendor-sel" onchange="changeItemVendor(${it.item_id}, this.value, this)">
-              ${it.vendors.map(v => `<option value="${v.vendor_id}" ${v.is_default?'selected':''}>${v.vendor_name}</option>`).join('')}
-            </select>` : `<span class="ord-item-vendor">${it.vendor || '거래처 미지정'}</span>`;
-          return `
+          ${rows.map(r => {
+            const item = _items.find(it => it.item_id === r.item_id);
+            const curQty = item ? Number(item.current_qty) : '?';
+            return `
+          <div class="ord-item-row">
+            <span class="ord-item-name">${r.item_name}</span>
+            <div class="ord-item-right">
+              <span class="ord-item-qty">현재 ${curQty}${r.unit} → <strong>${r.qty}${r.unit} 발주</strong></span>
+              <div class="ord-status-btns">
+                <button class="ord-btn-done" onclick="completeOrder(${r.id})">입고 완료</button>
+                <button class="ord-btn-cancel" onclick="cancelOrder(${r.id})">취소</button>
+              </div>
+            </div>
+          </div>`;
+          }).join('')}
+          ${actionBtn ? `<div class="ord-action-row">${actionBtn}</div>` : ''}
+        </div>`;
+      }
+    }
+
+    // ── Section B: 재고 부족 자동 제안 ──
+    if (suggestItems.length) {
+      const suggestGrp = new Map();
+      for (const it of suggestItems) {
+        const key = it.vendor || '거래처 미지정';
+        if (!suggestGrp.has(key)) suggestGrp.set(key, []);
+        suggestGrp.get(key).push(it);
+      }
+
+      html += `<div class="ord-section-title ord-suggest-section">재고 부족 품목 (발주 제안)</div>`;
+      for (const [vName, items] of suggestGrp) {
+        html += `
+        <div class="ord-vendor-group ord-suggest-section">
+          <div class="ord-vendor-hdr">
+            <span class="ord-vendor-name">📦 ${vName}</span>
+          </div>
+          ${items.map(it => `
           <div class="ord-item-row">
             <span class="ord-item-name">${it.name}</span>
             <div class="ord-item-right">
-              ${vendorSel}
               <span class="ord-item-qty">현재 ${it.current_qty}${it.unit} → <strong>${it.suggested_qty}${it.unit} 필요</strong></span>
+              <button class="ord-btn-done" onclick="createOrderFromSuggest(${it.item_id}, '${it.name}', ${it.suggested_qty}, '${it.unit}', ${it.vendor_id || 'null'})">발주 등록</button>
             </div>
-          </div>`;
-        }).join('')}
-        ${actionBtn ? `<div class="ord-action-row">${actionBtn}</div>` : ''}
-      </div>`;
+          </div>`).join('')}
+        </div>`;
+      }
     }
-    list.innerHTML = html;
 
+    list.innerHTML = html;
   } catch(e) {
-    list.innerHTML = `<div class="no-item">❌ 오류: ${e.message}</div>`;
+    list.innerHTML = `<div class="no-item">오류: ${e.message}</div>`;
   }
+}
+
+// 발주 완료 → status='done' + 재고 입고
+async function completeOrder(orderId) {
+  const row = _orderRequests.find(r => r.id === orderId);
+  if (!row) return;
+  // status 업데이트
+  await db.from('order_requests')
+    .update({ status: 'done', updated_at: new Date().toISOString() })
+    .eq('id', orderId);
+  // 재고 입고 처리
+  const item = _items.find(it => it.item_id === row.item_id);
+  if (item) {
+    const newQty = Number(item.current_qty) + Number(row.qty);
+    await db.from('items')
+      .update({ current_qty: newQty, updated_at: new Date().toISOString() })
+      .eq('item_id', item.item_id);
+    await db.from('kitchen_operations').insert({
+      store_id: SID, item_id: item.item_id, item_name: item.item_name,
+      action_type: 'inbound', quantity: row.qty, unit: row.unit,
+      qty_before: item.current_qty, qty_after: newQty,
+      input_method: 'order_complete', raw_text: `발주 #${orderId} 입고 완료`
+    });
+    item.current_qty = newQty;
+  }
+  showToast(`${row.item_name} ${row.qty}${row.unit} 입고 완료`);
+  renderOrder();
+}
+
+// 발주 취소
+async function cancelOrder(orderId) {
+  const row = _orderRequests.find(r => r.id === orderId);
+  if (!row) return;
+  await db.from('order_requests')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('id', orderId);
+  showToast(`${row.item_name} 발주 취소됨`);
+  renderOrder();
+}
+
+// 재고 부족 제안 → 발주 등록
+async function createOrderFromSuggest(itemId, itemName, qty, unit, vendorId) {
+  await db.from('order_requests').insert({
+    store_id: SID, item_id: itemId, item_name: itemName,
+    qty: qty, unit: unit, vendor_id: vendorId, status: 'pending'
+  });
+  showToast(`${itemName} ${qty}${unit} 발주 등록됨`);
+  renderOrder();
 }
 
 async function changeItemVendor(itemId, vendorId, sel) {
