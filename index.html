@@ -918,16 +918,19 @@ const _ALIAS = {
   '위생적 장갑':'위생장갑','위생적장갑':'위생장갑',
   '그라나 바다도':'그라나 파다노','파슬리 후레이크':'파슬리 플레이크',
   '피프 소스':'비프 소스','피프소스':'비프 소스',
+  '롤백중':'롤백 중','롤백소':'롤백 소','롤백대':'롤백 대',
+  '알리오 올리오 소스':'알리오올리오소스','토마토 비프 소스':'토마토비프소스',
+  '냉동 가리비':'냉동가리비',
 };
 
 function _ruleNormalize(text) {
   let s = text.trim();
   const up = _UNITS.join('|');
 
-  // 1. 품목명+한글숫자 붙여쓰기 분리
+  // 1. 품목명+한글숫자 붙여쓰기 분리 (글자 수 무관)
   const nk = Object.keys(_NUM_WORDS).sort((a,b)=>b.length-a.length);
   for (const nw of nk) {
-    s = s.replace(new RegExp('([가-힣])' + nw + '(' + up + '|\\s|$)', 'g'),
+    s = s.replace(new RegExp('([가-힣]+)' + nw + '(' + up + '|\\s|$)', 'g'),
       function(m,p,t){ return p + ' ' + nw + t; });
   }
 
