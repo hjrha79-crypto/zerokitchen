@@ -1024,8 +1024,9 @@ function _itemConfidence(name, seg) {
   if (!_NAME_JUNK.test(name)) score += 0.3;
   // 2) 수량이 숫자로 정상 파싱됨: +0.3
   if (seg.qtyParsed) score += 0.3;
-  // 3) 액션이 stock_check 폴백이 아님: +0.4
+  // 3) 액션이 stock_check 폴백이 아님: +0.4 / stock_check도 수량 파싱됐으면: +0.2
   if (seg.action && seg.action !== 'stock_check') score += 0.4;
+  else if (seg.qtyParsed) score += 0.2;
   return Math.round(score * 100) / 100;
 }
 
