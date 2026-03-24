@@ -1653,6 +1653,13 @@ document.addEventListener('click', function(e) {
     async function save() {
       if (saved) return; saved = true;
       const newName = input.value.trim();
+      // 즉시 span 복원 → 재렌더링 전에도 바로 재수정 가능
+      const span = document.createElement('span');
+      span.className = 'ord-item-name';
+      span.setAttribute('data-editable', '');
+      span.setAttribute('data-order-id', String(orderId));
+      span.textContent = newName || current;
+      input.replaceWith(span);
       if (newName && newName !== current) {
         await db.from('order_requests').update({ item_name: newName, updated_at: new Date().toISOString() }).eq('id', orderId);
         showToast('품목명 수정됨');
