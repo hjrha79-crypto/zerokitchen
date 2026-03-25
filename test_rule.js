@@ -10,14 +10,15 @@ const _NUM_WORDS = {
 };
 const _UNITS = ['봉지','봉','박스','케이스','팩','캔','통','병','킬로그램','킬로','키로그램','키로','kg','g','그램','인분','장','묶음','롤','판','다발','개'];
 const _UNIT_MAP = {'봉':'봉지','봉지':'봉지','박스':'박스','케이스':'박스','팩':'팩','캔':'캔','통':'통','병':'병','kg':'kg','킬로':'kg','킬로그램':'kg','키로':'kg','키로그램':'kg','g':'g','그램':'g','인분':'인분','장':'장','묶음':'묶음','롤':'롤','판':'판','다발':'다발','개':'개'};
-const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','빼기','빼','차감','사용','발주','주문','받았어','받았','들어왔어','썼어','써서','뺐어','버렸','꺼냈'];
+const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','넣','빼기','빼','차감','사용','발주','주문','받았어','받았','들어왔어','가져왔','썼어','써서','뺐어','버렸','꺼냈'];
 const _ACTION_MAP = {
-  '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','넣었어':'inbound','받았어':'inbound','받았':'inbound','들어왔어':'inbound',
+  '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','넣었어':'inbound','넣':'inbound','받았어':'inbound','받았':'inbound','들어왔어':'inbound','가져왔':'inbound',
   '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','썼어':'consume','써서':'consume','뺐어':'consume','버렸':'consume','꺼냈':'consume',
   '발주':'order','주문':'order',
 };
 const _COMPOUND_ACTIONS = [
   ['가져다\\s*놨','inbound'],['가져다\\s*놔','inbound'],
+  ['가져\\s*왔','inbound'],
   ['들여\\s*놨','inbound'],['들여\\s*놔','inbound'],
   ['넣어\\s*뒀','inbound'],['넣어\\s*놨','inbound'],
   ['꺼내\\s*썼','consume'],['꺼내\\s*쓰','consume'],
@@ -39,6 +40,12 @@ const _ALIAS = {
 
 function _ruleNormalize(text) {
   let s = text.trim();
+  // 0. 전처리: 문장부호·콤마·위치격·시간어 제거
+  s = s.replace(/[!?~。！？]/g, '');
+  s = s.replace(/\.(?!\d)/g, '');
+  s = s.replace(/,/g, ' ');
+  s = s.replace(/[가-힣]+에서\s/g, '');
+  s = s.replace(/^(오늘|어제|내일|아까|방금|지금)\s/, '');
   const up = _UNITS.join('|');
   // 1. 품목명+한글숫자+단위 붙여쓰기 분리 (단위가 바로 붙은 경우만)
   const nk = Object.keys(_NUM_WORDS).sort((a,b)=>b.length-a.length);
@@ -60,12 +67,14 @@ function _ruleNormalize(text) {
   }
   // 3. 숫자+단위 붙여쓰기 분리
   s = s.replace(new RegExp('(\\d+)(' + up + ')', 'g'), '$1 $2');
-  // 3b. 단위+조사 제거 (예: "5개은" → "5개")
-  s = s.replace(new RegExp('(' + up + ')(을|를|은|는|이|가)(\\s|,|$)', 'g'), '$1$3');
+  // 3b. 단위+조사/연결어 제거 (예: "5개은" → "5개", "3개이랑" → "3개")
+  s = s.replace(new RegExp('(' + up + ')(을|를|은|는|이|가|이랑|랑|하고)(\\s|,|$)', 'g'), '$1 $3');
+  // 3c. 연결 접속사 제거 (예: "그리고", "또")
+  s = s.replace(/(^|\s)(그리고|또한|또)(\s|,|$)/g, '$1$3');
   // 4. 조사 제거
   s = s.replace(/([가-힣]{2,})(을|를|은|는|이|가)(\s|,|$)/g,
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
-  const _SUFFIX = '(?:하고|해줘|고|어|서|해|줘)?';
+  const _SUFFIX = '(?:하고|해줘|고|어|서|해|줘|자)?';
   for (const [pat, act] of _COMPOUND_ACTIONS) {
     s = s.replace(new RegExp(pat + _SUFFIX + '(?=\\s|,|$)', 'g'),
       '\x01' + act + '\x01');
@@ -388,6 +397,140 @@ const TESTS = [
 { pat:7, input:'위생장갑 4박스 파마산치즈 3개',  expects:[{item_name:'위생장갑',quantity:4},{item_name:'파마산치즈',quantity:3}] },
 { pat:7, input:'냉동가리비 2kg 올리브 오일 3병', expects:[{item_name:'냉동가리비',quantity:2},{item_name:'올리브 오일',quantity:3}] },
 
+// ════════════ 패턴 8: 연결어/접속사 (20개) ════════════
+{ pat:8, input:'양파 3개 그리고 라면 5박스',                    expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5}] },
+{ pat:8, input:'양파 3개이랑 라면 5박스',                       expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5}] },
+{ pat:8, input:'양파 3개랑 라면 5박스',                         expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5}] },
+{ pat:8, input:'양파 3개하고 라면 5박스',                       expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5}] },
+{ pat:8, input:'양파 3개 또 라면 5박스',                        expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5}] },
+{ pat:8, input:'양파 3개, 라면 5박스',                          expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5}] },
+{ pat:8, input:'양파 3개, 라면 5박스, 우유 2봉지',              expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5},{item_name:'우유',quantity:2}] },
+{ pat:8, input:'깐마늘 5kg이랑 비프 소스 3봉지',               expects:[{item_name:'깐마늘',quantity:5},{item_name:'비프 소스',quantity:3}] },
+{ pat:8, input:'깐마늘 5kg랑 비프 소스 3봉지',                 expects:[{item_name:'깐마늘',quantity:5},{item_name:'비프 소스',quantity:3}] },
+{ pat:8, input:'깐마늘 5kg하고 비프 소스 3봉지',               expects:[{item_name:'깐마늘',quantity:5},{item_name:'비프 소스',quantity:3}] },
+{ pat:8, input:'양파 3개이랑 라면 5박스이랑 우유 2봉지',       expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5},{item_name:'우유',quantity:2}] },
+{ pat:8, input:'양파 3개랑 라면 5박스랑 우유 2봉지',           expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5},{item_name:'우유',quantity:2}] },
+{ pat:8, input:'양파 3개 그리고 라면 5박스 그리고 우유 2봉지', expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5},{item_name:'우유',quantity:2}] },
+{ pat:8, input:'파마산치즈 3개이랑 고르곤졸라 2개',            expects:[{item_name:'파마산치즈',quantity:3},{item_name:'고르곤졸라',quantity:2}] },
+{ pat:8, input:'롤백 중 4개하고 롤백 소 3개',                  expects:[{item_name:'롤백 중',quantity:4},{item_name:'롤백 소',quantity:3}] },
+{ pat:8, input:'양파 3개 입고하고 라면 5박스 차감',            expects:[{item_name:'양파',quantity:3,action:'inbound'},{item_name:'라면',quantity:5,action:'consume'}] },
+{ pat:8, input:'양파 3개 넣고 라면 5박스이랑 우유 2봉지 빼고', expects:[{item_name:'양파',quantity:3,action:'inbound'},{item_name:'라면',quantity:5},{item_name:'우유',quantity:2,action:'consume'}] },
+{ pat:8, input:'또띠아 3개',                                    expects:[{item_name:'또띠아',quantity:3}] },
+{ pat:8, input:'또띠아 3개이랑 양파 5개',                       expects:[{item_name:'또띠아',quantity:3},{item_name:'양파',quantity:5}] },
+{ pat:8, input:'양파 3개 또한 라면 5박스',                      expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5}] },
+
+// ════════════ 패턴 9: 문장 부호/특수 (15개) ════════════
+{ pat:9, input:'양파 3개 입고.',                expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:9, input:'양파 3개 입고!',                expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:9, input:'양파 3개 입고?',                expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:9, input:'양파 3개 발주해줘!',            expects:[{item_name:'양파',quantity:3,action:'order'}] },
+{ pat:9, input:'  양파 3개  ',                  expects:[{item_name:'양파',quantity:3}] },
+{ pat:9, input:'양파  3개  입고',               expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:9, input:'닭가슴살 1.5kg',                expects:[{item_name:'닭가슴살',quantity:1.5,unit:'kg'}] },
+{ pat:9, input:'설탕 0.5kg',                    expects:[{item_name:'설탕',quantity:0.5,unit:'kg'}] },
+{ pat:9, input:'닭가슴살 2.5kg 입고',           expects:[{item_name:'닭가슴살',quantity:2.5,unit:'kg',action:'inbound'}] },
+{ pat:9, input:'냉장고에서 양파 3개 꺼냈어',    expects:[{item_name:'양파',quantity:3,action:'consume'}] },
+{ pat:9, input:'창고에서 라면 5박스 가져왔어',  expects:[{item_name:'라면',quantity:5}] },
+{ pat:9, input:'양파 100개',                    expects:[{item_name:'양파',quantity:100}] },
+{ pat:9, input:'양파 999개 입고',               expects:[{item_name:'양파',quantity:999,action:'inbound'}] },
+{ pat:9, input:'양파 0개',                      expects:[{item_name:'양파',quantity:0}] },
+{ pat:9, input:'양파 3개 입고. 라면 5박스 차감', expects:[{item_name:'양파',quantity:3,action:'inbound'},{item_name:'라면',quantity:5,action:'consume'}] },
+
+// ════════════ 패턴 10: 미검증 단위+큰 숫자 (20개) ════════════
+{ pat:10, input:'삼겹살 3인분',                  expects:[{item_name:'삼겹살',quantity:3,unit:'인분'}] },
+{ pat:10, input:'김 10장',                       expects:[{item_name:'김',quantity:10,unit:'장'}] },
+{ pat:10, input:'파 2다발',                      expects:[{item_name:'파',quantity:2,unit:'다발'}] },
+{ pat:10, input:'깐마늘 5킬로그램',              expects:[{item_name:'깐마늘',quantity:5,unit:'kg'}] },
+{ pat:10, input:'깐마늘 5키로',                  expects:[{item_name:'깐마늘',quantity:5,unit:'kg'}] },
+{ pat:10, input:'설탕 500그램',                  expects:[{item_name:'설탕',quantity:500,unit:'g'}] },
+{ pat:10, input:'깐마늘 5킬로',                  expects:[{item_name:'깐마늘',quantity:5,unit:'kg'}] },
+{ pat:10, input:'닭가슴살 3키로그램',            expects:[{item_name:'닭가슴살',quantity:3,unit:'kg'}] },
+{ pat:10, input:'라면 3케이스',                  expects:[{item_name:'라면',quantity:3,unit:'박스'}] },
+{ pat:10, input:'치즈 2봉',                      expects:[{item_name:'치즈',quantity:2,unit:'봉지'}] },
+{ pat:10, input:'양파 열다섯 개',                expects:[{item_name:'양파',quantity:15}] },
+{ pat:10, input:'라면 스물 박스',                expects:[{item_name:'라면',quantity:20}] },
+{ pat:10, input:'양파 열한 개',                  expects:[{item_name:'양파',quantity:11}] },
+{ pat:10, input:'양파 열세 개',                  expects:[{item_name:'양파',quantity:13}] },
+{ pat:10, input:'양파 열네 개',                  expects:[{item_name:'양파',quantity:14}] },
+{ pat:10, input:'삼겹살 3인분 입고',             expects:[{item_name:'삼겹살',quantity:3,unit:'인분',action:'inbound'}] },
+{ pat:10, input:'김 10장 차감',                  expects:[{item_name:'김',quantity:10,unit:'장',action:'consume'}] },
+{ pat:10, input:'파 2다발 발주',                 expects:[{item_name:'파',quantity:2,unit:'다발',action:'order'}] },
+{ pat:10, input:'김 열다섯 장',                  expects:[{item_name:'김',quantity:15,unit:'장'}] },
+{ pat:10, input:'파 세 다발 입고',               expects:[{item_name:'파',quantity:3,unit:'다발',action:'inbound'}] },
+
+// ════════════ 패턴 11: 아이템명 혼동 방지 (15개) ════════════
+{ pat:11, input:'한우 3kg',                      expects:[{item_name:'한우',quantity:3,unit:'kg'}] },
+{ pat:11, input:'마스카포네 2개',                expects:[{item_name:'마스카포네',quantity:2}] },
+{ pat:11, input:'네추럴치즈 3개',                expects:[{item_name:'네추럴치즈',quantity:3}] },
+{ pat:11, input:'세제 2개',                      expects:[{item_name:'세제',quantity:2}] },
+{ pat:11, input:'두부 3개',                      expects:[{item_name:'두부',quantity:3}] },
+{ pat:11, input:'세트메뉴 2개',                  expects:[{item_name:'세트메뉴',quantity:2}] },
+{ pat:11, input:'한우 3kg 입고',                 expects:[{item_name:'한우',quantity:3,unit:'kg',action:'inbound'}] },
+{ pat:11, input:'두부 3개 차감',                 expects:[{item_name:'두부',quantity:3,action:'consume'}] },
+{ pat:11, input:'세제 2개 발주',                 expects:[{item_name:'세제',quantity:2,action:'order'}] },
+{ pat:11, input:'한우 3kg이랑 두부 5개',         expects:[{item_name:'한우',quantity:3},{item_name:'두부',quantity:5}] },
+{ pat:11, input:'또띠아 3개 입고',               expects:[{item_name:'또띠아',quantity:3,action:'inbound'}] },
+{ pat:11, input:'양파를 3개 입고',               expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:11, input:'양파는 3개 입고',               expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:11, input:'라면이 5박스 입고',             expects:[{item_name:'라면',quantity:5,action:'inbound'}] },
+{ pat:11, input:'우유가 3봉지 입고',             expects:[{item_name:'우유',quantity:3,action:'inbound'}] },
+
+// ════════════ 패턴 12: 복합 동작어 + 써서 (15개) ════════════
+{ pat:12, input:'양파 3개 가져다놨어',           expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:12, input:'양파 3개 채워놨고',             expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:12, input:'양파 3개 꺼내썼고',             expects:[{item_name:'양파',quantity:3,action:'consume'}] },
+{ pat:12, input:'양파 3개 다썼고',               expects:[{item_name:'양파',quantity:3,action:'consume'}] },
+{ pat:12, input:'양파 3개 채워 뒀어',            expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:12, input:'양파 3개 다 쓰고',              expects:[{item_name:'양파',quantity:3,action:'consume'}] },
+{ pat:12, input:'깐마늘 3kg 써서',               expects:[{item_name:'깐마늘',quantity:3,unit:'kg',action:'consume'}] },
+{ pat:12, input:'양파 3개 들여놨고',             expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:12, input:'양파 3개 넣어뒀어',             expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:12, input:'양파 3개 넣어놨고',             expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:12, input:'양파 3개 꺼내 쓰고',            expects:[{item_name:'양파',quantity:3,action:'consume'}] },
+{ pat:12, input:'양파 3개 버렸어',               expects:[{item_name:'양파',quantity:3,action:'consume'}] },
+{ pat:12, input:'양파 3개 버렸고',               expects:[{item_name:'양파',quantity:3,action:'consume'}] },
+{ pat:12, input:'양파 3개 들어왔어',             expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:12, input:'양파 3개 사용해',               expects:[{item_name:'양파',quantity:3,action:'consume'}] },
+
+// ════════════ 패턴 13: 복합 시나리오 (15개) ════════════
+{ pat:13, input:'양파 3개 입고 라면 5박스 차감 우유 2봉지 발주 참치 4캔 입고', expects:[{item_name:'양파',quantity:3,action:'inbound'},{item_name:'라면',quantity:5,action:'consume'},{item_name:'우유',quantity:2,action:'order'},{item_name:'참치',quantity:4,action:'inbound'}] },
+{ pat:13, input:'파마산치즈 3개 입고 깐마늘 5kg 차감 롤백 중 10개 발주', expects:[{item_name:'파마산치즈',quantity:3,action:'inbound'},{item_name:'깐마늘',quantity:5,action:'consume'},{item_name:'롤백 중',quantity:10,action:'order'}] },
+{ pat:13, input:'알리오 올리오 소스 2봉지 넣고 토마토 비프 소스 3봉지 빼고', expects:[{item_name:'알리오올리오소스',quantity:2,action:'inbound'},{item_name:'토마토비프소스',quantity:3,action:'consume'}] },
+{ pat:13, input:'양파 3개 라면 5박스 우유 2봉지 참치 4캔 깐마늘 2kg', expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5},{item_name:'우유',quantity:2},{item_name:'참치',quantity:4},{item_name:'깐마늘',quantity:2}] },
+{ pat:13, input:'입고 양파 3개',                 expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:13, input:'발주 라면 5박스',               expects:[{item_name:'라면',quantity:5,action:'order'}] },
+{ pat:13, input:'차감 우유 2봉지',               expects:[{item_name:'우유',quantity:2,action:'consume'}] },
+{ pat:13, input:'양파 3개 넣기',                 expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:13, input:'양파 3개 빼기',                 expects:[{item_name:'양파',quantity:3,action:'consume'}] },
+{ pat:13, input:'파마산치즈 5개 발주해줘',       expects:[{item_name:'파마산치즈',quantity:5,action:'order'}] },
+{ pat:13, input:'양파 3개 끝에 라면 5박스',       expects:[{item_name:'양파',quantity:3},{item_name:'끝에 라면',quantity:5}] },
+{ pat:13, input:'양파 3개를 넣고 라면 5박스를 빼고', expects:[{item_name:'양파',quantity:3,action:'inbound'},{item_name:'라면',quantity:5,action:'consume'}] },
+{ pat:13, input:'양파 5개은 입고',               expects:[{item_name:'양파',quantity:5,action:'inbound'}] },
+{ pat:13, input:'양파 세 개 라면 5박스',          expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5}] },
+{ pat:13, input:'양파 3개 그리고',               expects:[{item_name:'양파',quantity:3}] },
+
+// ════════════ 패턴 14: 넣고/가져왔/콤마 (20개) ════════════
+{ pat:14, input:'양파 3개 넣고 라면 5박스 빼고',                    expects:[{item_name:'양파',quantity:3,action:'inbound'},{item_name:'라면',quantity:5,action:'consume'}] },
+{ pat:14, input:'양파 3개 넣자',                                    expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:14, input:'라면 5박스 가져왔어',                              expects:[{item_name:'라면',quantity:5,action:'inbound'}] },
+{ pat:14, input:'우유 2봉지 가져왔고',                              expects:[{item_name:'우유',quantity:2,action:'inbound'}] },
+{ pat:14, input:'양파 3개,라면 5박스',                              expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5}] },
+{ pat:14, input:'양파 3개 ,라면 5박스',                             expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5}] },
+{ pat:14, input:'양파 3개이랑 라면 5박스이랑 우유 2봉지이랑 참치 4캔', expects:[{item_name:'양파',quantity:3},{item_name:'라면',quantity:5},{item_name:'우유',quantity:2},{item_name:'참치',quantity:4}] },
+{ pat:14, input:'양파를 3개 넣고 라면을 5박스 빼고',                expects:[{item_name:'양파',quantity:3,action:'inbound'},{item_name:'라면',quantity:5,action:'consume'}] },
+{ pat:14, input:'오늘 깐마늘 5kg 가져왔고 파마산치즈 3개 넣었어',   expects:[{item_name:'깐마늘',quantity:5,action:'inbound'},{item_name:'파마산치즈',quantity:3,action:'inbound'}] },
+{ pat:14, input:'비프 소스 4봉지, 크림 소스 3봉지, 토마토 소스 2통 입고', expects:[{item_name:'비프 소스',quantity:4,action:'inbound'},{item_name:'크림 소스',quantity:3,action:'inbound'},{item_name:'토마토 소스',quantity:2,action:'inbound'}] },
+{ pat:14, input:'양파 3개 넣고 깐마늘 2kg 넣고 우유 1봉지 넣고',   expects:[{item_name:'양파',quantity:3,action:'inbound'},{item_name:'깐마늘',quantity:2,action:'inbound'},{item_name:'우유',quantity:1,action:'inbound'}] },
+{ pat:14, input:'양파 3개랑 라면 5박스랑 우유 2봉지 주문해줘',      expects:[{item_name:'양파',quantity:3,action:'order'},{item_name:'라면',quantity:5,action:'order'},{item_name:'우유',quantity:2,action:'order'}] },
+{ pat:14, input:'양파 3개 추가해줘',                                expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:14, input:'양파 3개 차감해줘',                                expects:[{item_name:'양파',quantity:3,action:'consume'}] },
+{ pat:14, input:'양파 3개 주문해줘',                                expects:[{item_name:'양파',quantity:3,action:'order'}] },
+{ pat:14, input:'양파 3개 입고. 라면 5박스 차감.',                  expects:[{item_name:'양파',quantity:3,action:'inbound'},{item_name:'라면',quantity:5,action:'consume'}] },
+{ pat:14, input:'롤백 중 4개이랑 롤백 소 3개이랑 롤백 대 2개 발주해줘', expects:[{item_name:'롤백 중',quantity:4,action:'order'},{item_name:'롤백 소',quantity:3,action:'order'},{item_name:'롤백 대',quantity:2,action:'order'}] },
+{ pat:14, input:'라면 5박스 가져다놨어',                            expects:[{item_name:'라면',quantity:5,action:'inbound'}] },
+{ pat:14, input:'양파 3개 넣어줘',                                  expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+{ pat:14, input:'양파 3개 넣었어',                                  expects:[{item_name:'양파',quantity:3,action:'inbound'}] },
+
 ];
 
 // ── 실행 ───────────────────────────────────────────────────────────────────────
@@ -414,7 +557,7 @@ console.log(`\n${'═'.repeat(60)}`);
 console.log(`전체 통과율: ${pass}/${total} (${pct}%)`);
 console.log(`${'═'.repeat(60)}`);
 
-const PAT_NAMES = {1:'단일품목×단위',2:'2단어품목명',3:'3단어품목명',4:'혼합액션',5:'연결어미',6:'붙여쓰기',7:'실제매장품목명'};
+const PAT_NAMES = {1:'단일품목×단위',2:'2단어품목명',3:'3단어품목명',4:'혼합액션',5:'연결어미',6:'붙여쓰기',7:'실제매장품목명',8:'연결어/접속사',9:'문장부호/특수',10:'미검증단위/큰숫자',11:'아이템명혼동방지',12:'복합동작어/써서',13:'복합시나리오',14:'넣고/가져왔/콤마'};
 for (const [p, s] of Object.entries(byPat)) {
   const t2 = s.pass + s.fail;
   console.log(`  패턴 ${p} [${PAT_NAMES[p]}]: ${s.pass}/${t2} (${(s.pass/t2*100).toFixed(0)}%)`);

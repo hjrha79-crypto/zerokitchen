@@ -895,15 +895,16 @@ const _NUM_WORDS = {
 };
 const _UNITS = ['봉지','봉','박스','케이스','팩','캔','통','병','킬로그램','킬로','키로그램','키로','kg','g','그램','인분','장','묶음','롤','판','다발','개'];
 const _UNIT_MAP = {'봉':'봉지','봉지':'봉지','박스':'박스','케이스':'박스','팩':'팩','캔':'캔','통':'통','병':'병','kg':'kg','킬로':'kg','킬로그램':'kg','키로':'kg','키로그램':'kg','g':'g','그램':'g','인분':'인분','장':'장','묶음':'묶음','롤':'롤','판':'판','다발':'다발','개':'개'};
-const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','빼기','빼','차감','사용','발주','주문','받았어','받았','들어왔어','썼어','써서','뺐어','버렸','꺼냈'];
+const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','넣','빼기','빼','차감','사용','발주','주문','받았어','받았','들어왔어','가져왔','썼어','써서','뺐어','버렸','꺼냈'];
 const _ACTION_MAP = {
-  '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','넣었어':'inbound','받았어':'inbound','받았':'inbound','들어왔어':'inbound',
+  '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','넣었어':'inbound','넣':'inbound','받았어':'inbound','받았':'inbound','들어왔어':'inbound','가져왔':'inbound',
   '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','썼어':'consume','써서':'consume','뺐어':'consume','버렸':'consume','꺼냈':'consume',
   '발주':'order','주문':'order',
 };
 // 복합 동작어구: [regex_pattern, action_type]
 const _COMPOUND_ACTIONS = [
   ['가져다\\s*놨','inbound'],['가져다\\s*놔','inbound'],
+  ['가져\\s*왔','inbound'],
   ['들여\\s*놨','inbound'],['들여\\s*놔','inbound'],
   ['넣어\\s*뒀','inbound'],['넣어\\s*놨','inbound'],
   ['꺼내\\s*썼','consume'],['꺼내\\s*쓰','consume'],
@@ -926,6 +927,12 @@ const _ALIAS = {
 
 function _ruleNormalize(text) {
   let s = text.trim();
+  // 0. 전처리: 문장부호·콤마·위치격·시간어 제거
+  s = s.replace(/[!?~。！？]/g, '');
+  s = s.replace(/\.(?!\d)/g, '');
+  s = s.replace(/,/g, ' ');
+  s = s.replace(/[가-힣]+에서\s/g, '');
+  s = s.replace(/^(오늘|어제|내일|아까|방금|지금)\s/, '');
   const up = _UNITS.join('|');
 
   // 1. 품목명+한글숫자+단위 붙여쓰기 분리 (단위가 바로 붙은 경우만 — 마스카포네 같은 오분리 방지)
@@ -952,15 +959,18 @@ function _ruleNormalize(text) {
   // 3. 숫자+단위 붙여쓰기 분리
   s = s.replace(new RegExp('(\\d+)(' + up + ')', 'g'), '$1 $2');
 
-  // 3b. 단위+조사 제거 (예: "5개은" → "5개", "3봉지를" → "3봉지")
-  s = s.replace(new RegExp('(' + up + ')(을|를|은|는|이|가)(\\s|,|$)', 'g'), '$1$3');
+  // 3b. 단위+조사/연결어 제거 (예: "5개은" → "5개", "3개이랑" → "3개")
+  s = s.replace(new RegExp('(' + up + ')(을|를|은|는|이|가|이랑|랑|하고)(\\s|,|$)', 'g'), '$1 $3');
+
+  // 3c. 연결 접속사 제거 (예: "그리고", "또")
+  s = s.replace(/(^|\s)(그리고|또한|또)(\s|,|$)/g, '$1$3');
 
   // 4. 조사 제거
   s = s.replace(/([가-힣]{2,})(을|를|은|는|이|가)(\s|,|$)/g,
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
 
   // 5a. 복합 동작어구 → 마커 치환 (단일 동작어보다 먼저 처리)
-  const _SUFFIX = '(?:하고|해줘|고|어|서|해|줘)?';
+  const _SUFFIX = '(?:하고|해줘|고|어|서|해|줘|자)?';
   for (const [pat, act] of _COMPOUND_ACTIONS) {
     s = s.replace(new RegExp(pat + _SUFFIX + '(?=\\s|,|$)', 'g'),
       '\x01' + act + '\x01');

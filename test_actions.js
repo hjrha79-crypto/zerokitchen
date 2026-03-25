@@ -9,14 +9,15 @@ const _NUM_WORDS = {
 };
 const _UNITS = ['봉지','봉','박스','케이스','팩','캔','통','병','킬로그램','킬로','키로그램','키로','kg','g','그램','인분','장','묶음','롤','판','다발','개'];
 const _UNIT_MAP = {'봉':'봉지','봉지':'봉지','박스':'박스','케이스':'박스','팩':'팩','캔':'캔','통':'통','병':'병','kg':'kg','킬로':'kg','킬로그램':'kg','키로':'kg','키로그램':'kg','g':'g','그램':'g','인분':'인분','장':'장','묶음':'묶음','롤':'롤','판':'판','다발':'다발','개':'개'};
-const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','빼기','빼','차감','사용','발주','주문','받았어','받았','들어왔어','썼어','뺐어','버렸','꺼냈'];
+const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','넣','빼기','빼','차감','사용','발주','주문','받았어','받았','들어왔어','가져왔','썼어','써서','뺐어','버렸','꺼냈'];
 const _ACTION_MAP = {
-  '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','넣었어':'inbound','받았어':'inbound','받았':'inbound','들어왔어':'inbound',
-  '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','썼어':'consume','뺐어':'consume','버렸':'consume','꺼냈':'consume',
+  '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','넣었어':'inbound','넣':'inbound','받았어':'inbound','받았':'inbound','들어왔어':'inbound','가져왔':'inbound',
+  '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','썼어':'consume','써서':'consume','뺐어':'consume','버렸':'consume','꺼냈':'consume',
   '발주':'order','주문':'order',
 };
 const _COMPOUND_ACTIONS = [
   ['가져다\\s*놨','inbound'],['가져다\\s*놔','inbound'],
+  ['가져\\s*왔','inbound'],
   ['들여\\s*놨','inbound'],['들여\\s*놔','inbound'],
   ['넣어\\s*뒀','inbound'],['넣어\\s*놨','inbound'],
   ['꺼내\\s*썼','consume'],['꺼내\\s*쓰','consume'],
@@ -27,20 +28,30 @@ const _NAME_JUNK = /좀|는데|인데|그리고|이랑/;
 const _ALIAS = {
   '개깐마늘':'깐마늘','개깐 마늘':'깐마늘','까마늘':'깐마늘',
   '파마산 치즈':'파마산치즈','고르곤 졸라':'고르곤졸라','고르곤':'고르곤졸라',
-  '위생적 장갑':'위생장갑','위생적장갑':'위생장갑',
+  '위생적 장갑':'위생장갑','위생적장갑':'위생장갑','위생 장갑':'위생장갑',
+  '깐 마늘':'깐마늘',
   '그라나 바다도':'그라나 파다노','파슬리 후레이크':'파슬리 플레이크',
   '피프 소스':'비프 소스','피프소스':'비프 소스',
+  '롤백중':'롤백 중','롤백소':'롤백 소','롤백대':'롤백 대',
+  '알리오 올리오 소스':'알리오올리오소스','토마토 비프 소스':'토마토비프소스',
+  '냉동 가리비':'냉동가리비',
 };
 
 // ── Functions (synced with index.html) ──
 function _ruleNormalize(text) {
   let s = text.trim();
+  // 0. 전처리: 문장부호·콤마·위치격·시간어 제거
+  s = s.replace(/[!?~。！？]/g, '');
+  s = s.replace(/\.(?!\d)/g, '');
+  s = s.replace(/,/g, ' ');
+  s = s.replace(/[가-힣]+에서\s/g, '');
+  s = s.replace(/^(오늘|어제|내일|아까|방금|지금)\s/, '');
   const up = _UNITS.join('|');
 
   const nk = Object.keys(_NUM_WORDS).sort((a,b)=>b.length-a.length);
   for (const nw of nk) {
-    s = s.replace(new RegExp('([가-힣])' + nw + '(' + up + '|\\s|$)', 'g'),
-      function(m,p,t){ return p + ' ' + nw + t; });
+    s = s.replace(new RegExp('([가-힣]+)' + nw + '(' + up + ')', 'g'),
+      function(m,p,t){ return p + ' ' + nw + ' ' + t; });
   }
 
   // 1b. 한글숫자+단위 붙여쓰기 분리 (띄어쓰기 후: "두병" → "두 병")
@@ -58,10 +69,15 @@ function _ruleNormalize(text) {
 
   s = s.replace(new RegExp('(\\d+)(' + up + ')', 'g'), '$1 $2');
 
+  // 3b. 단위+조사/연결어 제거
+  s = s.replace(new RegExp('(' + up + ')(을|를|은|는|이|가|이랑|랑|하고)(\\s|,|$)', 'g'), '$1 $3');
+  // 3c. 연결 접속사 제거
+  s = s.replace(/(^|\s)(그리고|또한|또)(\s|,|$)/g, '$1$3');
+
   s = s.replace(/([가-힣]{2,})(을|를|은|는|이|가)(\s|,|$)/g,
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
 
-  const _SUFFIX = '(?:하고|해줘|고|어|서|해|줘)?';
+  const _SUFFIX = '(?:하고|해줘|고|어|서|해|줘|자)?';
   for (const [pat, act] of _COMPOUND_ACTIONS) {
     s = s.replace(new RegExp(pat + _SUFFIX + '(?=\\s|,|$)', 'g'),
       '\x01' + act + '\x01');
@@ -122,6 +138,7 @@ function _itemConfidence(name, seg) {
   if (!_NAME_JUNK.test(name)) score += 0.3;
   if (seg.qtyParsed) score += 0.3;
   if (seg.action && seg.action !== 'stock_check') score += 0.4;
+  else if (seg.qtyParsed) score += 0.2;
   return Math.round(score * 100) / 100;
 }
 
