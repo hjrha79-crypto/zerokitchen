@@ -828,6 +828,7 @@ const ACTION_LIST = [
 ];
 
 let _draftItems = [];  // 현재 검토 중인 draft
+let _parseMeta  = { confidence: null, usedLLM: false }; // 파싱 메타데이터 (로그용)
 
 // 자연어 입력 처리
 async function handleNaturalInput() {
@@ -852,13 +853,15 @@ async function handleNaturalInput() {
     // 1차: Rule Engine (빠름, 비용 없음)
     let parsed = null;
     const ruleResult = ruleEngine(raw);
+    _parseMeta = { confidence: ruleResult.confidence || 0, usedLLM: false };
     if (!ruleResult.needsFallback && ruleResult.results.length > 0) {
       parsed = ruleResult.results;
       document.getElementById('parseLoading')?.remove();
-      console.log('Rule Engine 처리:', parsed.length, '개 품목 (최저 신뢰도:', Math.round((ruleResult.confidence||0)*100)+'%)');
+      console.log('Rule Engine 처리:', parsed.length, '개 품목 (최저 신뢰도:', Math.round(_parseMeta.confidence*100)+'%)');
     } else {
       // 2차: LLM fallback (아이템 중 하나라도 confidence < 0.8)
-      console.log('LLM fallback 실행 (최저 신뢰도:', Math.round((ruleResult.confidence||0)*100)+'%)',
+      _parseMeta.usedLLM = true;
+      console.log('LLM fallback 실행 (최저 신뢰도:', Math.round(_parseMeta.confidence*100)+'%)',
         ruleResult.results.length ? '- 항목별: ' + ruleResult.results.map(r=>r.item_name+'='+r._score).join(', ') : '');
       parsed = await parseWithClaude(raw);
       document.getElementById('parseLoading')?.remove();
@@ -866,6 +869,15 @@ async function handleNaturalInput() {
 
     if (!parsed || !parsed.length) {
       addResult(raw, '❌ 품목을 인식하지 못했습니다. 다시 입력해 주세요.', 'err');
+      // 파싱 실패 로그
+      db.from('kitchen_logs').insert({
+        store_id: SID, raw_input: raw, parsed_items: null,
+        final_action: null, success: false,
+        error_reason: '품목 인식 실패',
+        confidence: _parseMeta.confidence, used_llm: _parseMeta.usedLLM
+      }).then(({ error }) => {
+        if (error) console.warn('kitchen_logs insert failed:', error.message);
+      });
       return;
     }
 
@@ -877,6 +889,15 @@ async function handleNaturalInput() {
   } catch(e) {
     document.getElementById('parseLoading')?.remove();
     addResult(raw, '❌ 파싱 오류: ' + e.message, 'err');
+    // 파싱 예외 로그
+    db.from('kitchen_logs').insert({
+      store_id: SID, raw_input: raw, parsed_items: null,
+      final_action: null, success: false,
+      error_reason: '파싱 오류: ' + e.message,
+      confidence: _parseMeta.confidence, used_llm: _parseMeta.usedLLM
+    }).then(({ error }) => {
+      if (error) console.warn('kitchen_logs insert failed:', error.message);
+    });
   } finally {
     btn.disabled = false;
     btnTxt.textContent = '입력';
@@ -1325,12 +1346,54 @@ async function confirmReview() {
     req._source = 'table_review';
 
     const result = await processRequest(req);
+
+    // ── kitchen_logs 기록 ──
+    const actions = _draftItems.map(it => it.action || 'stock_check');
+    const uniqueActions = [...new Set(actions)];
+    const finalAction = uniqueActions.length === 1 ? uniqueActions[0] : 'mixed';
+    const logSuccess = result.status === 'success' || result.status === 'partial';
+    const logErrors = result.errors?.map(e => `${e.name}: ${e.reason}`).join('; ');
+
+    db.from('kitchen_logs').insert({
+      store_id:     SID,
+      raw_input:    rawText,
+      parsed_items: _draftItems.map(it => ({
+        item_name: it.item_name, quantity: it.quantity,
+        unit: it.unit, action: it.action
+      })),
+      final_action: finalAction,
+      success:      logSuccess,
+      error_reason: logErrors || null,
+      confidence:   _parseMeta.confidence,
+      used_llm:     _parseMeta.usedLLM
+    }).then(({ error }) => {
+      if (error) console.warn('kitchen_logs insert failed:', error.message);
+    });
+
     cancelReview();
     // 확정 후 입력창 클리어
     document.getElementById('nlInput').value = '';
     addResult(rawText, formatResult(result), result.status === 'success' ? 'ok' : 'warn');
     renderInventory();
   } catch(e) {
+    // 실행 실패 시에도 로그 기록
+    const rawText = document.getElementById('reviewPanel').dataset.rawText || '';
+    db.from('kitchen_logs').insert({
+      store_id:     SID,
+      raw_input:    rawText,
+      parsed_items: _draftItems.map(it => ({
+        item_name: it.item_name, quantity: it.quantity,
+        unit: it.unit, action: it.action
+      })),
+      final_action: 'stock_check',
+      success:      false,
+      error_reason: e.message,
+      confidence:   _parseMeta.confidence,
+      used_llm:     _parseMeta.usedLLM
+    }).then(({ error }) => {
+      if (error) console.warn('kitchen_logs insert failed:', error.message);
+    });
+
     showToast('저장 실패: ' + e.message);
   } finally {
     btn.disabled = false; btn.textContent = '✅ 확정 저장';
