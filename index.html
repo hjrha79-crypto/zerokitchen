@@ -790,7 +790,20 @@ function detectCommand(text) {
     return { request_type: 'order_generate', criteria: 'below_threshold' };
   }
 
-  // 개별 품목 재고 조회: "치즈 몇 봉 남았지?" / "양파 몇 개 있어" / "토마토 재고 얼마��"
+  // 재고 설정: "우유 재고 5박스로 설정" / "양파 재고 3개로 변경" / "치즈 재고 10봉지"
+  const _QW = {하나:1,한:1,둘:2,두:2,셋:3,세:3,넷:4,네:4,다섯:5,여섯:6,일곱:7,여덟:8,아홉:9,열:10,열하나:11,열둘:12,스물:20};
+  const stockSet = s.match(/^(.+?)\s*재고\s*(\d+|하나|한|둘|두|셋|세|넷|네|다섯|여섯|일곱|여덟|아홉|열|열하나|열둘|스물)\s*(개|봉지?|박스|케이스|팩|캔|통|병|kg|g|장|묶음|롤|판|다발)?\s*(?:으로|로)?\s*(?:설정|변경|세팅|맞춰|바꿔)?[\s줘해]*$/);
+  if (stockSet) {
+    const name = stockSet[1].replace(/\s*(은|는|이|가)$/,'').trim();
+    const qty  = _QW[stockSet[2]] ?? parseInt(stockSet[2]);
+    const unit = stockSet[3] || '개';
+    if (name && !isNaN(qty)) return {
+      request_type: 'inventory_update',
+      items: [{ name, quantity: qty, unit, action_type: 'stock_check' }]
+    };
+  }
+
+  // 개별 품목 재고 조회: "치즈 몇 봉 남았지?" / "양파 몇 개 있어" / "토마토 재고 얼마나"
   const _uPat = '(?:개|봉지?|박스|팩|캔|통|병|kg|g|장|묶음|롤|판|다발)?';
   const itemQryRe = new RegExp(
     '^(.+?)\\s*(?:' +
