@@ -790,8 +790,15 @@ function detectCommand(text) {
     return { request_type: 'order_generate', criteria: 'below_threshold' };
   }
 
-  // 재고 조회: "재고 뭐야" / "지금 재고"
-  if (/재고.*(뭐야|알려줘|조회|확인)|(뭐가|얼마나).*(있어|남았)/.test(s)) {
+  // 개별 품목 재고 조회: "치즈 몇 봉 남았지?" / "양파 몇 개 있어" / "토마토 재고 얼마나"
+  const itemQry = s.match(/^(.+?)\s*(?:몇\s*(?:개|봉지?|박스|팩|캔|통|병|kg|g)?\s*(?:남았|있어|있지|남아|남음|남았지)|(?:재고|수량)\s*(?:얼마|몇|확인|알려줘|알려|뭐야)|얼마나\s*(?:남았|있어|남아)|(?:남았|있어)\s*\??)[\s?]*$/);
+  if (itemQry) {
+    const name = itemQry[1].replace(/\s*(은|는|이|가|요|좀)$/,'').trim();
+    if (name) return { request_type: 'inventory_read', filter: 'specific', names: [name] };
+  }
+
+  // 전체 재고 조회: "재고 뭐야" / "지금 재고" / "재고 얼마나 남았어"
+  if (/재고.*(뭐야|알려줘|조회|확인|얼마|남았)|(뭐가|얼마나).*(있어|남았)/.test(s)) {
     return { request_type: 'inventory_read', filter: 'all' };
   }
 
