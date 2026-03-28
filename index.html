@@ -787,7 +787,7 @@ function detectCommand(text) {
 
   // 질문형 문장 → LLM fallback (품목 파싱하지 않음)
   const _questionPatterns = /[?？]$|^(이번|왜|어떻게|무슨|얼마나|뭐가|뭘|어떤|어디|언제|몇\s*번|얼마|뭐야)\b|(?:뭐야|뭘까|할까|인가요|인가|일까|나요|인지|건지|걸까)\s*[?？]?\s*$/;
-  if (_questionPatterns.test(s) && !/(?:몇\s*(?:개|봉지?|박스|팩|캔|통|병|kg|g|장|묶음|롤|판|다발|단)\s*(?:남았|있어|있지|남아|남음|있나|있냐)|재고\s*(?:얼마|몇|확인|알려|뭐야|봐줘?)|얼마나\s*(?:남았|있어|남아)|얼마\s*(?:남았|있어|남아)|(?:발주|주문).+(?:뭐야|뭐|있어|해야)|부족|떨어진)/.test(s)) {
+  if (_questionPatterns.test(s) && !/(?:몇\s*(?:개|봉지?|박스|팩|캔|통|병|kg|g|장|묶음|롤|판|다발|단)\s*(?:남았|있어|있지|남아|남음|있나|있냐)|재고\s*(?:얼마|몇|확인|알려|뭐야|봐줘?)|얼마나\s*(?:남았|있어|남아)|얼마\s*(?:남았|있어|남아)|(?:발주|주문).+(?:뭐야|뭐|있어|해야|보여줘|알려줘|목록|필요)|뭐.+(?:발주|주문|시켜)|^(?:부족|떨어진))/.test(s)) {
     return { request_type: '_llm_question', text: s };
   }
 
@@ -804,8 +804,12 @@ function detectCommand(text) {
     return { request_type: '_switch_tab', tab: 'inventory' };
   }
 
-  // 발주 조회: "발주해야 되는 거 뭐야" / "발주 뭐야" / "뭐 발주해야 돼"
-  if (/발주|주문해야|시켜야/.test(s) && /뭐야|뭐|있어|해야/.test(s)) {
+  // 발주 조회: "발주해야 되는 거 뭐야" / "발주 뭐야" / "뭐 발주해야 돼" / "발주 목록 보여줘"
+  if (/발주|주문해야|시켜야/.test(s) && /뭐야|뭐|있어|해야|보여줘|알려줘|목록|필요/.test(s)) {
+    return { request_type: 'order_generate', criteria: 'below_threshold' };
+  }
+  // "뭐 주문해야 해?" 패턴
+  if (/뭐.*(주문|발주|시켜)/.test(s)) {
     return { request_type: 'order_generate', criteria: 'below_threshold' };
   }
 
@@ -814,14 +818,14 @@ function detectCommand(text) {
   const itemQryRe = new RegExp(
     '^(.+?)\\s*(?:' +
       '몇\\s*' + _uPat + '\\s*(?:남았|있어|있지|남아|남음|남았지|있나|있냐|있을까|있나요)' +
-      '|(?:재고|수량)\\s*(?:얼마|몇|확인|알려줘?|뭐야|봐줘?)' +
+      '|(?:재고|수량)\\s*(?:얼마|몇|확인|알려줘?|뭐야|봐줘?|보여줘?)' +
       '|얼마나\\s*(?:남았|있어|남아|있나)' +
       '|얼마\\s*(?:남았|있어|남아)' +
       '|(?:남았|있어)\\s*\\??' +
     ')[\\.\\s?!]*$'
   );
   // 동작어가 포함되지 않은 경우만 재고 조회로 인식 (혼합 입력 방지)
-  const _hasActionWord = /(?:추가|입고|넣어|넣기|넣었어|빼기|빼|차감|사용|받았어|들어왔어|썼어|뺐어|버렸|꺼냈)/.test(s);
+  const _hasActionWord = /(?:추가|입고|넣어|넣기|넣었어|빼기|빼|차감|사용|소비|소진|빠짐|받았어|들어왔어|썼어|뺐어|버렸|꺼냈)/.test(s);
   const itemQry = s.match(itemQryRe);
   if (itemQry && !_hasActionWord) {
     const name = itemQry[1].replace(/\s*(은|는|이|가|요|좀|지금)$/,'').trim();
@@ -855,6 +859,18 @@ function detectCommand(text) {
     const name = tgtOnly[1].trim();
     const tgt  = QW[tgtOnly[2]] ?? parseInt(tgtOnly[2]);
     return { request_type: 'set_stock_config', items: [{ name, target_stock: tgt }] };
+  }
+
+  // 재고 설정: "우유 재고 5박스로 설정" / "치즈 재고 10개로 설정" / "토마토소스 8개로 맞춰줘"
+  const QW_SET = {하나:1,둘:2,셋:3,넷:4,다섯:5,여섯:6,일곱:7,여덟:8,아홉:9,열:10};
+  const stockSet = s.match(/^(.+?)\s+(?:재고\s+)?(\d+|하나|둘|셋|넷|다섯|여섯|일곱|여덟|아홉|열)\s*(?:개|봉지|봉|박스|팩|캔|통|병|kg|g|단|망|모)?\s*(?:으로|로)?\s*(?:설정|세팅|맞춰\s*줘|맞춰)/);
+  if (stockSet) {
+    const name = stockSet[1].replace(/\s*재고\s*$/, '').trim();
+    const qty  = QW_SET[stockSet[2]] ?? parseInt(stockSet[2]);
+    return {
+      request_type: 'inventory_update',
+      items: [{ name, quantity: qty, unit: '개' }]
+    };
   }
 
   // 수량 변경: "치즈 두 개로 바꿔 줘" / "양파 5개로 수정"
@@ -1065,18 +1081,19 @@ const _NUM_WORDS = {
   '열하나':11,'열한':11,'열둘':12,'열두':12,
   '열셋':13,'열세':13,'열넷':14,'열네':14,'열다섯':15,'스물':20,
 };
-const _UNITS = ['봉지','봉','박스','케이스','팩','캔','통','병','킬로그램','킬로','키로그램','키로','kg','g','그램','인분','장','묶음','롤','판','다발','단','개'];
-const _UNIT_MAP = {'봉':'봉지','봉지':'봉지','박스':'박스','케이스':'박스','팩':'팩','캔':'캔','통':'통','병':'병','kg':'kg','킬로':'kg','킬로그램':'kg','키로':'kg','키로그램':'kg','g':'g','그램':'g','인분':'인분','장':'장','묶음':'묶음','롤':'롤','판':'판','다발':'다발','단':'단','개':'개'};
-const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','넣','빼기','빼','차감','사용','발주','주문','받았어','받았','들어왔어','가져왔','썼어','써서','뺐어','버렸','꺼냈'];
+const _UNITS = ['봉지','봉','박스','케이스','팩','캔','통','병','킬로그램','킬로','키로그램','키로','kg','g','그램','인분','장','묶음','롤','판','다발','단','망','모','개'];
+const _UNIT_MAP = {'봉':'봉지','봉지':'봉지','박스':'박스','케이스':'박스','팩':'팩','캔':'캔','통':'통','병':'병','kg':'kg','킬로':'kg','킬로그램':'kg','키로':'kg','키로그램':'kg','g':'g','그램':'g','인분':'인분','장':'장','묶음':'묶음','롤':'롤','판':'판','다발':'다발','단':'단','망':'망','모':'모','개':'개'};
+const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','넣','빼기','빼','차감','사용','소비','소진','빠짐','발주','주문','받았어','받았','들어왔어','가져왔','썼어','써서','뺐어','버렸','꺼냈'];
 const _ACTION_MAP = {
   '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','넣었어':'inbound','넣':'inbound','받았어':'inbound','받았':'inbound','들어왔어':'inbound','가져왔':'inbound',
-  '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','썼어':'consume','써서':'consume','뺐어':'consume','버렸':'consume','꺼냈':'consume',
+  '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','소비':'consume','소진':'consume','빠짐':'consume','썼어':'consume','써서':'consume','뺐어':'consume','버렸':'consume','꺼냈':'consume',
   '발주':'order','주문':'order',
 };
 // 복합 동작어구: [regex_pattern, action_type]
 const _COMPOUND_ACTIONS = [
   ['가져다\\s*놨','inbound'],['가져다\\s*놔','inbound'],
   ['가져\\s*왔','inbound'],
+  ['들어\\s*온','inbound'],
   ['들여\\s*놨','inbound'],['들여\\s*놔','inbound'],
   ['넣어\\s*뒀','inbound'],['넣어\\s*놨','inbound'],
   ['꺼내\\s*썼','consume'],['꺼내\\s*쓰','consume'],
@@ -1142,7 +1159,7 @@ function _ruleNormalize(text) {
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
 
   // 5a. 복합 동작어구 → 마커 치환 (단일 동작어보다 먼저 처리)
-  const _SUFFIX = '(?:하고|해줘|고|어|서|해|줘|자)?';
+  const _SUFFIX = '(?:했어|하고|해줘|했음|함|고|어|서|해|줘|자)?';
   for (const [pat, act] of _COMPOUND_ACTIONS) {
     s = s.replace(new RegExp(pat + _SUFFIX + '(?=\\s|,|$)', 'g'),
       '\x01' + act + '\x01');
