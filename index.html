@@ -120,7 +120,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .no-item{text-align:center;padding:40px;color:var(--muted);font-size:14px;grid-column:1/-1}
 /* ResultCard */
 .result-card-wrap{background:var(--surface);border:1.5px solid var(--accent);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px}
-.result-card-title{font-size:12px;color:var(--text-muted);font-family:'JetBrains Mono',monospace;padding-bottom:8px;border-bottom:1px solid var(--border)}
+.result-card-title{font-size:15px;font-weight:700;color:var(--text);padding-bottom:10px;border-bottom:1px solid var(--border)}
 .result-card-body{display:flex;flex-direction:column;gap:6px}
 .rc-row{display:flex;align-items:baseline;gap:10px;padding:12px 0;border-bottom:1px solid var(--surface2)}
 .rc-row:last-child{border-bottom:none}
@@ -136,6 +136,15 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .similar-card-btns button{flex:1;padding:13px;border-radius:10px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer}
 .similar-btn-link{background:var(--accent);border:none;color:#fff}
 .similar-btn-new{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+/* Just Talk 유도 */
+.just-talk{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px 16px;margin-bottom:0}
+.just-talk-title{font-size:15px;font-weight:700;color:var(--text);margin-bottom:12px;line-height:1.5}
+.just-talk-sub{font-size:13px;color:var(--muted);margin-bottom:8px;font-weight:600}
+.just-talk-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:6px}
+.just-talk-item{font-size:14px;color:var(--accent);cursor:pointer;padding:8px 12px;background:var(--accent-lt);border-radius:8px;transition:background .15s}
+.just-talk-item:hover{background:var(--accent);color:#fff}
+/* 묶음 확인 타이틀 */
+.rc-summary{font-size:15px;font-weight:700;color:var(--text);padding-bottom:8px}
 .result-add-btn{width:100%;padding:9px;background:transparent;border:1px dashed var(--border);border-radius:8px;color:var(--text-muted);font-family:inherit;font-size:13px;cursor:pointer;display:none}
 .result-card-btns{display:flex;gap:8px}
 .rc-btn-primary{flex:2;padding:14px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer}
@@ -258,6 +267,17 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
     <button class="nl-send-btn" id="nlSendBtn" onclick="handleNaturalInput()">
       <span id="nlBtnTxt">입력</span>
     </button>
+  </div>
+
+  <!-- Just Talk 유도 영역 -->
+  <div id="justTalk" class="just-talk">
+    <div class="just-talk-title">재고 확인과 발주를 말로 빠르게 처리합니다</div>
+    <div class="just-talk-sub">따라해 보세요</div>
+    <ul class="just-talk-list">
+      <li class="just-talk-item" onclick="fillExample(this)">치즈 몇 봉 남았지?</li>
+      <li class="just-talk-item" onclick="fillExample(this)">오늘 발주 뭐 해야 돼?</li>
+      <li class="just-talk-item" onclick="fillExample(this)">토마토소스 3봉 추가</li>
+    </ul>
   </div>
 
   <!-- ResultCard -->
@@ -858,6 +878,17 @@ async function handleNaturalInput() {
   resList.insertBefore(loadCard, resList.firstChild);
 
   try {
+    // 0차: 명령 감지 (발주 조회, 재고 조회 등 — 품목 파싱 불필요)
+    if (!_items.length) await refreshItems();
+    const cmd = detectCommand(raw);
+    if (cmd) {
+      document.getElementById('parseLoading')?.remove();
+      inp.value = '';
+      const result = await processRequest(cmd);
+      addResult(raw, formatResult(result), result.status === 'success' ? 'ok' : 'warn');
+      return;
+    }
+
     // 1차: Rule Engine (빠름, 비용 없음)
     let parsed = null;
     const ruleResult = ruleEngine(raw);
@@ -1290,9 +1321,9 @@ function showReviewPanel(rawText) {
   panel.style.display = 'block';
   panel.dataset.rawText = rawText;
   _reviewEditMode = false;  // 항상 확인 모드로 시작
-  // 타이틀: 원문 표시
+  // 타이틀: 묶음 요약
   const title = document.getElementById('resultCardTitle');
-  if (title) title.textContent = '"' + rawText + '"';
+  if (title) title.textContent = `총 ${_draftItems.length}개 품목 입력되었습니다`;
   renderReviewRows();
   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -1308,15 +1339,15 @@ function renderReviewRows() {
   }
 }
 
-// 확인 모드 — 텍스트 크게, 정보 최소화
+// 확인 모드 — 전체 묶음 확인
 function renderReviewRead(body) {
   body.innerHTML = _draftItems.map((it) => {
     const a = _ACTION_LABEL[it.action] || _ACTION_LABEL['stock_check'];
     const isDefault = it._defaultApplied;
     return `
     <div class="rc-row">
-      <span class="rc-item-name">${it.item_name || '?'}${isDefault ? ' <span class="rc-default-badge">(기본값 적용됨)</span>' : ''}</span>
-      <span class="rc-item-qty">${a.prefix}${it.quantity||1}${it.unit||'개'} (${a.label})</span>
+      <span class="rc-item-name">${it.item_name || '?'} ${it.quantity||1}${it.unit||'개'}${isDefault ? ' <span class="rc-default-badge">(기본값 적용됨)</span>' : ''}</span>
+      <span class="rc-item-qty">(${a.label})</span>
     </div>`;
   }).join('');
 }
@@ -1514,8 +1545,11 @@ function formatResult(result) {
       }).join('\n') + (result.errors?.length ? '\n' + result.errors.map(e=>`❌ ${e.name}: ${e.reason}`).join('\n') : '');
     case 'inventory_state':
       return (result.items||[]).map(it => `📦 ${it.name}: ${it.quantity}${it.unit||''}`).join('\n') || '품목 없음';
-    case 'order_suggestion':
-      return (result.items||[]).map(it => `🛒 ${it.name} ${it.suggested_qty}${it.unit||''} 필요`).join('\n') || '발주 필요 없음';
+    case 'order_suggestion': {
+      const oi = result.items || [];
+      if (!oi.length) return '발주 필요 품목이 없습니다';
+      return '오늘 발주입니다 — ' + oi.map(it => `${it.name} ${it.suggested_qty}${it.unit||''}`).join(', ');
+    }
     case 'set_stock_config_result':
       return (result.updated_items||[]).map(it => `⚙️ ${it.name} — ${it.status}`).join('\n');
     default:
@@ -2150,12 +2184,28 @@ function addResult(raw, msg, type) {
   card.className = 'res-card '+(type||'ok');
   card.innerHTML = `<div class="res-raw">${raw}</div><div class="res-msg">${msg.replace(/\n/g,'<br>')}</div><div class="res-time">${now}</div>`;
   list.insertBefore(card, list.firstChild);
+  updateJustTalk();
 }
 
 let _tt=null;
 function showToast(m, ms=2500) {
   const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show');
   clearTimeout(_tt); _tt=setTimeout(()=>t.classList.remove('show'),ms);
+}
+
+// Just Talk: 예시 클릭 → 입력창에 자동 입력
+function fillExample(el) {
+  const inp = document.getElementById('nlInput');
+  inp.value = el.textContent;
+  inp.focus();
+}
+
+// Just Talk: 처리 결과가 있으면 숨기기
+function updateJustTalk() {
+  const el = document.getElementById('justTalk');
+  if (!el) return;
+  const hasResults = document.getElementById('resList')?.children.length > 0;
+  el.style.display = hasResults ? 'none' : '';
 }
 
 document.addEventListener('keydown', e=>{
