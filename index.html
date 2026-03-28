@@ -246,7 +246,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 <body>
 
 <div class="hdr">
-  <span class="logo">ZeroKitchen</span>
+  <span class="logo" onclick="resetToHome()" style="cursor:pointer">ZeroKitchen</span>
   <span class="store-nm" id="storeNm">로딩 중...</span>
   <div class="navs">
     <button class="nav active" onclick="switchTab('input',this)">입력</button>
@@ -790,10 +790,20 @@ function detectCommand(text) {
     return { request_type: 'order_generate', criteria: 'below_threshold' };
   }
 
-  // 개별 품목 재고 조회: "치즈 몇 봉 남았지?" / "양파 몇 개 있어" / "토마토 재고 얼마나"
-  const itemQry = s.match(/^(.+?)\s*(?:몇\s*(?:개|봉지?|박스|팩|캔|통|병|kg|g)?\s*(?:남았|있어|있지|남아|남음|남았지)|(?:재고|수량)\s*(?:얼마|몇|확인|알려줘|알려|뭐야)|얼마나\s*(?:남았|있어|남아)|(?:남았|있어)\s*\??)[\s?]*$/);
+  // 개별 품목 재고 조회: "치즈 몇 봉 남았지?" / "양파 몇 개 있어" / "토마토 재고 얼마��"
+  const _uPat = '(?:개|봉지?|박스|팩|캔|통|병|kg|g|장|묶음|롤|판|다발)?';
+  const itemQryRe = new RegExp(
+    '^(.+?)\\s*(?:' +
+      '몇\\s*' + _uPat + '\\s*(?:남았|있어|있지|남아|남음|남았지|있나|있냐|있을까|있나요)' +
+      '|(?:재고|수량)\\s*(?:얼마|몇|확인|알려줘?|뭐야|봐줘?)' +
+      '|얼마나\\s*(?:남았|있어|남아|있나)' +
+      '|얼마\\s*(?:남았|있어|남아)' +
+      '|(?:남았|있어)\\s*\\??' +
+    ')[\\.\\s?!]*$'
+  );
+  const itemQry = s.match(itemQryRe);
   if (itemQry) {
-    const name = itemQry[1].replace(/\s*(은|는|이|가|요|좀)$/,'').trim();
+    const name = itemQry[1].replace(/\s*(은|는|이|가|���|좀|지금)$/,'').trim();
     if (name) return { request_type: 'inventory_read', filter: 'specific', names: [name] };
   }
 
@@ -2182,6 +2192,24 @@ function switchTab(n, btn) {
   btn.classList.add('active');
   if (n==='inventory') renderInventory();
   if (n==='order') renderOrder();
+}
+
+function resetToHome() {
+  // 입력탭으로 전환
+  const inputNav = document.querySelector('.nav');
+  switchTab('input', inputNav);
+  // 처리 결과 초기화
+  document.getElementById('resList').innerHTML = '';
+  // 리뷰 패널 닫기
+  cancelReview();
+  // 입력창 초기화
+  document.getElementById('nlInput').value = '';
+  // 버튼 로딩 상태 해제
+  const btn = document.getElementById('nlSendBtn');
+  btn.disabled = false;
+  document.getElementById('nlBtnTxt').textContent = '입력';
+  // Just Talk 다시 표시
+  updateJustTalk();
 }
 
 function addResult(raw, msg, type) {
