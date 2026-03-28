@@ -128,6 +128,14 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .rc-item-qty{font-size:20px;font-weight:700;color:var(--accent);font-family:'JetBrains Mono',monospace;white-space:nowrap}
 .rc-vendor{font-size:12px;color:var(--text-muted);background:var(--surface2);border-radius:4px;padding:1px 6px;white-space:nowrap}
 .rc-item-action{font-size:12px;color:var(--text-muted);white-space:nowrap}
+.rc-default-badge{font-size:11px;color:var(--muted);background:var(--surface2);border-radius:4px;padding:2px 6px;white-space:nowrap}
+/* 유사 품목 선택 카드 */
+.similar-card{background:var(--surface);border:1.5px solid var(--warn);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;margin-bottom:10px}
+.similar-card-title{font-size:14px;font-weight:700;color:var(--text)}
+.similar-card-btns{display:flex;gap:8px}
+.similar-card-btns button{flex:1;padding:13px;border-radius:10px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.similar-btn-link{background:var(--accent);border:none;color:#fff}
+.similar-btn-new{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
 .result-add-btn{width:100%;padding:9px;background:transparent;border:1px dashed var(--border);border-radius:8px;color:var(--text-muted);font-family:inherit;font-size:13px;cursor:pointer;display:none}
 .result-card-btns{display:flex;gap:8px}
 .rc-btn-primary{flex:2;padding:14px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer}
@@ -881,10 +889,26 @@ async function handleNaturalInput() {
       return;
     }
 
-    // 모든 입력 → 확인 카드(Review Panel) 거침
+    // 유사 품목 체크 후 확인 카드 표시
     _draftItems = parsed;
     inp.value = '';
-    showReviewPanel(raw);
+
+    // 신규 품목 중 유사 기존 품목이 있는지 확인
+    const similarChecks = _draftItems.map((it, idx) => {
+      const exact = _items.find(ex =>
+        ex.item_name === it.item_name ||
+        ex.item_name.replace(/\s/g,'') === it.item_name.replace(/\s/g,'')
+      );
+      if (exact) return null; // 기존 품목 — 유사 체크 불필요
+      const similar = _findSimilarItem(it.item_name);
+      return similar ? { idx, newName: it.item_name, existName: similar } : null;
+    }).filter(Boolean);
+
+    if (similarChecks.length) {
+      await _showSimilarChoices(similarChecks, raw);
+    } else {
+      showReviewPanel(raw);
+    }
 
   } catch(e) {
     document.getElementById('parseLoading')?.remove();
@@ -1082,7 +1106,8 @@ function ruleEngine(text) {
     const confSeg = { ...seg, action: action };
     const conf = _itemConfidence(name, confSeg);
     if (conf < minConf) minConf = conf;
-    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:action, confidence:conf >= 0.8 ? 'high' : 'low', _score:conf });
+    const defaultApplied = !seg.action && fallbackAction === 'stock_check';
+    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:action, confidence:conf >= 0.8 ? 'high' : 'low', _score:conf, _defaultApplied:defaultApplied });
   }
   // 아이템 중 하나라도 confidence < 0.8 이면 전체 LLM fallback
   const needsFallback = !results.length || minConf < 0.8;
@@ -1221,6 +1246,45 @@ function fallbackParse(text) {
 }
 
 // ResultCard 표시
+// 유사 품목 찾기 — 포함 관계 또는 공통 글자 비율
+function _findSimilarItem(newName) {
+  const n = newName.replace(/\s/g,'');
+  for (const it of _items) {
+    const e = it.item_name.replace(/\s/g,'');
+    if (e === n) return null; // 정확 일치 — 유사가 아님
+    // 포함 관계 (한쪽이 다른쪽을 포함)
+    if (n.length >= 2 && e.length >= 2 && (e.includes(n) || n.includes(e))) return it.item_name;
+  }
+  return null;
+}
+
+// 유사 품목 선택 카드를 순차 표시
+async function _showSimilarChoices(checks, rawText) {
+  for (const chk of checks) {
+    const choice = await new Promise(resolve => {
+      const panel = document.getElementById('reviewPanel');
+      panel.style.display = 'block';
+      const wrap = panel.querySelector('.result-card-wrap');
+      const origHTML = wrap.innerHTML;
+      wrap.innerHTML = `
+        <div class="similar-card">
+          <div class="similar-card-title">${chk.newName}을(를) 어떻게 처리할까요?</div>
+          <div class="similar-card-btns">
+            <button class="similar-btn-link" id="simBtnLink">${chk.existName}(으)로 연결</button>
+            <button class="similar-btn-new"  id="simBtnNew">새 품목으로 추가</button>
+          </div>
+        </div>`;
+      document.getElementById('simBtnLink').onclick = () => { wrap.innerHTML = origHTML; resolve('link'); };
+      document.getElementById('simBtnNew').onclick  = () => { wrap.innerHTML = origHTML; resolve('new'); };
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    if (choice === 'link') {
+      _draftItems[chk.idx].item_name = chk.existName;
+    }
+  }
+  showReviewPanel(rawText);
+}
+
 function showReviewPanel(rawText) {
   const panel = document.getElementById('reviewPanel');
   panel.style.display = 'block';
@@ -1248,9 +1312,10 @@ function renderReviewRows() {
 function renderReviewRead(body) {
   body.innerHTML = _draftItems.map((it) => {
     const a = _ACTION_LABEL[it.action] || _ACTION_LABEL['stock_check'];
+    const isDefault = it._defaultApplied;
     return `
     <div class="rc-row">
-      <span class="rc-item-name">${it.item_name || '?'}</span>
+      <span class="rc-item-name">${it.item_name || '?'}${isDefault ? ' <span class="rc-default-badge">(기본값 적용됨)</span>' : ''}</span>
       <span class="rc-item-qty">${a.prefix}${it.quantity||1}${it.unit||'개'} (${a.label})</span>
     </div>`;
   }).join('');
