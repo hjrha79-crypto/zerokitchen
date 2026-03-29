@@ -1249,7 +1249,7 @@ function _ruleNormalize(text) {
   s = s.replace(/조금\s*있음/g, '0.3 개');
   s = s.replace(/(?:반|절반|1\/2)\s*(?:정도|쯤|만큼)?/g, '0.5 개');
   s = s.replace(/발주\s*필요/g, '0 개');
-  s = s.replace(/(?:다\s*)?떨어짐|없음|소진|다\s*(?:썼어|써버렸|나갔|떨어졌|사용)/g, '0 개');
+  s = s.replace(/(을|를|은|는|이|가)?\s*(?:(?:다\s*)?떨어짐|없음|소진|다\s*(?:썼어|써버렸|나갔|떨어졌|사용))/g, ' 0 개');
 
   // 2. 한글숫자 → 아라비아 (lookbehind 없이, 브라우저 호환)
   const numEntries = Object.entries(_NUM_WORDS).sort((a,b)=>b[0].length-a[0].length);
