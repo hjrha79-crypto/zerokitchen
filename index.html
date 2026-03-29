@@ -334,6 +334,11 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
       <option value="all">전체</option>
       <option value="low_stock">부족만</option>
     </select>
+    <select id="invSort" onchange="renderInventory()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;color:var(--text);outline:none">
+      <option value="updated">업데이트순</option>
+      <option value="name">이름순</option>
+      <option value="qty">수량순</option>
+    </select>
     <span id="invCount" style="font-size:12px;color:var(--muted);white-space:nowrap"></span>
   </div>
   <div class="inv-grid" id="invGrid"></div>
@@ -1857,9 +1862,12 @@ function renderInventory() {
   const q   = document.getElementById('invSearch')?.value.trim() || '';
   const flt = document.getElementById('invFilter')?.value || 'all';
   let items = [..._items];
+  const sort = document.getElementById('invSort')?.value || 'updated';
   if (q) items = items.filter(it => it.item_name.includes(q));
   if (flt === 'low_stock') items = items.filter(it => Number(it.current_qty) < Number(it.target_qty));
-  items.sort((a,b) => a.item_name < b.item_name ? -1 : 1);
+  if (sort === 'name') items.sort((a,b) => a.item_name < b.item_name ? -1 : 1);
+  else if (sort === 'qty') items.sort((a,b) => Number(a.current_qty) - Number(b.current_qty));
+  else items.sort((a,b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
   document.getElementById('invCount').textContent = items.length + '개';
   if (!items.length) { grid.innerHTML = '<div class="no-item">품목 없음</div>'; return; }
   grid.innerHTML = items.map(it => {
