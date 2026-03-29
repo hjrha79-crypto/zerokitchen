@@ -962,11 +962,7 @@ async function handleNaturalInput() {
   const btnTxt = document.getElementById('nlBtnTxt');
   if (!raw) return;
 
-  // 재고/발주 탭에서 입력 시 입력탭으로 전환 (Fix 3)
-  const _inputTab = document.getElementById('tab-input');
-  if (!_inputTab.classList.contains('active')) {
-    switchTab('input', document.querySelector('.nav'));
-  }
+  const _onInputTab = document.getElementById('tab-input').classList.contains('active');
 
   btn.disabled = true;
   btnTxt.innerHTML = '<span class="spin"></span>';
@@ -1045,6 +1041,10 @@ async function handleNaturalInput() {
       }
 
       addResult(raw, formatResult(result), result.status === 'success' ? 'ok' : 'warn');
+      if (!_onInputTab) {
+        if (document.getElementById('tab-inventory').classList.contains('active')) renderInventory();
+        if (document.getElementById('tab-order').classList.contains('active')) renderOrder();
+      }
       return;
     }
 
@@ -1115,6 +1115,25 @@ async function handleNaturalInput() {
     // 품목명 trailing 조사 제거
     for (const it of _draftItems) {
       if (it.item_name) it.item_name = it.item_name.replace(/(을|를|은|는|이|가)$/, '').trim();
+    }
+
+    // 비입력 탭: 리뷰 패널 없이 직접 처리 → 토스트 + 현재 탭 갱신
+    if (!_onInputTab) {
+      const req = draftToRequest(_draftItems);
+      req._source = 'direct_input';
+      const result = await processRequest(req);
+      for (const it of _draftItems) {
+        const existing = _sessionInputs.find(s => s.item_name === it.item_name);
+        if (existing) { existing.quantity = it.quantity; existing.unit = it.unit; }
+        else _sessionInputs.push({ item_name: it.item_name, quantity: it.quantity, unit: it.unit });
+      }
+      const msg = formatResult(result);
+      showToast(msg.replace(/[✅🆕❌📦⚙️]/g,'').trim(), 3000);
+      addResult(raw, msg, result.status === 'success' ? 'ok' : 'warn');
+      if (document.getElementById('tab-inventory').classList.contains('active')) renderInventory();
+      if (document.getElementById('tab-order').classList.contains('active')) renderOrder();
+      _draftItems = [];
+      return;
     }
 
     // Step 1: 한 문장에서 동일 품목 합산 (Fix 4)
