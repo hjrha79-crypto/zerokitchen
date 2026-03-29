@@ -24,7 +24,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .nav.active{background:var(--accent);border-color:var(--accent);color:#fff}
 /* 탭 */
 .tab-wrap{flex:1;overflow:hidden}
-.tab{display:none;height:calc(100dvh - 52px);overflow-y:auto;padding:14px 14px 24px;flex-direction:column;gap:12px}
+.tab{display:none;height:calc(100dvh - 52px - 62px);overflow-y:auto;padding:14px 14px 24px;flex-direction:column;gap:12px}
 .tab.active{display:flex}
 /* 공통 카드 */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px}
@@ -152,13 +152,39 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .rc-btn-cancel{flex:1;padding:14px;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text-muted);font-family:inherit;font-size:14px;cursor:pointer}
 .rc-btn-primary:disabled{opacity:.5}
 
-/* 자연어 입력존 */
+/* 자연어 입력존 — 전체 탭 공통 고정 */
+.global-input-zone{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 14px;position:sticky;top:52px;z-index:9}
 .nl-input-zone{display:flex;gap:8px;align-items:center}
 .nl-input{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:16px;font-family:inherit;color:var(--text);outline:none;transition:border-color .15s}
 .nl-input:focus{border-color:var(--accent)}
 .nl-input::placeholder{color:var(--text-muted);font-size:14px}
 .nl-send-btn{padding:14px 20px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity .15s;flex-shrink:0}
 .nl-send-btn:disabled{opacity:.5}
+/* 동일 품목 재입력 확인 카드 */
+.dup-card{background:var(--surface);border:1.5px solid var(--warn);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
+.dup-card-title{font-size:14px;font-weight:700;color:var(--text)}
+.dup-card-detail{font-size:13px;color:var(--dim);line-height:1.5}
+.dup-card-btns{display:flex;gap:8px}
+.dup-card-btns button{flex:1;padding:12px;border-radius:10px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.dup-btn-merge{background:var(--accent);border:none;color:#fff}
+.dup-btn-replace{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+.dup-btn-cancel{background:transparent;border:1px solid var(--border);color:var(--muted)}
+/* 설정 변경 카드 */
+.config-card{background:var(--surface);border:1.5px solid var(--accent);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.config-card-title{font-size:15px;font-weight:700;color:var(--text)}
+.config-card-opts{display:flex;gap:8px;flex-wrap:wrap}
+.config-card-opts button{padding:12px 16px;border-radius:10px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;background:var(--accent-lt);border:1px solid var(--accent);color:var(--accent)}
+.config-card-opts button:hover{background:var(--accent);color:#fff}
+.config-vendor-list{display:flex;flex-direction:column;gap:6px}
+.config-vendor-btn{padding:11px 14px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-family:inherit;font-size:14px;cursor:pointer;text-align:left;transition:all .15s}
+.config-vendor-btn:hover{border-color:var(--accent);background:var(--accent-lt);color:var(--accent)}
+.config-vendor-btn.current{border-color:var(--accent);background:var(--accent);color:#fff}
+/* 발주 리스트 인라인 버튼 */
+.order-action-inline{display:flex;gap:8px;margin-top:10px}
+.order-action-inline button{padding:10px 16px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:700;cursor:pointer}
+.oai-create{background:var(--accent);border:none;color:#fff}
+.oai-edit{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
+.oai-cancel{background:transparent;border:1px solid var(--border);color:var(--muted)}
 
 /* Table Review */
 .review-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
@@ -256,11 +282,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
   </div>
 </div>
 
-<div class="tab-wrap">
-
-<!-- 입력탭 -->
-<div id="tab-input" class="tab active">
-  <!-- 자연어 입력존 -->
+<!-- 전체 탭 공통 입력존 -->
+<div class="global-input-zone">
   <div class="nl-input-zone">
     <input class="nl-input" id="nlInput" type="text"
       placeholder="예: 치즈 2봉 양파 5개 브로콜리 세 개" autocomplete="off" enterkeyhint="send">
@@ -268,8 +291,13 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
       <span id="nlBtnTxt">입력</span>
     </button>
   </div>
+</div>
 
-  <!-- Just Talk 유도 영역 -->
+<div class="tab-wrap">
+
+<!-- 입력탭 -->
+<div id="tab-input" class="tab active">
+  <!-- Just Talk 유도 ��역 -->
   <div id="justTalk" class="just-talk">
     <div class="just-talk-title">재고 확인과 발주를 말로 빠르게 처리합니다</div>
     <div class="just-talk-sub">따라해 보세요</div>
@@ -796,6 +824,12 @@ function detectCommand(text) {
     return { request_type: '_invalid_jamo' };
   }
 
+  // 설정 변경 감지: "브로콜리 거래처 바꿔줘", "양파 최소수량 바꿔"
+  const _configMatch = s.match(/^(.+?)\s*(?:거래처|최소\s*수량|목표\s*수량|min|target)\s*(?:바꿔|변경|수정|설정|바꿔줘|변경해줘|설정해줘)/);
+  if (_configMatch) {
+    return { request_type: '_config_change', item_name: _configMatch[1].trim(), text: s };
+  }
+
   // "발주" 또는 "재고" 단독 입력 → 해당 탭으로 이동
   if (/^발주\s*$/.test(s)) {
     return { request_type: '_switch_tab', tab: 'order' };
@@ -911,6 +945,7 @@ const ACTION_LIST = [
 
 let _draftItems = [];  // 현재 검토 중인 draft
 let _parseMeta  = { confidence: null, usedLLM: false }; // 파싱 메타데이터 (로그용)
+let _sessionInputs = []; // 동일 품목 재입력 감지용 세션 이력
 
 // 자연어 입력 처리
 async function handleNaturalInput() {
@@ -967,7 +1002,35 @@ async function handleNaturalInput() {
         return;
       }
 
+      // 설정 변경 카드 (Feature 5)
+      if (cmd.request_type === '_config_change') {
+        await _showConfigCard(cmd.item_name, raw);
+        return;
+      }
+
       const result = await processRequest(cmd);
+
+      // 발주 리스트 출력 개선 — 버튼 추가 (Feature 3)
+      if (result.response_type === 'order_suggestion' && result.items?.length) {
+        const text = formatResult(result);
+        const cardId = 'orderSuggest_' + Date.now();
+        addResult(raw, text, 'ok');
+        // 결과 카드에 버튼 삽입
+        const firstCard = document.getElementById('resList')?.firstChild;
+        if (firstCard) {
+          const btnRow = document.createElement('div');
+          btnRow.className = 'order-action-inline';
+          btnRow.innerHTML = `
+            <button class="oai-create" onclick="_createOrderFromSuggestion()">발주 생성</button>
+            <button class="oai-edit" onclick="switchTab('order', document.querySelectorAll('.nav')[2])">수정</button>
+            <button class="oai-cancel" onclick="this.parentElement.remove()">취소</button>`;
+          firstCard.appendChild(btnRow);
+          // 발주 제안 데이터 임시 저장
+          window._lastOrderSuggestion = result.items;
+        }
+        return;
+      }
+
       addResult(raw, formatResult(result), result.status === 'success' ? 'ok' : 'warn');
       return;
     }
@@ -1050,7 +1113,16 @@ async function handleNaturalInput() {
     if (similarChecks.length) {
       await _showSimilarChoices(similarChecks, raw);
     } else {
-      showReviewPanel(raw);
+      // Feature 2: 동일 품목 재입력 감지
+      const dupChecks = _draftItems.map((it, idx) => {
+        const prev = _sessionInputs.find(s => s.item_name === it.item_name);
+        return prev ? { idx, item_name: it.item_name, prevQty: prev.quantity, prevUnit: prev.unit, newQty: it.quantity, newUnit: it.unit || prev.unit, action: it.action } : null;
+      }).filter(Boolean);
+      if (dupChecks.length) {
+        await _showDupChoices(dupChecks, raw);
+      } else {
+        showReviewPanel(raw);
+      }
     }
 
   } catch(e) {
@@ -1136,6 +1208,13 @@ function _ruleNormalize(text) {
     s = s.replace(new RegExp('(^|\\s)' + nw + '(' + up + ')', 'g'),
       '$1' + nw + ' $2');
   }
+
+  // 1c. "없음/다 떨어짐/소진" → 0, "거의 없음" → 0.2, "조금 있음" → 0.3, "반/절반/1/2" → 0.5
+  s = s.replace(/(?:다\s*)?떨어짐|없음|소진|다\s*(?:썼어|써버렸|나갔|떨어졌|사용)/g, '0 개');
+  s = s.replace(/발주\s*필요/g, '0 개');
+  s = s.replace(/거의\s*없음/g, '0.2 개');
+  s = s.replace(/조금\s*있음/g, '0.3 개');
+  s = s.replace(/(?:반|절반|1\/2)\s*(?:정도|쯤|만큼)?/g, '0.5 개');
 
   // 2. 한글숫자 → 아라비아 (lookbehind 없이, 브라우저 호환)
   const numEntries = Object.entries(_NUM_WORDS).sort((a,b)=>b[0].length-a[0].length);
@@ -1611,6 +1690,12 @@ async function confirmReview() {
       if (error) console.warn('kitchen_logs insert failed:', error.message);
     });
 
+    // 세션 이력에 기록 (동일 품목 재입력 감지용)
+    for (const it of _draftItems) {
+      const existing = _sessionInputs.find(s => s.item_name === it.item_name);
+      if (existing) { existing.quantity = it.quantity; existing.unit = it.unit; }
+      else _sessionInputs.push({ item_name: it.item_name, quantity: it.quantity, unit: it.unit });
+    }
     cancelReview();
     // 확정 후 입력창 클리어
     document.getElementById('nlInput').value = '';
@@ -2348,6 +2433,152 @@ function addResult(raw, msg, type) {
   card.innerHTML = `<div class="res-raw">${raw}</div><div class="res-msg">${msg.replace(/\n/g,'<br>')}</div><div class="res-time">${now}</div>`;
   list.insertBefore(card, list.firstChild);
   updateJustTalk();
+}
+
+// Feature 2: 동일 품목 재입력 확인 카드
+async function _showDupChoices(dupChecks, rawText) {
+  for (const dup of dupChecks) {
+    const mergedQty = dup.prevQty + dup.newQty;
+    const choice = await new Promise(resolve => {
+      const panel = document.getElementById('reviewPanel');
+      panel.style.display = 'block';
+      const wrap = panel.querySelector('.result-card-wrap');
+      const origHTML = wrap.innerHTML;
+      wrap.innerHTML = `
+        <div class="dup-card">
+          <div class="dup-card-title">"${dup.item_name}" — 이미 입력한 품목입니다</div>
+          <div class="dup-card-detail">
+            이전 입력: ${dup.prevQty}${dup.prevUnit}<br>
+            새 입력: ${dup.newQty}${dup.newUnit}<br>
+            합계: <strong>${mergedQty}${dup.newUnit}</strong>
+          </div>
+          <div class="dup-card-btns">
+            <button class="dup-btn-merge" id="dupMerge">합쳐서 ${mergedQty}${dup.newUnit}</button>
+            <button class="dup-btn-replace" id="dupReplace">새로 ${dup.newQty}${dup.newUnit}으로</button>
+            <button class="dup-btn-cancel" id="dupCancel">취소</button>
+          </div>
+        </div>`;
+      let resolved = false;
+      const _timeout = setTimeout(() => { if (!resolved) { resolved = true; wrap.innerHTML = origHTML; resolve('timeout'); } }, 5000);
+      document.getElementById('dupMerge').onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); wrap.innerHTML = origHTML; resolve('merge'); } };
+      document.getElementById('dupReplace').onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); wrap.innerHTML = origHTML; resolve('replace'); } };
+      document.getElementById('dupCancel').onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); wrap.innerHTML = origHTML; resolve('cancel'); } };
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    if (choice === 'merge') {
+      _draftItems[dup.idx].quantity = mergedQty;
+    } else if (choice === 'replace') {
+      // 새 수량 유지 (이미 draft에 있음)
+    } else if (choice === 'cancel') {
+      _draftItems.splice(dup.idx, 1);
+    } else if (choice === 'timeout') {
+      // 5초 무응답 — 해당 품목 제거 (자동 저장 아님)
+      _draftItems.splice(dup.idx, 1);
+      addResult(dup.item_name, '⏰ 5초 무응답 — 입력이 자동 취소되었습니다.', 'warn');
+    }
+  }
+  if (_draftItems.length) {
+    showReviewPanel(rawText);
+  } else {
+    cancelReview();
+  }
+}
+
+// Feature 3: 발주 제안 → order_requests에 일괄 INSERT
+async function _createOrderFromSuggestion() {
+  const items = window._lastOrderSuggestion;
+  if (!items?.length) { showToast('발주 대상이 없습니다.'); return; }
+  let count = 0;
+  for (const it of items) {
+    const item = _items.find(i => i.item_name === it.name);
+    if (!item) continue;
+    await db.from('order_requests').insert({
+      store_id: SID, item_id: item.item_id, item_name: it.name,
+      qty: it.suggested_qty, unit: it.unit, vendor_id: it.vendor_id || null, status: 'pending'
+    });
+    count++;
+  }
+  window._lastOrderSuggestion = null;
+  showToast(`${count}개 품목 발주 등록됨`);
+  // 버튼 제거
+  document.querySelector('.order-action-inline')?.remove();
+}
+
+// Feature 5: 설정 변경 카드
+async function _showConfigCard(itemName, rawText) {
+  const item = _items.find(it =>
+    it.item_name === itemName ||
+    it.item_name.replace(/\s/g,'') === itemName.replace(/\s/g,'') ||
+    it.item_name.includes(itemName) || itemName.includes(it.item_name)
+  );
+  if (!item) {
+    addResult(rawText, `❌ "${itemName}" 품목을 찾을 수 없습니다.`, 'err');
+    return;
+  }
+  const panel = document.getElementById('reviewPanel');
+  panel.style.display = 'block';
+  const wrap = panel.querySelector('.result-card-wrap');
+  const origHTML = wrap.innerHTML;
+  const vName = _vendors.find(v => v.vendor_id === item.vendor_id)?.vendor_name || '미지정';
+  wrap.innerHTML = `
+    <div class="config-card">
+      <div class="config-card-title">"${item.item_name}" 설정 변경</div>
+      <div style="font-size:13px;color:var(--dim);margin-bottom:4px">
+        현재 — 거래처: ${vName} / 최소수량: ${item.min_stock||0} / 목표수량: ${item.target_qty||0}
+      </div>
+      <div class="config-card-opts">
+        <button id="cfgVendor">거래처 변경</button>
+        <button id="cfgMin">최소수량 변경</button>
+        <button id="cfgTarget">목표수량 변경</button>
+      </div>
+      <div id="configSubPanel"></div>
+      <div style="margin-top:8px"><button class="rc-btn-cancel" style="width:100%" id="cfgClose">닫기</button></div>
+    </div>`;
+  document.getElementById('cfgClose').onclick = () => { wrap.innerHTML = origHTML; panel.style.display = 'none'; };
+  document.getElementById('cfgVendor').onclick = () => {
+    const sub = document.getElementById('configSubPanel');
+    sub.innerHTML = `<div class="config-vendor-list">${_vendors.map(v =>
+      `<button class="config-vendor-btn${v.vendor_id===item.vendor_id?' current':''}" onclick="_applyConfigVendor(${item.item_id},${v.vendor_id},'${v.vendor_name.replace(/'/g,"&#39;")}','${item.item_name.replace(/'/g,"&#39;")}')">${v.vendor_name}${v.vendor_id===item.vendor_id?' (현재)':''}</button>`
+    ).join('')}</div>`;
+  };
+  document.getElementById('cfgMin').onclick = () => {
+    const sub = document.getElementById('configSubPanel');
+    sub.innerHTML = `<div style="display:flex;gap:8px;align-items:center">
+      <input id="cfgMinVal" type="number" value="${item.min_stock||0}" class="inv-edit-inp" style="width:100px" placeholder="최소수량">
+      <button class="ord-btn-done" onclick="_applyConfigNum(${item.item_id},'min_stock',document.getElementById('cfgMinVal').value,'${item.item_name.replace(/'/g,"&#39;")}')">저장</button>
+    </div>`;
+    document.getElementById('cfgMinVal').focus();
+  };
+  document.getElementById('cfgTarget').onclick = () => {
+    const sub = document.getElementById('configSubPanel');
+    sub.innerHTML = `<div style="display:flex;gap:8px;align-items:center">
+      <input id="cfgTargetVal" type="number" value="${item.target_qty||0}" class="inv-edit-inp" style="width:100px" placeholder="목표수량">
+      <button class="ord-btn-done" onclick="_applyConfigNum(${item.item_id},'target_qty',document.getElementById('cfgTargetVal').value,'${item.item_name.replace(/'/g,"&#39;")}')">저장</button>
+    </div>`;
+    document.getElementById('cfgTargetVal').focus();
+  };
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function _applyConfigVendor(itemId, vendorId, vendorName, itemName) {
+  await db.from('items').update({ vendor_id: vendorId, updated_at: new Date().toISOString() }).eq('item_id', itemId);
+  const item = _items.find(i => i.item_id === itemId);
+  if (item) item.vendor_id = vendorId;
+  document.getElementById('reviewPanel').style.display = 'none';
+  addResult(itemName, `✅ "${itemName}" 거래처를 "${vendorName}"(으)로 변경했습니다.`, 'ok');
+  renderInventory();
+}
+
+async function _applyConfigNum(itemId, field, value, itemName) {
+  const num = parseFloat(value) || 0;
+  const patch = { [field]: num, updated_at: new Date().toISOString() };
+  await db.from('items').update(patch).eq('item_id', itemId);
+  const item = _items.find(i => i.item_id === itemId);
+  if (item) item[field] = num;
+  document.getElementById('reviewPanel').style.display = 'none';
+  const label = field === 'min_stock' ? '최소수량' : '목표수량';
+  addResult(itemName, `✅ "${itemName}" ${label}을 ${num}(으)로 변경했습니다.`, 'ok');
+  renderInventory();
 }
 
 let _tt=null;
