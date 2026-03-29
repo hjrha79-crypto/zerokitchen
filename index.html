@@ -1110,6 +1110,11 @@ async function handleNaturalInput() {
     _draftItems = parsed;
     inp.value = '';
 
+    // 품목명 trailing 조사 제거
+    for (const it of _draftItems) {
+      if (it.item_name) it.item_name = it.item_name.replace(/(을|를|은|는|이|가)$/, '').trim();
+    }
+
     // Step 1: 한 문장에서 동일 품목 합산 (Fix 4)
     const _nameCountMap = new Map();
     for (let i = 0; i < _draftItems.length; i++) {
