@@ -1528,7 +1528,7 @@ function fallbackParse(text) {
     if (name.trim()) {
       results.push({
         item_name: name.trim().replace(/(을|를|은|는|이|가)$/, ''),
-        quantity:  qty || 1,
+        quantity:  qty != null ? qty : 1,
         unit:      unit || '개',
         action:    'stock_check',
         vendor:    null,
