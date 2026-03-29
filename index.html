@@ -1233,6 +1233,9 @@ function _ruleNormalize(text) {
   // 3c. 연결 접속사 제거 (예: "그리고", "또")
   s = s.replace(/(^|\s)(그리고|또한|또)(\s|,|$)/g, '$1$3');
 
+  // 3d. 품목명에 포함되면 안 되는 키워드 제거 ("재고", "수량" 등)
+  s = s.replace(/(^|\s)(재고|수량|현재|지금)(\s|$)/g, '$1$3');
+
   // 4. 조사 제거
   s = s.replace(/([가-힣]{2,})(을|를|은|는|이|가)(\s|,|$)/g,
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
@@ -2466,7 +2469,7 @@ async function _showDupChoices(dupChecks, rawText) {
         </div>`;
       let resolved = false;
       const restore = () => { if (wrap.parentNode) wrap.innerHTML = origHTML; };
-      const _timeout = setTimeout(() => { if (!resolved) { resolved = true; restore(); resolve('timeout'); } }, 5000);
+      const _timeout = setTimeout(() => { if (!resolved) { resolved = true; restore(); resolve('timeout'); } }, 30000);
       const mergeBtn = document.getElementById('dupMerge');
       const replaceBtn = document.getElementById('dupReplace');
       const cancelBtn = document.getElementById('dupCancel');
