@@ -338,6 +338,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
       <option value="updated">업데이트순</option>
       <option value="name">이름순</option>
       <option value="qty">수량순</option>
+      <option value="vendor">거래처순</option>
     </select>
     <span id="invCount" style="font-size:12px;color:var(--muted);white-space:nowrap"></span>
   </div>
@@ -1872,6 +1873,12 @@ function renderInventory() {
   if (flt === 'low_stock') items = items.filter(it => Number(it.current_qty) < Number(it.target_qty));
   if (sort === 'name') items.sort((a,b) => a.item_name < b.item_name ? -1 : 1);
   else if (sort === 'qty') items.sort((a,b) => Number(a.current_qty) - Number(b.current_qty));
+  else if (sort === 'vendor') items.sort((a,b) => {
+    const va = _vendors.find(v => v.vendor_id === a.vendor_id)?.vendor_name || '';
+    const vb = _vendors.find(v => v.vendor_id === b.vendor_id)?.vendor_name || '';
+    if (!va && vb) return 1; if (va && !vb) return -1;
+    return va < vb ? -1 : va > vb ? 1 : a.item_name < b.item_name ? -1 : 1;
+  });
   else items.sort((a,b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
   document.getElementById('invCount').textContent = items.length + '개';
   if (!items.length) { grid.innerHTML = '<div class="no-item">품목 없음</div>'; return; }
@@ -2474,12 +2481,12 @@ async function deleteVendor(vendorId, name) {
   showToast('🗑 거래처 삭제됨');
 }
 
-function switchTab(n, btn) {
+async function switchTab(n, btn) {
   document.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
   document.querySelectorAll('.nav').forEach(e=>e.classList.remove('active'));
   document.getElementById('tab-'+n).classList.add('active');
   btn.classList.add('active');
-  if (n==='inventory') renderInventory();
+  if (n==='inventory') { if (!_items.length) await refreshItems(); renderInventory(); }
   if (n==='order') renderOrder();
 }
 
