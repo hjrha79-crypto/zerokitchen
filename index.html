@@ -1209,12 +1209,12 @@ function _ruleNormalize(text) {
       '$1' + nw + ' $2');
   }
 
-  // 1c. "없음/다 떨어짐/소진" → 0, "거의 없음" → 0.2, "조금 있음" → 0.3, "반/절반/1/2" → 0.5
-  s = s.replace(/(?:다\s*)?떨어짐|없음|소진|다\s*(?:썼어|써버렸|나갔|떨어졌|사용)/g, '0 개');
-  s = s.replace(/발주\s*필요/g, '0 개');
+  // 1c. 수량 표현 → 숫자 변환 (순서 중요: 복합 표현을 먼저 처리)
   s = s.replace(/거의\s*없음/g, '0.2 개');
   s = s.replace(/조금\s*있음/g, '0.3 개');
   s = s.replace(/(?:반|절반|1\/2)\s*(?:정도|쯤|만큼)?/g, '0.5 개');
+  s = s.replace(/발주\s*필요/g, '0 개');
+  s = s.replace(/(?:다\s*)?떨어짐|없음|소진|다\s*(?:썼어|써버렸|나갔|떨어졌|사용)/g, '0 개');
 
   // 2. 한글숫자 → 아라비아 (lookbehind 없이, 브라우저 호환)
   const numEntries = Object.entries(_NUM_WORDS).sort((a,b)=>b[0].length-a[0].length);
@@ -1570,7 +1570,7 @@ function renderReviewRead(body) {
     const isDefault = it._defaultApplied;
     return `
     <div class="rc-row">
-      <span class="rc-item-name">${it.item_name || '?'} ${it.quantity||1}${it.unit||'개'}${isDefault ? ' <span class="rc-default-badge">(기본값 적용됨)</span>' : ''}</span>
+      <span class="rc-item-name">${it.item_name || '?'} ${it.quantity != null ? it.quantity : 1}${it.unit||'개'}${isDefault ? ' <span class="rc-default-badge">(기본값 적용됨)</span>' : ''}</span>
       <span class="rc-item-qty">(${a.label})</span>
     </div>`;
   }).join('');
@@ -1585,7 +1585,7 @@ function renderReviewEdit(body) {
       <td>
         <div class="rt-qty-wrap">
           <button class="rt-qty-btn" onclick="adjQty(${i},-1)">−</button>
-          <input class="rt-qty" type="number" value="${it.quantity||1}" min="0" onchange="_draftItems[${i}].quantity=parseFloat(this.value)||1">
+          <input class="rt-qty" type="number" value="${it.quantity != null ? it.quantity : 1}" min="0" onchange="_draftItems[${i}].quantity=parseFloat(this.value)">
           <button class="rt-qty-btn" onclick="adjQty(${i},1)">+</button>
         </div>
       </td>
@@ -1644,7 +1644,7 @@ function draftToRequest(items) {
     request_type: 'inventory_update',
     items: items.map(it => ({
       name:        it.item_name,
-      quantity:    it.quantity || 1,
+      quantity:    it.quantity != null ? it.quantity : 1,
       unit:        it.unit || '개',
       action_type: it.action || 'stock_check'
     }))
@@ -2437,12 +2437,18 @@ function addResult(raw, msg, type) {
 
 // Feature 2: 동일 품목 재입력 확인 카드
 async function _showDupChoices(dupChecks, rawText) {
-  for (const dup of dupChecks) {
+  // 역순 처리: splice 시 앞쪽 인덱스가 뒤쪽에 영향 안 주도록
+  const sortedDups = dupChecks.slice().sort((a, b) => b.idx - a.idx);
+  for (const dup of sortedDups) {
+    // 인덱스 유효성 확인
+    if (dup.idx >= _draftItems.length || !_draftItems[dup.idx]) continue;
     const mergedQty = dup.prevQty + dup.newQty;
     const choice = await new Promise(resolve => {
       const panel = document.getElementById('reviewPanel');
+      if (!panel) { resolve('cancel'); return; }
       panel.style.display = 'block';
       const wrap = panel.querySelector('.result-card-wrap');
+      if (!wrap) { resolve('cancel'); return; }
       const origHTML = wrap.innerHTML;
       wrap.innerHTML = `
         <div class="dup-card">
@@ -2459,12 +2465,17 @@ async function _showDupChoices(dupChecks, rawText) {
           </div>
         </div>`;
       let resolved = false;
-      const _timeout = setTimeout(() => { if (!resolved) { resolved = true; wrap.innerHTML = origHTML; resolve('timeout'); } }, 5000);
-      document.getElementById('dupMerge').onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); wrap.innerHTML = origHTML; resolve('merge'); } };
-      document.getElementById('dupReplace').onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); wrap.innerHTML = origHTML; resolve('replace'); } };
-      document.getElementById('dupCancel').onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); wrap.innerHTML = origHTML; resolve('cancel'); } };
+      const restore = () => { if (wrap.parentNode) wrap.innerHTML = origHTML; };
+      const _timeout = setTimeout(() => { if (!resolved) { resolved = true; restore(); resolve('timeout'); } }, 5000);
+      const mergeBtn = document.getElementById('dupMerge');
+      const replaceBtn = document.getElementById('dupReplace');
+      const cancelBtn = document.getElementById('dupCancel');
+      if (mergeBtn) mergeBtn.onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); restore(); resolve('merge'); } };
+      if (replaceBtn) replaceBtn.onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); restore(); resolve('replace'); } };
+      if (cancelBtn) cancelBtn.onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); restore(); resolve('cancel'); } };
       panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
+    if (dup.idx >= _draftItems.length) continue;
     if (choice === 'merge') {
       _draftItems[dup.idx].quantity = mergedQty;
     } else if (choice === 'replace') {
@@ -2472,7 +2483,6 @@ async function _showDupChoices(dupChecks, rawText) {
     } else if (choice === 'cancel') {
       _draftItems.splice(dup.idx, 1);
     } else if (choice === 'timeout') {
-      // 5초 무응답 — 해당 품목 제거 (자동 저장 아님)
       _draftItems.splice(dup.idx, 1);
       addResult(dup.item_name, '⏰ 5초 무응답 — 입력이 자동 취소되었습니다.', 'warn');
     }
