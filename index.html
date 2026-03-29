@@ -1115,7 +1115,7 @@ async function handleNaturalInput() {
     const intraDups = [..._nameCountMap.entries()].filter(([,idxs]) => idxs.length > 1);
     if (intraDups.length) {
       await _showIntraDupChoices(intraDups, raw);
-      if (!_draftItems.length) return;
+      if (!_draftItems.length) { cancelReview(); return; }
     }
 
     // Step 2: 수량 이상값 확인 (Fix 7)
@@ -1131,7 +1131,7 @@ async function handleNaturalInput() {
     if (outlierChecks.length) {
       const outlierResult = await _showOutlierConfirm(outlierChecks, raw);
       if (outlierResult === 'edit') return;
-      if (!_draftItems.length) return;
+      if (!_draftItems.length) { cancelReview(); return; }
     }
 
     // Step 3: 신규 품목 중 유사 기존 품목 확인
@@ -1564,8 +1564,10 @@ async function _showSimilarChoices(checks, rawText) {
   for (const chk of checks) {
     const choice = await new Promise(resolve => {
       const panel = document.getElementById('reviewPanel');
+      if (!panel) { resolve('new'); return; }
       panel.style.display = 'block';
       const wrap = panel.querySelector('.result-card-wrap');
+      if (!wrap) { resolve('new'); return; }
       const origHTML = wrap.innerHTML;
       wrap.innerHTML = `
         <div class="similar-card">
@@ -1600,6 +1602,7 @@ async function _showSimilarChoices(checks, rawText) {
 
 function showReviewPanel(rawText) {
   const panel = document.getElementById('reviewPanel');
+  if (!panel) return;
   panel.style.display = 'block';
   panel.dataset.rawText = rawText;
   _reviewEditMode = false;  // 항상 확인 모드로 시작
@@ -1614,6 +1617,7 @@ let _reviewEditMode = false;
 
 function renderReviewRows() {
   const body = document.getElementById('reviewBody');
+  if (!body) return;
   if (_reviewEditMode) {
     renderReviewEdit(body);
   } else {
@@ -1691,7 +1695,8 @@ function addReviewRow() {
 }
 
 function cancelReview() {
-  document.getElementById('reviewPanel').style.display = 'none';
+  const panel = document.getElementById('reviewPanel');
+  if (panel) panel.style.display = 'none';
   _draftItems = [];
   _reviewEditMode = false;
 }
