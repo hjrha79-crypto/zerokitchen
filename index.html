@@ -1269,10 +1269,20 @@ function _ruleNormalize(text) {
       function(m,p,t){ return p + ' ' + nw + ' ' + t; });
   }
 
+  // 1a-2. 단위 뒤에 바로 붙은 다음 품목 분리 ("봉양파" → "봉 양파")
+  s = s.replace(new RegExp('(' + up + ')([가-힣]{2,})', 'g'), '$1 $2');
+
   // 1b. 한글숫자+단위 붙여쓰기 분리 (띄어쓰기 후: "두병" → "두 병")
   for (const nw of nk) {
     s = s.replace(new RegExp('(^|\\s)' + nw + '(' + up + ')', 'g'),
       '$1' + nw + ' $2');
+  }
+
+  // 1b-2. 품목명+한글숫자 (단위 없음, 문장 끝) — "브로콜리하나" → "브로콜리 하나"
+  for (const nw of nk) {
+    if (nw.length < 2) continue; // 1글자 수사(한/두/세/네)는 오분리 위험 → 건너뜀
+    s = s.replace(new RegExp('([가-힣]{2,})' + nw + '(?=\\s|$)', 'g'),
+      function(m,p){ return p + ' ' + nw; });
   }
 
   // 1c. 수량 표현 → 숫자 변환 (순서 중요: 복합 표현을 먼저 처리)
