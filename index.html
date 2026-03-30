@@ -58,6 +58,10 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .res-raw{font-size:11px;color:var(--muted);margin-bottom:3px;font-family:'JetBrains Mono',monospace}
 .res-msg{font-size:14px;font-weight:600;line-height:1.4}
 .res-time{font-size:11px;color:var(--muted);margin-top:3px;text-align:right}
+.res-foot{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
+.res-undo{font-size:11px;padding:3px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;color:var(--text);font-family:inherit;transition:opacity .2s}
+.res-undo:hover{background:var(--bg)}
+.res-undo:disabled{opacity:.4;cursor:default}
 /* 재고 그리드 */
 .inv-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .inv-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:13px 11px;display:flex;flex-direction:column;gap:5px}
@@ -293,6 +297,20 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
   </div>
 </div>
 
+<!-- 확인 카드 (모든 탭에서 공통 표시) -->
+<div id="reviewPanel" style="display:none">
+  <div class="result-card-wrap">
+    <div class="result-card-title" id="resultCardTitle"></div>
+    <div class="result-card-body" id="reviewBody"></div>
+    <button class="result-add-btn" onclick="addReviewRow()">+ 품목 추가</button>
+    <div class="result-card-btns">
+      <button class="rc-btn-primary"   id="confirmReviewBtn" onclick="confirmReview()">확인 · 실행</button>
+      <button class="rc-btn-secondary" onclick="editReview()">수정</button>
+      <button class="rc-btn-cancel"    onclick="cancelReview()">취소</button>
+    </div>
+  </div>
+</div>
+
 <div class="tab-wrap">
 
 <!-- 입력탭 -->
@@ -306,20 +324,6 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
       <li class="just-talk-item" onclick="fillExample(this)">오늘 발주 뭐 해야 돼?</li>
       <li class="just-talk-item" onclick="fillExample(this)">토마토소스 3봉 추가</li>
     </ul>
-  </div>
-
-  <!-- ResultCard -->
-  <div id="reviewPanel" style="display:none">
-    <div class="result-card-wrap">
-      <div class="result-card-title" id="resultCardTitle"></div>
-      <div class="result-card-body" id="reviewBody"></div>
-      <button class="result-add-btn" onclick="addReviewRow()">+ 품목 추가</button>
-      <div class="result-card-btns">
-        <button class="rc-btn-primary"   id="confirmReviewBtn" onclick="confirmReview()">확인 · 실행</button>
-        <button class="rc-btn-secondary" onclick="editReview()">수정</button>
-        <button class="rc-btn-cancel"    onclick="cancelReview()">취소</button>
-      </div>
-    </div>
   </div>
 
   <div class="res-hdr">처리 결과</div>
@@ -521,6 +525,7 @@ async function processRequest(json) {
               continue;
             }
 
+            const qtyBefore = item.current_qty;
             let newQty;
             if (action === 'inbound') {
               newQty = item.current_qty + qty;
@@ -541,14 +546,14 @@ async function processRequest(json) {
             await db.from('kitchen_operations').insert({
               store_id: SID, item_id: item.item_id, item_name: item.item_name,
               action_type: action, quantity: qty, unit: unit || item.unit,
-              qty_before: item.current_qty, qty_after: newQty,
+              qty_before: qtyBefore, qty_after: newQty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
             });
 
             // 캐시 업데이트
             item.current_qty = newQty;
             if (unit) item.unit = unit;
-            updated.push({ name: item.item_name, quantity: newQty, inputQty: qty, unit: item.unit, action });
+            updated.push({ name: item.item_name, quantity: newQty, inputQty: qty, unit: item.unit, action, item_id: item.item_id, qty_before: qtyBefore });
 
           } else {
             // 신규 품목 — items에 추가
@@ -1117,24 +1122,7 @@ async function handleNaturalInput() {
       if (it.item_name) it.item_name = it.item_name.replace(/(을|를|은|는|이|가)$/, '').trim();
     }
 
-    // 비입력 탭: 리뷰 패널 없이 직접 처리 → 토스트 + 현재 탭 갱신
-    if (!_onInputTab) {
-      const req = draftToRequest(_draftItems);
-      req._source = 'direct_input';
-      const result = await processRequest(req);
-      for (const it of _draftItems) {
-        const existing = _sessionInputs.find(s => s.item_name === it.item_name);
-        if (existing) { existing.quantity = it.quantity; existing.unit = it.unit; }
-        else _sessionInputs.push({ item_name: it.item_name, quantity: it.quantity, unit: it.unit });
-      }
-      const msg = formatResult(result);
-      showToast(msg.replace(/[✅🆕❌📦⚙️]/g,'').trim(), 3000);
-      addResult(raw, msg, result.status === 'success' ? 'ok' : 'warn');
-      if (document.getElementById('tab-inventory').classList.contains('active')) renderInventory();
-      if (document.getElementById('tab-order').classList.contains('active')) renderOrder();
-      _draftItems = [];
-      return;
-    }
+    // 모든 탭에서 확인 카드 표시 (비입력 탭 포함)
 
     // Step 1: 한 문장에서 동일 품목 합산 (Fix 4)
     const _nameCountMap = new Map();
@@ -1885,8 +1873,10 @@ async function confirmReview() {
     cancelReview();
     // 확정 후 입력창 클리어
     document.getElementById('nlInput').value = '';
-    addResult(rawText, formatResult(result), result.status === 'success' ? 'ok' : 'warn');
+    const undoItems = (result.updated_items || []).filter(it => it.item_id && it.qty_before != null).map(it => ({ item_id: it.item_id, name: it.name, qty_before: it.qty_before, qty_after: it.quantity, unit: it.unit }));
+    addResult(rawText, formatResult(result), result.status === 'success' ? 'ok' : 'warn', undoItems);
     renderInventory();
+    if (document.getElementById('tab-order')?.classList.contains('active')) renderOrder();
   } catch(e) {
     // 실행 실패 시에도 로그 기록
     const rawText = document.getElementById('reviewPanel').dataset.rawText || '';
@@ -2133,7 +2123,7 @@ async function renderOrder() {
             const curQty = item ? Number(item.current_qty) : '?';
             const rVendor = _vendors.find(v => v.vendor_id === r.vendor_id);
             const vendorDisplay = rVendor
-              ? `<span class="ord-vendor-label">${rVendor.vendor_name}</span>`
+              ? `<button class="ord-vendor-assign" data-vendor-change="${r.id}" data-item-name="${r.item_name}" data-current-vendor="${rVendor.vendor_name}">${rVendor.vendor_name}</button>`
               : `<button class="ord-vendor-assign" data-vendor-assign="${r.id}">거래처 지정</button>`;
             return `
           <div class="ord-item-row">
@@ -2142,7 +2132,7 @@ async function renderOrder() {
               ${vendorDisplay}
             </div>
             <div class="ord-item-right">
-              <span class="ord-item-qty">${curQty}${r.unit} → <strong>${r.qty}${r.unit}</strong></span>
+              <span class="ord-item-qty">현재 ${curQty}${r.unit} / 발주 <strong>${r.qty}${r.unit}</strong></span>
               <div class="ord-status-btns">
                 <button class="ord-btn-done" onclick="completeOrder(${r.id})">입고 완료</button>
                 <button class="ord-btn-cancel" onclick="cancelOrder(${r.id})">취소</button>
@@ -2178,7 +2168,7 @@ async function renderOrder() {
           <div class="ord-item-row">
             <span class="ord-item-name">${it.name}</span>
             <div class="ord-item-right">
-              <span class="ord-item-qty">${it.current_qty}${it.unit} → <strong>${it.suggested_qty}${it.unit} 필요</strong></span>
+              <span class="ord-item-qty">현재 ${it.current_qty}${it.unit} / 발주 <strong>${it.suggested_qty}${it.unit}</strong></span>
               <button class="ord-btn-register" onclick="createOrderFromSuggest(${it.item_id}, '${it.name}', ${it.suggested_qty}, '${it.unit}', ${it.vendor_id || 'null'})">발주 등록</button>
             </div>
           </div>`).join('')}
@@ -2303,6 +2293,38 @@ document.addEventListener('click', function(e) {
     }
     sel.addEventListener('change', pick);
     sel.addEventListener('blur', function() { if (!picked) renderOrder(); });
+    return;
+  }
+
+  // 거래처 변경 선택 카드
+  const vendorChangeBtn = e.target.closest('[data-vendor-change]');
+  if (vendorChangeBtn) {
+    const orderId = Number(vendorChangeBtn.dataset.vendorChange);
+    const itemName = vendorChangeBtn.dataset.itemName;
+    const currentVendor = vendorChangeBtn.dataset.currentVendor;
+    const row = vendorChangeBtn.closest('.ord-item-row');
+    if (!row) return;
+    // 이미 카드가 열려있으면 무시
+    if (row.querySelector('.vendor-change-card')) return;
+    const card = document.createElement('div');
+    card.className = 'vendor-change-card';
+    card.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:10px;margin-top:6px';
+    card.innerHTML = `
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px">${itemName} 거래처를 변경합니다</div>
+      <div class="vendor-change-btns" style="display:flex;flex-wrap:wrap;gap:6px">
+        ${_vendors.map(v => `<button class="vendor-pick-btn" data-vid="${v.vendor_id}" style="font-size:12px;padding:5px 12px;border:1px solid ${v.vendor_name===currentVendor?'var(--accent)':'var(--border)'};border-radius:8px;background:${v.vendor_name===currentVendor?'var(--accent-lt)':'var(--surface)'};cursor:pointer;font-family:inherit">${v.vendor_name}</button>`).join('')}
+        <button class="vendor-pick-cancel" style="font-size:12px;padding:5px 12px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;font-family:inherit;color:var(--muted)">취소</button>
+      </div>`;
+    row.appendChild(card);
+    card.querySelector('.vendor-pick-cancel').onclick = () => card.remove();
+    card.querySelectorAll('.vendor-pick-btn').forEach(btn => {
+      btn.onclick = async () => {
+        const vid = parseInt(btn.dataset.vid);
+        await db.from('order_requests').update({ vendor_id: vid, updated_at: new Date().toISOString() }).eq('id', orderId);
+        showToast('거래처 변경됨');
+        renderOrder();
+      };
+    });
     return;
   }
 });
@@ -2621,14 +2643,55 @@ function resetToHome() {
   updateJustTalk();
 }
 
-function addResult(raw, msg, type) {
+let _undoCounter = 0;
+function addResult(raw, msg, type, undoItems) {
   const list = document.getElementById('resList');
   const now  = new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
   const card = document.createElement('div');
   card.className = 'res-card '+(type||'ok');
-  card.innerHTML = `<div class="res-raw">${raw}</div><div class="res-msg">${msg.replace(/\n/g,'<br>')}</div><div class="res-time">${now}</div>`;
-  list.insertBefore(card, list.firstChild);
+  let footHtml = `<div class="res-time">${now}</div>`;
+  if (undoItems && undoItems.length) {
+    const uid = 'undo_' + (++_undoCounter);
+    footHtml = `<div class="res-foot"><button class="res-undo" id="${uid}">되돌리기</button><div class="res-time">${now}</div></div>`;
+    card.innerHTML = `<div class="res-raw">${raw}</div><div class="res-msg">${msg.replace(/\n/g,'<br>')}</div>${footHtml}`;
+    list.insertBefore(card, list.firstChild);
+    const btn = document.getElementById(uid);
+    // 30초 후 비활성화
+    const timer = setTimeout(() => { btn.disabled = true; }, 30000);
+    btn.onclick = async () => {
+      btn.disabled = true;
+      clearTimeout(timer);
+      await _undoResult(undoItems);
+      // 되돌린 후 다시 되돌리기 가능하도록 새 undo 데이터 생성
+      const reverseUndo = undoItems.map(it => ({ item_id: it.item_id, name: it.name, qty_before: it.qty_after, qty_after: it.qty_before, unit: it.unit }));
+      const reMsg = undoItems.map(it => `↩️ ${it.name} → ${it.qty_before}${it.unit}`).join('\n');
+      addResult('되돌리기', reMsg, 'ok', reverseUndo);
+      renderInventory();
+    };
+  } else {
+    card.innerHTML = `<div class="res-raw">${raw}</div><div class="res-msg">${msg.replace(/\n/g,'<br>')}</div>${footHtml}`;
+    list.insertBefore(card, list.firstChild);
+  }
   updateJustTalk();
+}
+
+async function _undoResult(undoItems) {
+  for (const it of undoItems) {
+    if (!it.item_id) continue;
+    await db.from('items')
+      .update({ current_qty: it.qty_before, updated_at: new Date().toISOString() })
+      .eq('item_id', it.item_id);
+    await db.from('kitchen_operations').insert({
+      store_id: SID, item_id: it.item_id, item_name: it.name,
+      action_type: 'undo', quantity: Math.abs(it.qty_after - it.qty_before),
+      unit: it.unit, qty_before: it.qty_after, qty_after: it.qty_before,
+      input_method: 'undo', raw_text: '되돌리기'
+    });
+    // 캐시 업데이트
+    const cached = _items.find(i => i.item_id === it.item_id);
+    if (cached) cached.current_qty = it.qty_before;
+  }
+  showToast('되돌렸습니다');
 }
 
 // 한 문장에서 동일 품목 합산 확인 카드 (Fix 4)
