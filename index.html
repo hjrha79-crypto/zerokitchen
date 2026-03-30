@@ -3268,8 +3268,10 @@ function _startRecognition() {
     if (final) {
       _micAccumulated += (_micAccumulated ? ' ' : '') + final;
       document.getElementById('nlInput').value = _micAccumulated;
-    } else {
+      _resetMicCountdown();
+    } else if (interim) {
       document.getElementById('nlInput').value = _micAccumulated + (_micAccumulated && interim ? ' ' : '') + interim;
+      _resetMicCountdown();
     }
   };
 
@@ -3295,25 +3297,32 @@ function _startRecognition() {
   } catch(e) {}
 }
 
+let _micRemaining = 0;
+
 function _startMicCountdown() {
   const btn = document.getElementById('micBtn');
-  let remaining = _micTimeout;
-  btn.innerHTML = '<span class="mic-countdown">' + remaining + '</span>';
+  _micRemaining = _micTimeout;
+  btn.innerHTML = '<span class="mic-countdown">' + _micRemaining + '</span>';
   _micCountdown = setInterval(() => {
-    remaining--;
-    if (remaining <= 0) {
+    _micRemaining--;
+    if (_micRemaining <= 0) {
       _micShouldStop = true;
       if (_recognition) { try { _recognition.stop(); } catch(e) {} _recognition = null; }
       _stopMicUI();
-      // 카운트다운 종료 시 텍스트 있으면 자동 전송
       const inp = document.getElementById('nlInput');
       if (inp && inp.value.trim()) {
         setTimeout(() => handleNaturalInput(), 300);
       }
       return;
     }
-    btn.innerHTML = '<span class="mic-countdown">' + remaining + '</span>';
+    btn.innerHTML = '<span class="mic-countdown">' + _micRemaining + '</span>';
   }, 1000);
+}
+
+function _resetMicCountdown() {
+  _micRemaining = _micTimeout;
+  const btn = document.getElementById('micBtn');
+  if (_micActive) btn.innerHTML = '<span class="mic-countdown">' + _micRemaining + '</span>';
 }
 
 function _stopMic() {
