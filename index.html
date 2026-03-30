@@ -1156,7 +1156,7 @@ async function handleNaturalInput() {
         ex.item_name.replace(/\s/g,'') === it.item_name.replace(/\s/g,'')
       );
       const targetStock = existing?.target_qty || 0;
-      const isOutlier = it.quantity > 50 || (targetStock > 0 && it.quantity > targetStock * 5);
+      const isOutlier = it.quantity >= 20 || (targetStock > 0 && it.quantity > targetStock * 5);
       return isOutlier ? { idx, item_name: it.item_name, quantity: it.quantity, unit: it.unit || '개', targetStock } : null;
     }).filter(Boolean);
     if (outlierChecks.length) {
@@ -2622,7 +2622,7 @@ async function _showOutlierConfirm(outliers, rawText) {
           <div class="dup-card-title">${ol.item_name} ${ol.quantity}${ol.unit} 입력됨. 확인해주세요.</div>
           <div class="dup-card-detail">
             ${ol.targetStock > 0 ? '목표 재고: ' + ol.targetStock + ol.unit + '<br>' : ''}
-            수량이 ${ol.quantity > 50 ? '50을 초과' : '목표 재고의 5배를 초과'}합니다.
+            수량이 ${ol.quantity >= 20 ? '20 이상' : '목표 재고의 5배를 초과'}입니다.
           </div>
           <div class="dup-card-btns">
             <button class="dup-btn-merge" id="outlierOk">확인</button>
