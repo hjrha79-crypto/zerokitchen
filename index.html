@@ -831,8 +831,8 @@ function detectCommand(text) {
     return { request_type: '_invalid_jamo' };
   }
 
-  // 설정 변경 감지: "브로콜리 거래처 바꿔줘", "양파 최소수량 바꿔"
-  const _configMatch = s.match(/^(.+?)\s*(?:거래처|최소\s*수량|목표\s*수량|min|target)\s*(?:바꿔|변경|수정|설정|바꿔줘|변경해줘|설정해줘)/);
+  // 설정 변경 감지: "칠리소스 거래처 쿠치나 푸드로 바꿔 줘", "양파 최소수량 5로 바꿔줘"
+  const _configMatch = s.match(/^(.+?)\s+(?:거래처|최소\s*수량|목표\s*수량|min|target)(?:\s+.*?)?(?:바꿔\s*줘?|변경\s*해?\s*줘?|수정\s*해?\s*줘?|설정\s*해?\s*줘?)\s*$/);
   if (_configMatch) {
     return { request_type: '_config_change', item_name: _configMatch[1].trim(), text: s };
   }
@@ -1165,6 +1165,17 @@ async function handleNaturalInput() {
       if (!_draftItems.length) { cancelReview(); return; }
     }
 
+    // Step 2.5: 품목명 길이 확인 (10글자 초과 시 경고)
+    const longNameChecks = _draftItems.map((it, idx) => {
+      const nameLen = (it.item_name || '').replace(/\s/g, '').length;
+      return nameLen > 10 ? { idx, item_name: it.item_name } : null;
+    }).filter(Boolean);
+    if (longNameChecks.length) {
+      const longResult = await _showLongNameWarning(longNameChecks, raw);
+      if (longResult === 'retry') return;
+      if (!_draftItems.length) { cancelReview(); return; }
+    }
+
     // Step 3: 신규 품목 중 유사 기존 품목 확인
     const similarChecks = _draftItems.map((it, idx) => {
       const exact = _items.find(ex =>
@@ -1179,8 +1190,9 @@ async function handleNaturalInput() {
     if (similarChecks.length) {
       await _showSimilarChoices(similarChecks, raw);
     } else {
-      // Step 4: 세션 이력 동일 품목 재입력 감지
+      // Step 4: 세션 이력 동일 품목 재입력 감지 ("추가"=inbound 동작은 합산 건너뜀)
       const dupChecks = _draftItems.map((it, idx) => {
+        if (it.action === 'inbound') return null; // "추가" 키워드 시 세션 합산 스킵
         const prev = _sessionInputs.find(s => s.item_name === it.item_name);
         return prev ? { idx, item_name: it.item_name, prevQty: prev.quantity, prevUnit: prev.unit, newQty: it.quantity, newUnit: it.unit || prev.unit, action: it.action } : null;
       }).filter(Boolean);
@@ -1283,6 +1295,17 @@ function _ruleNormalize(text) {
     if (nw.length < 2) continue; // 1글자 수사(한/두/세/네)는 오분리 위험 → 건너뜀
     s = s.replace(new RegExp('([가-힣]{2,})' + nw + '(?=\\s|$)', 'g'),
       function(m,p){ return p + ' ' + nw; });
+  }
+
+  // 1b-3. 1글자 한글숫자(한/두/세/네) 품목명 끝 붙어쓰기 + 단위 패턴 — "육수네 통" → "육수 네 통"
+  for (const nw of nk) {
+    if (nw.length !== 1) continue;
+    // 단위가 뒤따를 때만 분리 (마스카포네 같은 품목명 보호)
+    s = s.replace(new RegExp('([가-힣]{2,})' + nw + '\\s+(' + up + ')(?=\\s|$)', 'g'),
+      function(m,p,t){ return p + ' ' + nw + ' ' + t; });
+    // 단위가 바로 붙은 경우도 처리 — "육수네통" → "육수 네 통" (section 1에서 놓친 경우 보강)
+    s = s.replace(new RegExp('([가-힣]{2,})' + nw + '(' + up + ')(?=\\s|$)', 'g'),
+      function(m,p,t){ return p + ' ' + nw + ' ' + t; });
   }
 
   // 1c. 수량 표현 → 숫자 변환 (순서 중요: 복합 표현을 먼저 처리)
@@ -1663,6 +1686,41 @@ async function _showSimilarChoices(checks, rawText) {
     });
   }
   showReviewPanel(rawText);
+}
+
+// 품목명 길이 초과 경고 카드
+async function _showLongNameWarning(checks, rawText) {
+  const sortedChecks = checks.slice().sort((a, b) => b.idx - a.idx);
+  for (const chk of sortedChecks) {
+    if (chk.idx >= _draftItems.length) continue;
+    const choice = await new Promise(resolve => {
+      const panel = document.getElementById('reviewPanel');
+      if (!panel) { resolve('keep'); return; }
+      panel.style.display = 'block';
+      const wrap = panel.querySelector('.result-card-wrap');
+      if (!wrap) { resolve('keep'); return; }
+      const origHTML = wrap.innerHTML;
+      wrap.innerHTML = `
+        <div class="similar-card">
+          <div class="similar-card-title">⚠️ 입력이 너무 깁니다. 다시 말씀해 주세요.</div>
+          <div class="dup-card-detail" style="margin:8px 0;word-break:break-all">"${chk.item_name}"</div>
+          <div class="similar-card-btns">
+            <button class="similar-btn-link" id="longRetry">다시 입력</button>
+            <button class="similar-btn-new" id="longKeep">그대로 추가</button>
+          </div>
+        </div>`;
+      document.getElementById('longRetry').onclick = () => { wrap.innerHTML = origHTML; resolve('retry'); };
+      document.getElementById('longKeep').onclick  = () => { wrap.innerHTML = origHTML; resolve('keep'); };
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+    if (choice === 'retry') {
+      _draftItems = [];
+      cancelReview();
+      document.getElementById('nlInput')?.focus();
+      return 'retry';
+    }
+  }
+  return 'keep';
 }
 
 function showReviewPanel(rawText) {
