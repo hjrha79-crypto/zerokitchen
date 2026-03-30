@@ -1600,6 +1600,33 @@ function _findSimilarItem(newName) {
   return null;
 }
 
+// DecisionEvent 저장 (localStorage)
+function _createDecisionEvent({ entity, ai_suggestion, final_value, user_decision, decision_action, edit_delta, harness_trigger }) {
+  try {
+    const event = {
+      decision_id: crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2),
+      source_app: 'zero_kitchen',
+      event_type: 'decision_made',
+      entity,
+      ai_suggestion,
+      final_value,
+      value_type: 'number',
+      user_decision,
+      decision_action,
+      edit_delta,
+      harness_trigger,
+      reason: null,
+      created_at: new Date().toISOString()
+    };
+    const key = 'zerokitchen_decision_events_v1';
+    const existing = JSON.parse(localStorage.getItem(key) || '[]');
+    existing.push(event);
+    localStorage.setItem(key, JSON.stringify(existing));
+    console.log('[DecisionEvent]', event);
+    return event;
+  } catch (e) { console.warn('[DecisionEvent] save failed:', e); }
+}
+
 // 유사 품목 선택 카드를 순차 표시
 async function _showSimilarChoices(checks, rawText) {
   for (const chk of checks) {
@@ -1625,17 +1652,14 @@ async function _showSimilarChoices(checks, rawText) {
     if (choice === 'link') {
       _draftItems[chk.idx].item_name = chk.existName;
     }
-    // DecisionEvent 저장 (Fix 8)
-    db.from('decision_events').insert({
-      source_app: 'zero_kitchen',
-      event_type: 'decision_made',
+    _createDecisionEvent({
       entity: chk.newName,
       ai_suggestion: chk.existName,
-      user_decision: choice === 'link' ? 'CONFIRM' : 'REJECT',
       final_value: choice === 'link' ? chk.existName : chk.newName,
-      created_at: new Date().toISOString()
-    }).then(function(res) {
-      if (res.error) console.warn('decision_events insert failed:', res.error.message);
+      user_decision: choice === 'link' ? 'CONFIRM' : 'REJECT',
+      decision_action: null,
+      edit_delta: null,
+      harness_trigger: 'item_match'
     });
   }
   showReviewPanel(rawText);
@@ -2589,6 +2613,17 @@ async function _showIntraDupChoices(intraDups, rawText) {
       panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
+    if (choice === 'merge' || choice === 'replace') {
+      _createDecisionEvent({
+        entity: name,
+        ai_suggestion: lastQty,
+        final_value: choice === 'merge' ? totalQty : lastQty,
+        user_decision: choice === 'merge' ? 'EDIT' : 'REJECT',
+        decision_action: choice === 'merge' ? 'MERGE' : 'REPLACE',
+        edit_delta: choice === 'merge' ? totalQty : null,
+        harness_trigger: 'duplicate_entry'
+      });
+    }
     const sortedIndices = validIndices.slice().sort((a, b) => b - a);
     if (choice === 'merge') {
       _draftItems[validIndices[0]].quantity = totalQty;
@@ -2629,8 +2664,14 @@ async function _showOutlierConfirm(outliers, rawText) {
             <button class="dup-btn-replace" id="outlierEdit">수정</button>
           </div>
         </div>`;
-      document.getElementById('outlierOk').onclick = () => { wrap.innerHTML = origHTML; resolve('confirm'); };
-      document.getElementById('outlierEdit').onclick = () => { wrap.innerHTML = origHTML; resolve('edit'); };
+      document.getElementById('outlierOk').onclick = () => {
+        _createDecisionEvent({ entity: ol.item_name, ai_suggestion: ol.quantity, final_value: ol.quantity, user_decision: 'CONFIRM', decision_action: null, edit_delta: 0, harness_trigger: 'quantity_high' });
+        wrap.innerHTML = origHTML; resolve('confirm');
+      };
+      document.getElementById('outlierEdit').onclick = () => {
+        _createDecisionEvent({ entity: ol.item_name, ai_suggestion: ol.quantity, final_value: null, user_decision: 'EDIT', decision_action: null, edit_delta: null, harness_trigger: 'quantity_high' });
+        wrap.innerHTML = origHTML; resolve('edit');
+      };
       panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     if (choice === 'edit') {
