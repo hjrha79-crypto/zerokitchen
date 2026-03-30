@@ -3250,7 +3250,7 @@ function _startRecognition() {
   _recognition = new SR();
   _recognition.lang = 'ko-KR';
   _recognition.interimResults = true;
-  _recognition.continuous = true;
+  _recognition.continuous = false;
 
   _recognition.onresult = (e) => {
     let final = '', interim = '';
@@ -3258,17 +3258,20 @@ function _startRecognition() {
       if (e.results[i].isFinal) final += e.results[i][0].transcript;
       else interim += e.results[i][0].transcript;
     }
-    if (final) _micAccumulated = final;
-    document.getElementById('nlInput').value = _micAccumulated || interim;
+    if (final) {
+      _micAccumulated += (_micAccumulated ? ' ' : '') + final;
+      document.getElementById('nlInput').value = _micAccumulated;
+    } else {
+      document.getElementById('nlInput').value = _micAccumulated + (_micAccumulated && interim ? ' ' : '') + interim;
+    }
   };
 
   _recognition.onend = () => {
     _recognition = null;
-    // 브라우저가 강제 종료함 — 카운트다운 남아있으면 자동 재시작
     if (_micActive && !_micShouldStop) {
       setTimeout(() => {
         if (_micActive && !_micShouldStop) _startRecognition();
-      }, 100);
+      }, 300);
       return;
     }
   };
@@ -3282,9 +3285,7 @@ function _startRecognition() {
 
   try {
     _recognition.start();
-  } catch(e) {
-    // 이미 시작된 경우 무시
-  }
+  } catch(e) {}
 }
 
 function _startMicCountdown() {
