@@ -1,11 +1,78 @@
-index.html 버그 2개 수정해줘.
+index.html 수정 1건 — 입력 전송 시 마이크 강제 종료
 
-1. "현미 없음" 입력 시 파싱 오류 (Cannot set properties of null - innerHTML).
-SET_ZERO intent 처리 시 렌더링 대상 DOM 요소가 null인 문제.
-렌더링 컨테이너 존재 여부 확인 후 처리.
+handleNaturalInput 함수 상단에 마이크 종료 코드 추가.
 
-2. 합산 카드 30초 무응답 자동 종료 후 다음 입력 시 innerHTML null 오류 발생.
-카드 종료 시 _sessionInputs 상태 초기화 및 DOM 복원이 완전히 이루어지지 않는 문제.
-카드 자동 종료 후 상태를 완전히 clean up하도록 수정.
+현재 handleNaturalInput 함수 시작부분:
 
-완료 후 git add index.html && git commit -m "Fix null innerHTML errors in zero-stock and merge card cleanup" && git push
+async function handleNaturalInput() {
+  const inp   = document.getElementById('nlInput');
+  let   raw   = inp.value.trim();
+  const btn   = document.getElementById('nlSendBtn');
+  const btnTxt = document.getElementById('nlBtnTxt');
+  if (!raw) return;
+
+변경 후:
+
+async function handleNaturalInput() {
+  // 마이크 활성 중이면 즉시 종료 (중복 입력 방지)
+  if (_micActive) {
+    _micShouldStop = true;
+    if (_recognition) { try { _recognition.stop(); } catch(e) {} _recognition = null; }
+    _stopMicUI();
+  }
+  const inp   = document.getElementById('nlInput');
+  let   raw   = inp.value.trim();
+  const btn   = document.getElementById('nlSendBtn');
+  const btnTxt = document.getElementById('nlBtnTxt');
+  if (!raw) return;
+
+그리고 _stopMic 함수에서 handleNaturalInput 자동 호출 부분 삭제.
+
+현재 _stopMic:
+function _stopMic() {
+  _micShouldStop = true;
+  if (_recognition) {
+    try { _recognition.stop(); } catch(e) {}
+    _recognition = null;
+  }
+  _stopMicUI();
+  const inp = document.getElementById('nlInput');
+  if (inp && inp.value.trim()) {
+    setTimeout(() => handleNaturalInput(), 300);
+  }
+}
+
+변경 후:
+function _stopMic() {
+  _micShouldStop = true;
+  if (_recognition) {
+    try { _recognition.stop(); } catch(e) {}
+    _recognition = null;
+  }
+  _stopMicUI();
+}
+
+이유: 카운트다운 0일 때 _stopMic이 handleNaturalInput을 호출하면, 사용자가 이미 입력 버튼을 눌렀을 때 중복 전송됨. 
+카운트다운 종료 시 자동 전송은 _startMicCountdown 함수에서 처리.
+
+그리고 _startMicCountdown 함수의 remaining <= 0 부분 수정:
+
+현재:
+    if (remaining <= 0) {
+      _micShouldStop = true;
+      _stopMic();
+      return;
+    }
+
+변경 후:
+    if (remaining <= 0) {
+      _micShouldStop = true;
+      if (_recognition) { try { _recognition.stop(); } catch(e) {} _recognition = null; }
+      _stopMicUI();
+      // 카운트다운 종료 시 텍스트 있으면 자동 전송
+      const inp = document.getElementById('nlInput');
+      if (inp && inp.value.trim()) {
+        setTimeout(() => handleNaturalInput(), 300);
+      }
+      return;
+    }
