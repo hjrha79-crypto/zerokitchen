@@ -180,6 +180,13 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .nl-input::placeholder{color:var(--text-muted);font-size:14px}
 .nl-mic-btn{width:42px;height:42px;border-radius:50%;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
 .nl-mic-btn.rec{border-color:var(--red);background:rgba(217,48,37,.1);animation:pulse 1.2s ease-in-out infinite}
+.nl-mic-btn .mic-countdown{font-size:14px;font-weight:700;color:var(--red);line-height:1}
+.mic-settings-popup{position:absolute;bottom:54px;left:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:0 -4px 16px rgba(0,0,0,.12);z-index:30;min-width:180px;display:none}
+.mic-settings-popup.open{display:block}
+.mic-settings-popup .msp-title{font-size:12px;font-weight:600;color:var(--dim);margin-bottom:8px}
+.mic-settings-popup .msp-opts{display:flex;gap:6px;flex-wrap:wrap}
+.mic-settings-popup .msp-opt{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-size:13px;font-family:inherit;cursor:pointer;color:var(--text)}
+.mic-settings-popup .msp-opt.active{border-color:var(--accent);background:var(--accent-lt);color:var(--accent);font-weight:600}
 .nl-send-btn{padding:14px 20px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity .15s;flex-shrink:0}
 .nl-send-btn:disabled{opacity:.5}
 /* 동일 품목 재입력 확인 카드 */
@@ -408,7 +415,13 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 <!-- 입력창 하단 고정 -->
 <div class="global-input-zone">
   <div class="nl-input-zone">
-    <button class="nl-mic-btn" id="micBtn" onclick="toggleMic()">🎤</button>
+    <div style="position:relative;flex-shrink:0">
+      <button class="nl-mic-btn" id="micBtn" onclick="toggleMic()" oncontextmenu="event.preventDefault();toggleMicSettings()">🎤</button>
+      <div class="mic-settings-popup" id="micSettingsPopup">
+        <div class="msp-title">🎤 녹음 대기시간</div>
+        <div class="msp-opts" id="micTimeoutOpts"></div>
+      </div>
+    </div>
     <input class="nl-input" id="nlInput" type="text"
       placeholder="예: 치즈 2봉 양파 5개 브로콜리 세 개" autocomplete="off" enterkeyhint="send">
     <button class="nl-send-btn" id="nlSendBtn" onclick="handleNaturalInput()">
@@ -1048,9 +1061,8 @@ async function handleNaturalInput() {
         return;
       }
 
-      // 설정 변경 (Feature 5)
+      // 설정 변경 (Feature 5) — 항상 확인 카드 표시 (자동 확인 금지 원칙)
       if (cmd.request_type === '_config_change') {
-        // 값이 명확하면 확인 카드 없이 바로 처리
         if (cmd.field && cmd.value != null) {
           const item = _items.find(it =>
             it.item_name === cmd.item_name ||
@@ -1058,9 +1070,12 @@ async function handleNaturalInput() {
             it.item_name.includes(cmd.item_name) || cmd.item_name.includes(it.item_name)
           );
           if (!item) { addResult(raw, `❌ "${cmd.item_name}" 품목을 찾을 수 없습니다.`, 'err'); return; }
+
           if (cmd.field === 'vendor') {
             const vendor = _vendors.find(v => v.vendor_name.replace(/\s/g,'').includes(cmd.value.replace(/\s/g,'')) || cmd.value.replace(/\s/g,'').includes(v.vendor_name.replace(/\s/g,'')));
             if (vendor) {
+              const confirmed = await _showConfigConfirm(item, cmd.field, vendor.vendor_name, vendor.vendor_id);
+              if (!confirmed) { addResult(raw, '취소됨', 'warn'); return; }
               await db.from('items').update({ vendor_id: vendor.vendor_id, updated_at: new Date().toISOString() }).eq('item_id', item.item_id);
               item.vendor_id = vendor.vendor_id;
               showToast(`${item.item_name} 거래처가 ${vendor.vendor_name}(으)로 설정되었습니다`, 2000);
@@ -1070,9 +1085,11 @@ async function handleNaturalInput() {
             }
           } else {
             const num = typeof cmd.value === 'number' ? cmd.value : parseFloat(cmd.value) || 0;
+            const label = cmd.field === 'min_stock' ? '최소수량' : '목표수량';
+            const confirmed = await _showConfigConfirm(item, cmd.field, num);
+            if (!confirmed) { addResult(raw, '취소됨', 'warn'); return; }
             await db.from('items').update({ [cmd.field]: num, updated_at: new Date().toISOString() }).eq('item_id', item.item_id);
             item[cmd.field] = num;
-            const label = cmd.field === 'min_stock' ? '최소수량' : '목표수량';
             showToast(`${item.item_name} ${label}이 ${num}(으)로 설정되었습니다`, 2000);
             addResult(raw, `✅ ${item.item_name} ${label} → ${num}`, 'ok');
             renderInventory();
@@ -3045,6 +3062,49 @@ async function _createOrderFromSuggestion() {
 }
 
 // Feature 5: 설정 변경 카드
+// 설정 변경 확인 카드 (값이 명시된 경우)
+async function _showConfigConfirm(item, field, displayValue, vendorId) {
+  const panel = document.getElementById('reviewPanel');
+  panel.style.display = 'block';
+  const wrap = panel.querySelector('.result-card-wrap');
+  const origHTML = wrap.innerHTML;
+
+  let label, currentVal;
+  if (field === 'vendor') {
+    label = '거래처';
+    currentVal = _vendors.find(v => v.vendor_id === item.vendor_id)?.vendor_name || '미지정';
+  } else {
+    label = field === 'min_stock' ? '최소수량' : '목표수량';
+    currentVal = item[field] || 0;
+  }
+
+  wrap.innerHTML = `
+    <div class="similar-card">
+      <button class="card-close-x" id="cfgConfirmClose">✕</button>
+      <div class="similar-card-title">${item.item_name} ${label} 변경</div>
+      <div class="dup-card-detail" style="margin:4px 0 8px">
+        ${currentVal} → <strong style="color:var(--accent)">${displayValue}</strong>
+      </div>
+      <div class="similar-card-btns">
+        <button class="similar-btn-link" id="cfgConfirmOk">변경</button>
+        <button class="similar-btn-new" id="cfgConfirmCancel">취소</button>
+      </div>
+    </div>`;
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+  return new Promise(resolve => {
+    document.getElementById('cfgConfirmOk').onclick = () => {
+      wrap.innerHTML = origHTML; panel.style.display = 'none'; resolve(true);
+    };
+    document.getElementById('cfgConfirmCancel').onclick = () => {
+      wrap.innerHTML = origHTML; panel.style.display = 'none'; resolve(false);
+    };
+    document.getElementById('cfgConfirmClose').onclick = () => {
+      wrap.innerHTML = origHTML; panel.style.display = 'none'; resolve(false);
+    };
+  });
+}
+
 async function _showConfigCard(itemName, rawText) {
   const item = _items.find(it =>
     it.item_name === itemName ||
@@ -3162,10 +3222,14 @@ document.addEventListener('keydown', e=>{
 // Web Speech API — 마이크 입력
 let _recognition = null;
 let _micActive = false;
+let _micTimer = null;
+let _micCountdown = null;
+let _micTimeout = parseInt(localStorage.getItem('zk_mic_timeout') || '10');
+
 function toggleMic() {
   const btn = document.getElementById('micBtn');
   if (_micActive) {
-    if (_recognition) _recognition.stop();
+    _stopMic();
     return;
   }
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -3176,9 +3240,20 @@ function toggleMic() {
   _recognition.lang = 'ko-KR';
   _recognition.interimResults = true;
   _recognition.continuous = false;
-  _recognition.onstart = () => { _micActive = true; btn.classList.add('rec'); };
-  _recognition.onend = () => { _micActive = false; btn.classList.remove('rec'); _recognition = null; };
-  _recognition.onerror = (e) => { _micActive = false; btn.classList.remove('rec'); if (e.error !== 'no-speech') showToast('음성 인식 오류: ' + e.error); };
+
+  _recognition.onstart = () => {
+    _micActive = true;
+    btn.classList.add('rec');
+    _startMicCountdown();
+  };
+  _recognition.onend = () => {
+    _stopMicUI();
+    _recognition = null;
+  };
+  _recognition.onerror = (e) => {
+    _stopMicUI();
+    if (e.error !== 'no-speech') showToast('음성 인식 오류: ' + e.error);
+  };
   _recognition.onresult = (e) => {
     const inp = document.getElementById('nlInput');
     let final = '', interim = '';
@@ -3187,9 +3262,73 @@ function toggleMic() {
       else interim += e.results[i][0].transcript;
     }
     inp.value = final || interim;
-    if (final) { _recognition.stop(); setTimeout(() => handleNaturalInput(), 200); }
+    if (final) {
+      _stopMic();
+      setTimeout(() => handleNaturalInput(), 200);
+    }
   };
   _recognition.start();
+}
+
+function _startMicCountdown() {
+  const btn = document.getElementById('micBtn');
+  let remaining = _micTimeout;
+  btn.innerHTML = `<span class="mic-countdown">${remaining}</span>`;
+  _micCountdown = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      _stopMic();
+      return;
+    }
+    btn.innerHTML = `<span class="mic-countdown">${remaining}</span>`;
+  }, 1000);
+}
+
+function _stopMic() {
+  if (_recognition) {
+    try { _recognition.stop(); } catch(e) {}
+  }
+  _stopMicUI();
+}
+
+function _stopMicUI() {
+  _micActive = false;
+  const btn = document.getElementById('micBtn');
+  btn.classList.remove('rec');
+  btn.innerHTML = '🎤';
+  if (_micCountdown) { clearInterval(_micCountdown); _micCountdown = null; }
+}
+
+function toggleMicSettings() {
+  const popup = document.getElementById('micSettingsPopup');
+  const isOpen = popup.classList.contains('open');
+  popup.classList.toggle('open');
+  if (!isOpen) _renderMicTimeoutOpts();
+  if (!isOpen) {
+    const closeHandler = (e) => {
+      if (!popup.contains(e.target)) {
+        popup.classList.remove('open');
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 100);
+  }
+}
+
+function _renderMicTimeoutOpts() {
+  const container = document.getElementById('micTimeoutOpts');
+  const options = [5, 10, 15, 20, 30];
+  container.innerHTML = options.map(sec =>
+    `<button class="msp-opt${sec === _micTimeout ? ' active' : ''}" onclick="_setMicTimeout(${sec})">${sec}초</button>`
+  ).join('');
+}
+
+function _setMicTimeout(sec) {
+  _micTimeout = sec;
+  localStorage.setItem('zk_mic_timeout', sec);
+  _renderMicTimeoutOpts();
+  showToast(`녹음 대기시간 ${sec}초로 설정됨`);
+  document.getElementById('micSettingsPopup').classList.remove('open');
 }
 
 // 모바일 키보드 대응: visualViewport 사용하여 입력창 위치 유지
