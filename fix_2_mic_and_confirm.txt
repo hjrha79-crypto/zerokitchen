@@ -1,0 +1,304 @@
+ZeroKitchen index.html 수정 지시 (2/2)
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+총 2건 수정: 마이크 대기시간 표시+설정 / 설정변경 확인카드 강제 표시
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 4: 마이크 대기시간 카운트다운 + 타임아웃 설정
+━━━━━━━━━━━━━━━━━━━━━
+
+[4-A] CSS 추가 (기존 .nl-mic-btn.rec 아래에)
+
+.nl-mic-btn .mic-countdown{font-size:14px;font-weight:700;color:var(--red);line-height:1}
+.mic-settings-popup{position:absolute;bottom:54px;left:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:0 -4px 16px rgba(0,0,0,.12);z-index:30;min-width:180px;display:none}
+.mic-settings-popup.open{display:block}
+.mic-settings-popup .msp-title{font-size:12px;font-weight:600;color:var(--dim);margin-bottom:8px}
+.mic-settings-popup .msp-opts{display:flex;gap:6px;flex-wrap:wrap}
+.mic-settings-popup .msp-opt{padding:6px 12px;border-radius:8px;border:1px solid var(--border);background:var(--surface2);font-size:13px;font-family:inherit;cursor:pointer;color:var(--text)}
+.mic-settings-popup .msp-opt.active{border-color:var(--accent);background:var(--accent-lt);color:var(--accent);font-weight:600}
+
+[4-B] HTML 수정 — 마이크 버튼 영역 (약 406~407번 줄)
+
+변경 전:
+  <div class="nl-input-zone">
+    <button class="nl-mic-btn" id="micBtn" onclick="toggleMic()">🎤</button>
+
+변경 후:
+  <div class="nl-input-zone">
+    <div style="position:relative;flex-shrink:0">
+      <button class="nl-mic-btn" id="micBtn" onclick="toggleMic()" oncontextmenu="event.preventDefault();toggleMicSettings()">🎤</button>
+      <div class="mic-settings-popup" id="micSettingsPopup">
+        <div class="msp-title">🎤 녹음 대기시간</div>
+        <div class="msp-opts" id="micTimeoutOpts"></div>
+      </div>
+    </div>
+
+[4-C] JavaScript — toggleMic 함수 전체 교체 (약 3147~3177번 줄)
+
+기존 코드 전체 삭제 (let _recognition = null; 부터 _recognition.start(); } 까지)
+
+새 코드로 교체:
+
+let _recognition = null;
+let _micActive = false;
+let _micTimer = null;
+let _micCountdown = null;
+let _micTimeout = parseInt(localStorage.getItem('zk_mic_timeout') || '10');
+
+function toggleMic() {
+  const btn = document.getElementById('micBtn');
+  if (_micActive) {
+    _stopMic();
+    return;
+  }
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    showToast('이 브라우저에서 음성 인식을 지원하지 않습니다.'); return;
+  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  _recognition = new SR();
+  _recognition.lang = 'ko-KR';
+  _recognition.interimResults = true;
+  _recognition.continuous = false;
+  
+  _recognition.onstart = () => {
+    _micActive = true;
+    btn.classList.add('rec');
+    _startMicCountdown();
+  };
+  _recognition.onend = () => {
+    _stopMicUI();
+    _recognition = null;
+  };
+  _recognition.onerror = (e) => {
+    _stopMicUI();
+    if (e.error !== 'no-speech') showToast('음성 인식 오류: ' + e.error);
+  };
+  _recognition.onresult = (e) => {
+    const inp = document.getElementById('nlInput');
+    let final = '', interim = '';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    inp.value = final || interim;
+    if (final) {
+      _stopMic();
+      setTimeout(() => handleNaturalInput(), 200);
+    }
+  };
+  _recognition.start();
+}
+
+function _startMicCountdown() {
+  const btn = document.getElementById('micBtn');
+  let remaining = _micTimeout;
+  btn.innerHTML = `<span class="mic-countdown">${remaining}</span>`;
+  _micCountdown = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      _stopMic();
+      return;
+    }
+    btn.innerHTML = `<span class="mic-countdown">${remaining}</span>`;
+  }, 1000);
+}
+
+function _stopMic() {
+  if (_recognition) {
+    try { _recognition.stop(); } catch(e) {}
+  }
+  _stopMicUI();
+}
+
+function _stopMicUI() {
+  _micActive = false;
+  const btn = document.getElementById('micBtn');
+  btn.classList.remove('rec');
+  btn.innerHTML = '🎤';
+  if (_micCountdown) { clearInterval(_micCountdown); _micCountdown = null; }
+}
+
+function toggleMicSettings() {
+  const popup = document.getElementById('micSettingsPopup');
+  const isOpen = popup.classList.contains('open');
+  popup.classList.toggle('open');
+  if (!isOpen) _renderMicTimeoutOpts();
+  // 바깥 클릭 시 닫기
+  if (!isOpen) {
+    const closeHandler = (e) => {
+      if (!popup.contains(e.target)) {
+        popup.classList.remove('open');
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 100);
+  }
+}
+
+function _renderMicTimeoutOpts() {
+  const container = document.getElementById('micTimeoutOpts');
+  const options = [5, 10, 15, 20, 30];
+  container.innerHTML = options.map(sec =>
+    `<button class="msp-opt${sec === _micTimeout ? ' active' : ''}" onclick="_setMicTimeout(${sec})">${sec}초</button>`
+  ).join('');
+}
+
+function _setMicTimeout(sec) {
+  _micTimeout = sec;
+  localStorage.setItem('zk_mic_timeout', sec);
+  _renderMicTimeoutOpts();
+  showToast(`녹음 대기시간 ${sec}초로 설정됨`);
+  document.getElementById('micSettingsPopup').classList.remove('open');
+}
+
+[4-D] 마이크 버튼 닫는 태그 수정
+기존 마이크 영역 닫기 부분에서, 새로 감싼 <div> 태그를 닫아야 함.
+
+기존에 micBtn 뒤에 바로 <input> 이 나오는 부분 확인.
+위 [4-B]에서 <div style="position:relative"> 로 감쌌으므로, 
+micSettingsPopup </div> 뒤에 </div> 를 추가하여 감싸는 div를 닫아야 함.
+(이미 [4-B]의 코드에 포함되어 있음)
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 5: 설정 변경 시 확인 카드 강제 표시
+━━━━━━━━━━━━━━━━━━━━━
+
+원인: "자동 확인 금지" 원칙 위반 — 거래처/수량 설정 변경이 확인 없이 바로 적용됨
+(마이크 입력이든 키보드 입력이든 동일하게 확인 카드 표시)
+
+[5-A] _config_change 처리 로직 전체 교체 (약 1047~1081번 줄)
+
+변경 전:
+      // 설정 변경 (Feature 5)
+      if (cmd.request_type === '_config_change') {
+        // 값이 명확하면 확인 카드 없이 바로 처리
+        if (cmd.field && cmd.value != null) {
+          const item = _items.find(it =>
+            it.item_name === cmd.item_name ||
+            it.item_name.replace(/\s/g,'') === cmd.item_name.replace(/\s/g,'') ||
+            it.item_name.includes(cmd.item_name) || cmd.item_name.includes(it.item_name)
+          );
+          if (!item) { addResult(raw, `❌ "${cmd.item_name}" 품목을 찾을 수 없습니다.`, 'err'); return; }
+          if (cmd.field === 'vendor') {
+            const vendor = _vendors.find(v => v.vendor_name.replace(/\s/g,'').includes(cmd.value.replace(/\s/g,'')) || cmd.value.replace(/\s/g,'').includes(v.vendor_name.replace(/\s/g,'')));
+            if (vendor) {
+              await db.from('items').update({ vendor_id: vendor.vendor_id, updated_at: new Date().toISOString() }).eq('item_id', item.item_id);
+              item.vendor_id = vendor.vendor_id;
+              showToast(`${item.item_name} 거래처가 ${vendor.vendor_name}(으)로 설정되었습니다`, 2000);
+              addResult(raw, `✅ ${item.item_name} 거래처 → ${vendor.vendor_name}`, 'ok');
+              renderInventory();
+              return;
+            }
+          } else {
+            const num = typeof cmd.value === 'number' ? cmd.value : parseFloat(cmd.value) || 0;
+            await db.from('items').update({ [cmd.field]: num, updated_at: new Date().toISOString() }).eq('item_id', item.item_id);
+            item[cmd.field] = num;
+            const label = cmd.field === 'min_stock' ? '최소수량' : '목표수량';
+            showToast(`${item.item_name} ${label}이 ${num}(으)로 설정되었습니다`, 2000);
+            addResult(raw, `✅ ${item.item_name} ${label} → ${num}`, 'ok');
+            renderInventory();
+            return;
+          }
+        }
+        // 값 없으면 기존 설정 카드 표시
+        await _showConfigCard(cmd.item_name, raw);
+        return;
+      }
+
+변경 후:
+      // 설정 변경 (Feature 5) — 항상 확인 카드 표시 (자동 확인 금지 원칙)
+      if (cmd.request_type === '_config_change') {
+        if (cmd.field && cmd.value != null) {
+          // 값이 명확해도 확인 카드를 먼저 표시
+          const item = _items.find(it =>
+            it.item_name === cmd.item_name ||
+            it.item_name.replace(/\s/g,'') === cmd.item_name.replace(/\s/g,'') ||
+            it.item_name.includes(cmd.item_name) || cmd.item_name.includes(it.item_name)
+          );
+          if (!item) { addResult(raw, `❌ "${cmd.item_name}" 품목을 찾을 수 없습니다.`, 'err'); return; }
+
+          if (cmd.field === 'vendor') {
+            const vendor = _vendors.find(v => v.vendor_name.replace(/\s/g,'').includes(cmd.value.replace(/\s/g,'')) || cmd.value.replace(/\s/g,'').includes(v.vendor_name.replace(/\s/g,'')));
+            if (vendor) {
+              const confirmed = await _showConfigConfirm(item, cmd.field, vendor.vendor_name, vendor.vendor_id);
+              if (!confirmed) { addResult(raw, '취소됨', 'warn'); return; }
+              await db.from('items').update({ vendor_id: vendor.vendor_id, updated_at: new Date().toISOString() }).eq('item_id', item.item_id);
+              item.vendor_id = vendor.vendor_id;
+              showToast(`${item.item_name} 거래처가 ${vendor.vendor_name}(으)로 설정되었습니다`, 2000);
+              addResult(raw, `✅ ${item.item_name} 거래처 → ${vendor.vendor_name}`, 'ok');
+              renderInventory();
+              return;
+            }
+          } else {
+            const num = typeof cmd.value === 'number' ? cmd.value : parseFloat(cmd.value) || 0;
+            const label = cmd.field === 'min_stock' ? '최소수량' : '목표수량';
+            const confirmed = await _showConfigConfirm(item, cmd.field, num);
+            if (!confirmed) { addResult(raw, '취소됨', 'warn'); return; }
+            await db.from('items').update({ [cmd.field]: num, updated_at: new Date().toISOString() }).eq('item_id', item.item_id);
+            item[cmd.field] = num;
+            showToast(`${item.item_name} ${label}이 ${num}(으)로 설정되었습니다`, 2000);
+            addResult(raw, `✅ ${item.item_name} ${label} → ${num}`, 'ok');
+            renderInventory();
+            return;
+          }
+        }
+        // 값 없으면 기존 설정 카드 표시
+        await _showConfigCard(cmd.item_name, raw);
+        return;
+      }
+
+[5-B] 새 함수 추가 — _showConfigConfirm (기존 _showConfigCard 함수 바로 위에)
+
+// 설정 변경 확인 카드 (값이 명시된 경우)
+async function _showConfigConfirm(item, field, displayValue, vendorId) {
+  const panel = document.getElementById('reviewPanel');
+  panel.style.display = 'block';
+  const wrap = panel.querySelector('.result-card-wrap');
+  const origHTML = wrap.innerHTML;
+  
+  let label, currentVal;
+  if (field === 'vendor') {
+    label = '거래처';
+    currentVal = _vendors.find(v => v.vendor_id === item.vendor_id)?.vendor_name || '미지정';
+  } else {
+    label = field === 'min_stock' ? '최소수량' : '목표수량';
+    currentVal = item[field] || 0;
+  }
+  
+  wrap.innerHTML = `
+    <div class="similar-card">
+      <button class="card-close-x" id="cfgConfirmClose">✕</button>
+      <div class="similar-card-title">${item.item_name} ${label} 변경</div>
+      <div class="dup-card-detail" style="margin:4px 0 8px">
+        ${currentVal} → <strong style="color:var(--accent)">${displayValue}</strong>
+      </div>
+      <div class="similar-card-btns">
+        <button class="similar-btn-link" id="cfgConfirmOk">변경</button>
+        <button class="similar-btn-new" id="cfgConfirmCancel">취소</button>
+      </div>
+    </div>`;
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  
+  return new Promise(resolve => {
+    document.getElementById('cfgConfirmOk').onclick = () => {
+      wrap.innerHTML = origHTML; panel.style.display = 'none'; resolve(true);
+    };
+    document.getElementById('cfgConfirmCancel').onclick = () => {
+      wrap.innerHTML = origHTML; panel.style.display = 'none'; resolve(false);
+    };
+    document.getElementById('cfgConfirmClose').onclick = () => {
+      wrap.innerHTML = origHTML; panel.style.display = 'none'; resolve(false);
+    };
+  });
+}
+
+━━━━━━━━━━━━━━━━━━━━━
+적용 후 테스트 체크리스트
+━━━━━━━━━━━━━━━━━━━━━
+□ "페퍼로니 거래처를 쿠팡으로 설정" → 확인 카드 표시 후 변경
+□ "냉동가리비 거래처 식봄으로 설정" → 확인 카드 표시 후 변경
+□ 토스트 메시지 → 2.5초 후 자동 사라짐
+□ 확인 카드 우측 상단 X 버튼 → 카드 닫힘
+□ 마이크 누르면 카운트다운 숫자 표시 (기본 10초)
+□ 마이크 버튼 길게 누르기(우클릭) → 대기시간 설정 팝업
+□ 마이크 입력으로 거래처 변경 → 확인 카드 표시

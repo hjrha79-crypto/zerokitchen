@@ -1,0 +1,11 @@
+index.html 버그 2개 수정해줘.
+
+1. "현미 없음" 입력 시 파싱 오류 (Cannot set properties of null - innerHTML).
+SET_ZERO intent 처리 시 렌더링 대상 DOM 요소가 null인 문제.
+렌더링 컨테이너 존재 여부 확인 후 처리.
+
+2. 합산 카드 30초 무응답 자동 종료 후 다음 입력 시 innerHTML null 오류 발생.
+카드 종료 시 _sessionInputs 상태 초기화 및 DOM 복원이 완전히 이루어지지 않는 문제.
+카드 자동 종료 후 상태를 완전히 clean up하도록 수정.
+
+완료 후 git add index.html && git commit -m "Fix null innerHTML errors in zero-stock and merge card cleanup" && git push

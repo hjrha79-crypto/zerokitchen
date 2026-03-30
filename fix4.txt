@@ -1,0 +1,180 @@
+index.html 수정 1건 — 마이크 자동 재시작 (브라우저 강제 종료 우회)
+
+핵심: recognition이 카운트다운 종료 전에 끝나면 자동으로 다시 시작한다.
+사용자가 직접 마이크 버튼을 누르거나, 카운트다운이 0이 되면 그때만 진짜 종료.
+
+_stopMic 관련 변수 추가:
+let _micShouldStop = false;
+
+toggleMic 함수에서 마이크 시작 직전에:
+_micShouldStop = false;
+
+_recognition.onend 핸들러를 다음으로 교체:
+  _recognition.onend = () => {
+    // 카운트다운 남아있고 사용자가 수동 종료 안 했으면 자동 재시작
+    if (!_micShouldStop && _micActive) {
+      try {
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        _recognition = new SR();
+        _recognition.lang = 'ko-KR';
+        _recognition.interimResults = true;
+        _recognition.continuous = true;
+        _recognition.onstart = () => {};  // 이미 UI 표시 중이므로 빈 처리
+        _recognition.onend = arguments.callee;  // 같은 핸들러 재사용 — 이건 안됨
+        // 아래처럼 재귀적으로 설정
+        _recognition.onend = _onRecEnd;
+        _recognition.onerror = (e) => {
+          if (e.error !== 'no-speech' && e.error !== 'aborted') showToast('음성 인식 오류: ' + e.error);
+        };
+        _recognition.onresult = _onRecResult;
+        _recognition.start();
+      } catch(e) {
+        _stopMicUI();
+      }
+      return;
+    }
+    _recognition = null;
+    // _stopMicUI는 _stopMic에서 이미 호출됨
+  };
+
+위 방식은 복잡해질 수 있으므로, toggleMic 관련 함수들을 아래 코드로 통째로 교체하는게 안전하다.
+
+=== 교체 대상 ===
+let _recognition 부터 _setMicTimeout 함수 끝까지 전부 삭제하고 아래로 교체:
+
+=== 새 코드 ===
+
+let _recognition = null;
+let _micActive = false;
+let _micCountdown = null;
+let _micShouldStop = false;
+let _micTimeout = parseInt(localStorage.getItem('zk_mic_timeout') || '10');
+let _micAccumulated = '';  // 누적 인식 텍스트
+
+function toggleMic() {
+  const btn = document.getElementById('micBtn');
+  if (_micActive) {
+    _micShouldStop = true;
+    _stopMic();
+    return;
+  }
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    showToast('이 브라우저에서 음성 인식을 지원하지 않습니다.'); return;
+  }
+  _micShouldStop = false;
+  _micAccumulated = '';
+  _micActive = true;
+  btn.classList.add('rec');
+  _startMicCountdown();
+  _startRecognition();
+}
+
+function _startRecognition() {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  _recognition = new SR();
+  _recognition.lang = 'ko-KR';
+  _recognition.interimResults = true;
+  _recognition.continuous = true;
+
+  _recognition.onresult = (e) => {
+    let final = '', interim = '';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    if (final) _micAccumulated = final;
+    document.getElementById('nlInput').value = _micAccumulated || interim;
+  };
+
+  _recognition.onend = () => {
+    _recognition = null;
+    // 브라우저가 강제 종료함 — 카운트다운 남아있으면 자동 재시작
+    if (_micActive && !_micShouldStop) {
+      setTimeout(() => {
+        if (_micActive && !_micShouldStop) _startRecognition();
+      }, 100);
+      return;
+    }
+  };
+
+  _recognition.onerror = (e) => {
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    showToast('음성 인식 오류: ' + e.error);
+    _micShouldStop = true;
+    _stopMic();
+  };
+
+  try {
+    _recognition.start();
+  } catch(e) {
+    // 이미 시작된 경우 무시
+  }
+}
+
+function _startMicCountdown() {
+  const btn = document.getElementById('micBtn');
+  let remaining = _micTimeout;
+  btn.innerHTML = '<span class="mic-countdown">' + remaining + '</span>';
+  _micCountdown = setInterval(() => {
+    remaining--;
+    if (remaining <= 0) {
+      _micShouldStop = true;
+      _stopMic();
+      return;
+    }
+    btn.innerHTML = '<span class="mic-countdown">' + remaining + '</span>';
+  }, 1000);
+}
+
+function _stopMic() {
+  _micShouldStop = true;
+  if (_recognition) {
+    try { _recognition.stop(); } catch(e) {}
+    _recognition = null;
+  }
+  _stopMicUI();
+  const inp = document.getElementById('nlInput');
+  if (inp && inp.value.trim()) {
+    setTimeout(() => handleNaturalInput(), 300);
+  }
+}
+
+function _stopMicUI() {
+  _micActive = false;
+  const btn = document.getElementById('micBtn');
+  btn.classList.remove('rec');
+  btn.innerHTML = '🎤';
+  if (_micCountdown) { clearInterval(_micCountdown); _micCountdown = null; }
+}
+
+function toggleMicSettings() {
+  const popup = document.getElementById('micSettingsPopup');
+  const isOpen = popup.classList.contains('open');
+  popup.classList.toggle('open');
+  if (!isOpen) _renderMicTimeoutOpts();
+  if (!isOpen) {
+    const closeHandler = (e) => {
+      if (!popup.contains(e.target)) {
+        popup.classList.remove('open');
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 100);
+  }
+}
+
+function _renderMicTimeoutOpts() {
+  const container = document.getElementById('micTimeoutOpts');
+  const options = [5, 10, 15, 20, 30];
+  container.innerHTML = options.map(sec =>
+    '<button class="msp-opt' + (sec === _micTimeout ? ' active' : '') + '" onclick="_setMicTimeout(' + sec + ')">' + sec + '초</button>'
+  ).join('');
+}
+
+function _setMicTimeout(sec) {
+  _micTimeout = sec;
+  localStorage.setItem('zk_mic_timeout', sec);
+  _renderMicTimeoutOpts();
+  showToast('녹음 대기시간 ' + sec + '초로 설정됨');
+  document.getElementById('micSettingsPopup').classList.remove('open');
+}

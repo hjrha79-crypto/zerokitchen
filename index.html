@@ -3222,73 +3222,97 @@ document.addEventListener('keydown', e=>{
 // Web Speech API — 마이크 입력
 let _recognition = null;
 let _micActive = false;
-let _micTimer = null;
 let _micCountdown = null;
+let _micShouldStop = false;
 let _micTimeout = parseInt(localStorage.getItem('zk_mic_timeout') || '10');
+let _micAccumulated = '';  // 누적 인식 텍스트
 
 function toggleMic() {
   const btn = document.getElementById('micBtn');
   if (_micActive) {
+    _micShouldStop = true;
     _stopMic();
     return;
   }
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
     showToast('이 브라우저에서 음성 인식을 지원하지 않습니다.'); return;
   }
+  _micShouldStop = false;
+  _micAccumulated = '';
+  _micActive = true;
+  btn.classList.add('rec');
+  _startMicCountdown();
+  _startRecognition();
+}
+
+function _startRecognition() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   _recognition = new SR();
   _recognition.lang = 'ko-KR';
   _recognition.interimResults = true;
-  _recognition.continuous = false;
+  _recognition.continuous = true;
 
-  _recognition.onstart = () => {
-    _micActive = true;
-    btn.classList.add('rec');
-    _startMicCountdown();
-  };
-  _recognition.onend = () => {
-    _stopMicUI();
-    _recognition = null;
-  };
-  _recognition.onerror = (e) => {
-    _stopMicUI();
-    if (e.error !== 'no-speech') showToast('음성 인식 오류: ' + e.error);
-  };
   _recognition.onresult = (e) => {
-    const inp = document.getElementById('nlInput');
     let final = '', interim = '';
     for (let i = 0; i < e.results.length; i++) {
       if (e.results[i].isFinal) final += e.results[i][0].transcript;
       else interim += e.results[i][0].transcript;
     }
-    inp.value = final || interim;
-    if (final) {
-      _stopMic();
-      setTimeout(() => handleNaturalInput(), 200);
+    if (final) _micAccumulated = final;
+    document.getElementById('nlInput').value = _micAccumulated || interim;
+  };
+
+  _recognition.onend = () => {
+    _recognition = null;
+    // 브라우저가 강제 종료함 — 카운트다운 남아있으면 자동 재시작
+    if (_micActive && !_micShouldStop) {
+      setTimeout(() => {
+        if (_micActive && !_micShouldStop) _startRecognition();
+      }, 100);
+      return;
     }
   };
-  _recognition.start();
+
+  _recognition.onerror = (e) => {
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    showToast('음성 인식 오류: ' + e.error);
+    _micShouldStop = true;
+    _stopMic();
+  };
+
+  try {
+    _recognition.start();
+  } catch(e) {
+    // 이미 시작된 경우 무시
+  }
 }
 
 function _startMicCountdown() {
   const btn = document.getElementById('micBtn');
   let remaining = _micTimeout;
-  btn.innerHTML = `<span class="mic-countdown">${remaining}</span>`;
+  btn.innerHTML = '<span class="mic-countdown">' + remaining + '</span>';
   _micCountdown = setInterval(() => {
     remaining--;
     if (remaining <= 0) {
+      _micShouldStop = true;
       _stopMic();
       return;
     }
-    btn.innerHTML = `<span class="mic-countdown">${remaining}</span>`;
+    btn.innerHTML = '<span class="mic-countdown">' + remaining + '</span>';
   }, 1000);
 }
 
 function _stopMic() {
+  _micShouldStop = true;
   if (_recognition) {
     try { _recognition.stop(); } catch(e) {}
+    _recognition = null;
   }
   _stopMicUI();
+  const inp = document.getElementById('nlInput');
+  if (inp && inp.value.trim()) {
+    setTimeout(() => handleNaturalInput(), 300);
+  }
 }
 
 function _stopMicUI() {
@@ -3319,7 +3343,7 @@ function _renderMicTimeoutOpts() {
   const container = document.getElementById('micTimeoutOpts');
   const options = [5, 10, 15, 20, 30];
   container.innerHTML = options.map(sec =>
-    `<button class="msp-opt${sec === _micTimeout ? ' active' : ''}" onclick="_setMicTimeout(${sec})">${sec}초</button>`
+    '<button class="msp-opt' + (sec === _micTimeout ? ' active' : '') + '" onclick="_setMicTimeout(' + sec + ')">' + sec + '초</button>'
   ).join('');
 }
 
@@ -3327,7 +3351,7 @@ function _setMicTimeout(sec) {
   _micTimeout = sec;
   localStorage.setItem('zk_mic_timeout', sec);
   _renderMicTimeoutOpts();
-  showToast(`녹음 대기시간 ${sec}초로 설정됨`);
+  showToast('녹음 대기시간 ' + sec + '초로 설정됨');
   document.getElementById('micSettingsPopup').classList.remove('open');
 }
 

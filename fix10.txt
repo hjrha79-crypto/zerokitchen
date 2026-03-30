@@ -1,0 +1,11 @@
+index.html 버그 수정해줘.
+
+재고/발주 탭에서 입력창에 텍스트 입력 후 실행 시
+입력 탭으로 강제 전환되는 버그.
+
+원하는 동작:
+- 어느 탭에서 입력해도 탭 전환 없이 현재 탭에서 처리
+- 처리 결과는 입력창 아래 또는 현재 탭 내에 표시
+- 재고 탭에서 입력 후 재고 목록이 즉시 갱신
+
+완료 후 git add index.html && git commit -m "Fix tab switch on input from non-input tabs" && git push
