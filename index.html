@@ -147,8 +147,11 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .rc-item-action{font-size:12px;color:var(--text-muted);white-space:nowrap}
 .rc-default-badge{font-size:11px;color:var(--muted);background:var(--surface2);border-radius:4px;padding:2px 6px;white-space:nowrap}
 /* 유사 품목 선택 카드 */
-.similar-card{background:var(--surface);border:1.5px solid var(--warn);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;margin-bottom:10px}
+.similar-card{background:var(--surface);border:1.5px solid var(--warn);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;margin-bottom:10px;position:relative}
 .similar-card-title{font-size:14px;font-weight:700;color:var(--text)}
+/* 카드 닫기 X 버튼 */
+.card-close-x{position:absolute;top:10px;right:10px;width:30px;height:30px;border:none;background:var(--surface2);border-radius:50%;cursor:pointer;font-size:16px;color:var(--dim);display:flex;align-items:center;justify-content:center;transition:all .15s;z-index:1}
+.card-close-x:hover{background:var(--border);color:var(--text)}
 .similar-card-btns{display:flex;gap:8px}
 .similar-card-btns button{flex:1;padding:13px;border-radius:10px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer}
 .similar-btn-link{background:var(--accent);border:none;color:#fff}
@@ -180,7 +183,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .nl-send-btn{padding:14px 20px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity .15s;flex-shrink:0}
 .nl-send-btn:disabled{opacity:.5}
 /* 동일 품목 재입력 확인 카드 */
-.dup-card{background:var(--surface);border:1.5px solid var(--warn);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
+.dup-card{background:var(--surface);border:1.5px solid var(--warn);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;margin-bottom:10px;position:relative}
 .dup-card-title{font-size:14px;font-weight:700;color:var(--text)}
 .dup-card-detail{font-size:13px;color:var(--dim);line-height:1.5}
 .dup-card-btns{display:flex;gap:8px}
@@ -189,7 +192,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .dup-btn-replace{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
 .dup-btn-cancel{background:transparent;border:1px solid var(--border);color:var(--muted)}
 /* 설정 변경 카드 */
-.config-card{background:var(--surface);border:1.5px solid var(--accent);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.config-card{background:var(--surface);border:1.5px solid var(--accent);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:12px;position:relative}
 .config-card-title{font-size:15px;font-weight:700;color:var(--text)}
 .config-card-opts{display:flex;gap:8px;flex-wrap:wrap}
 .config-card-opts button{padding:12px 16px;border-radius:10px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer;background:var(--accent-lt);border:1px solid var(--accent);color:var(--accent)}
@@ -282,8 +285,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .item-vendor-sel { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:12px; font-family:inherit; color:var(--text); outline:none; cursor:pointer; }
 
 /* 토스트 */
-#toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--text);border-radius:10px;padding:11px 18px;font-size:13px;font-weight:500;color:var(--bg);transition:transform .25s ease;z-index:300;white-space:nowrap;pointer-events:none}
-#toast.show{transform:translateX(-50%) translateY(0)}
+#toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--text);border-radius:10px;padding:11px 18px;font-size:13px;font-weight:500;color:var(--bg);transition:transform .25s ease,opacity .25s ease;opacity:0;z-index:300;white-space:nowrap;pointer-events:none}
+#toast.show{transform:translateX(-50%) translateY(0);opacity:1}
 .spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:rot .6s linear infinite;vertical-align:middle}
 @keyframes rot{to{transform:rotate(360deg)}}
 </style>
@@ -389,7 +392,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 
 <!-- 확인 카드 (입력창 바로 위, 고정) -->
 <div id="reviewPanel" style="display:none">
-  <div class="result-card-wrap">
+  <div class="result-card-wrap" style="position:relative">
+    <button class="card-close-x" onclick="cancelReview()">✕</button>
     <div class="result-card-title" id="resultCardTitle"></div>
     <div class="result-card-body" id="reviewBody"></div>
     <button class="result-add-btn" onclick="addReviewRow()">+ 품목 추가</button>
@@ -853,17 +857,17 @@ function detectCommand(text) {
   }
 
   // 설정 변경 감지 (값 포함): "칠리소스 거래처 식봄으로 설정", "양파 최소수량 5로 바꿔줘"
-  const _cfgVendor = s.match(/^(.+?)\s+거래처\s+(.+?)(?:으?로)\s*(?:바꿔\s*줘?|변경\s*해?\s*줘?|수정\s*해?\s*줘?|설정\s*해?\s*줘?)\s*$/);
+  const _cfgVendor = s.match(/^(.+?)\s+거래처[를을]?\s+(.+?)(?:으?로)\s*(?:바꿔\s*줘?|변경\s*해?\s*줘?|수정\s*해?\s*줘?|설정\s*해?\s*줘?|설정)\s*$/);
   if (_cfgVendor) {
     return { request_type: '_config_change', item_name: _cfgVendor[1].trim(), field: 'vendor', value: _cfgVendor[2].trim(), text: s };
   }
-  const _cfgNum = s.match(/^(.+?)\s+(최소\s*수량|목표\s*수량|min|target)\s+(\d+)(?:으?로)?\s*(?:바꿔\s*줘?|변경\s*해?\s*줘?|수정\s*해?\s*줘?|설정\s*해?\s*줘?)\s*$/);
+  const _cfgNum = s.match(/^(.+?)\s+(최소\s*수량|목표\s*수량|min|target)[를을]?\s+(\d+)(?:으?로)?\s*(?:바꿔\s*줘?|변경\s*해?\s*줘?|수정\s*해?\s*줘?|설정\s*해?\s*줘?|설정)\s*$/);
   if (_cfgNum) {
     const field = /최소|min/.test(_cfgNum[2]) ? 'min_stock' : 'target_qty';
     return { request_type: '_config_change', item_name: _cfgNum[1].trim(), field, value: parseInt(_cfgNum[3]), text: s };
   }
   // 값 없는 설정 변경: "브로콜리 거래처 바꿔줘"
-  const _configMatch = s.match(/^(.+?)\s+(?:거래처|최소\s*수량|목표\s*수량|min|target)(?:\s+.*?)?(?:바꿔\s*줘?|변경\s*해?\s*줘?|수정\s*해?\s*줘?|설정\s*해?\s*줘?)\s*$/);
+  const _configMatch = s.match(/^(.+?)\s+(?:거래처|최소\s*수량|목표\s*수량|min|target)[를을]?(?:\s+.*?)?(?:바꿔\s*줘?|변경\s*해?\s*줘?|수정\s*해?\s*줘?|설정\s*해?\s*줘?|설정)\s*$/);
   if (_configMatch) {
     return { request_type: '_config_change', item_name: _configMatch[1].trim(), text: s };
   }
@@ -1783,6 +1787,7 @@ async function _showLongNameWarning(checks, rawText) {
       const origHTML = wrap.innerHTML;
       wrap.innerHTML = `
         <div class="similar-card">
+          <button class="card-close-x" id="longClose">✕</button>
           <div class="similar-card-title">⚠️ 입력이 너무 깁니다. 다시 말씀해 주세요.</div>
           <div class="dup-card-detail" style="margin:8px 0;word-break:break-all">"${chk.item_name}"</div>
           <div class="similar-card-btns">
@@ -1790,6 +1795,7 @@ async function _showLongNameWarning(checks, rawText) {
             <button class="similar-btn-new" id="longKeep">그대로 추가</button>
           </div>
         </div>`;
+      document.getElementById('longClose').onclick = () => { wrap.innerHTML = origHTML; resolve('retry'); };
       document.getElementById('longRetry').onclick = () => { wrap.innerHTML = origHTML; resolve('retry'); };
       document.getElementById('longKeep').onclick  = () => { wrap.innerHTML = origHTML; resolve('keep'); };
       panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -3056,6 +3062,7 @@ async function _showConfigCard(itemName, rawText) {
   const vName = _vendors.find(v => v.vendor_id === item.vendor_id)?.vendor_name || '미지정';
   wrap.innerHTML = `
     <div class="config-card">
+      <button class="card-close-x" id="cfgCloseX">✕</button>
       <div class="config-card-title">"${item.item_name}" 설정 변경</div>
       <div style="font-size:13px;color:var(--dim);margin-bottom:4px">
         현재 — 거래처: ${vName} / 최소수량: ${item.min_stock||0} / 목표수량: ${item.target_qty||0}
@@ -3069,6 +3076,7 @@ async function _showConfigCard(itemName, rawText) {
       <div style="margin-top:8px"><button class="rc-btn-cancel" style="width:100%" id="cfgClose">닫기</button></div>
     </div>`;
   document.getElementById('cfgClose').onclick = () => { wrap.innerHTML = origHTML; panel.style.display = 'none'; };
+  document.getElementById('cfgCloseX').onclick = () => { wrap.innerHTML = origHTML; panel.style.display = 'none'; };
   document.getElementById('cfgVendor').onclick = () => {
     const sub = document.getElementById('configSubPanel');
     sub.innerHTML = `<div class="config-vendor-list">${_vendors.map(v =>
@@ -3117,8 +3125,16 @@ async function _applyConfigNum(itemId, field, value, itemName) {
 
 let _tt=null;
 function showToast(m, ms=2500) {
-  const t=document.getElementById('toast'); t.textContent=m; t.classList.add('show');
-  clearTimeout(_tt); _tt=setTimeout(()=>t.classList.remove('show'),ms);
+  const t=document.getElementById('toast');
+  t.classList.remove('show');
+  clearTimeout(_tt);
+  void t.offsetWidth;
+  t.textContent=m;
+  t.classList.add('show');
+  _tt=setTimeout(()=>{
+    t.classList.remove('show');
+    setTimeout(()=>{ if(!t.classList.contains('show')) t.style.transform='translateX(-50%) translateY(80px)'; }, 300);
+  },ms);
 }
 
 // Just Talk: 예시 클릭 → 입력창에 자동 입력
