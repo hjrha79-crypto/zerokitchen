@@ -2040,6 +2040,29 @@ async function saveInvItem(id) {
   const tgt  = parseFloat(document.getElementById('iet_'+id)?.value) || 0;
   const vid  = parseInt(document.getElementById('iev_'+id)?.value) || null;
   if (!name) { showToast('품목명을 입력해 주세요.'); return; }
+
+  // 중복 감지: 같은 이름의 다른 품목이 이미 있으면 합치기 카드 표시
+  const existing = _items.find(x => x.item_id !== id && x.item_name.replace(/\s/g,'') === name.replace(/\s/g,''));
+  if (existing) {
+    const mergedQty = Number(existing.current_qty) + qty;
+    const choice = await _showMergeCard(name, existing, qty, unit);
+    if (choice === 'merge') {
+      // 합치기: 기존 품목에 수량 합산, 현재 품목 삭제
+      await db.from('items').update({
+        current_qty: mergedQty, updated_at: new Date().toISOString()
+      }).eq('item_id', existing.item_id);
+      existing.current_qty = mergedQty;
+      await db.from('items').delete().eq('item_id', id);
+      _items = _items.filter(x => x.item_id !== id);
+      renderInventory();
+      showToast(`✅ ${name} 합침 (${mergedQty}${unit || existing.unit || '개'})`);
+      return;
+    } else if (choice === 'cancel') {
+      return; // 수정 취소
+    }
+    // 'keep' → 따로 유지, 아래로 계속 진행하여 이름만 변경
+  }
+
   await db.from('items').update({
     item_name: name, current_qty: qty, unit, target_qty: tgt,
     vendor_id: vid, updated_at: new Date().toISOString()
@@ -2048,6 +2071,31 @@ async function saveInvItem(id) {
   if (loc) Object.assign(loc, { item_name:name, current_qty:qty, unit, target_qty:tgt, vendor_id:vid });
   renderInventory();
   showToast('✅ ' + name + ' 수정 완료');
+}
+
+function _showMergeCard(name, existing, newQty, unit) {
+  const mergedQty = Number(existing.current_qty) + newQty;
+  const u = unit || existing.unit || '개';
+  return new Promise(resolve => {
+    const card = document.getElementById('ic_' + existing.item_id);
+    const container = card || document.getElementById('invGrid');
+    const overlay = document.createElement('div');
+    overlay.className = 'merge-card-overlay';
+    overlay.style.cssText = 'background:var(--bg);border:1px solid var(--accent);border-radius:12px;padding:14px;margin:8px 0';
+    overlay.innerHTML = `
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px">"${name}"가 이미 있습니다.</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:10px">기존 ${existing.current_qty}${u} + 새 ${newQty}${u} = ${mergedQty}${u}</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <button class="rc-btn-primary" id="mergeBtn" style="font-size:13px;padding:7px 14px">합치기 (${mergedQty}${u})</button>
+        <button class="rc-btn-secondary" id="keepBtn" style="font-size:13px;padding:7px 14px">따로 유지</button>
+        <button class="rc-btn-cancel" id="mergeCancelBtn" style="font-size:13px;padding:7px 14px">취소</button>
+      </div>`;
+    container.after(overlay);
+    overlay.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    overlay.querySelector('#mergeBtn').onclick = () => { overlay.remove(); resolve('merge'); };
+    overlay.querySelector('#keepBtn').onclick = () => { overlay.remove(); resolve('keep'); };
+    overlay.querySelector('#mergeCancelBtn').onclick = () => { overlay.remove(); resolve('cancel'); };
+  });
 }
 
 async function deleteInvItem(id, name) {
