@@ -175,6 +175,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .nl-input{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:16px;font-family:inherit;color:var(--text);outline:none;transition:border-color .15s}
 .nl-input:focus{border-color:var(--accent)}
 .nl-input::placeholder{color:var(--text-muted);font-size:14px}
+.nl-mic-btn{width:42px;height:42px;border-radius:50%;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
+.nl-mic-btn.rec{border-color:var(--red);background:rgba(217,48,37,.1);animation:pulse 1.2s ease-in-out infinite}
 .nl-send-btn{padding:14px 20px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity .15s;flex-shrink:0}
 .nl-send-btn:disabled{opacity:.5}
 /* 동일 품목 재입력 확인 카드 */
@@ -402,6 +404,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 <!-- 입력창 하단 고정 -->
 <div class="global-input-zone">
   <div class="nl-input-zone">
+    <button class="nl-mic-btn" id="micBtn" onclick="toggleMic()">🎤</button>
     <input class="nl-input" id="nlInput" type="text"
       placeholder="예: 치즈 2봉 양파 5개 브로콜리 세 개" autocomplete="off" enterkeyhint="send">
     <button class="nl-send-btn" id="nlSendBtn" onclick="handleNaturalInput()">
@@ -849,7 +852,17 @@ function detectCommand(text) {
     return { request_type: '_invalid_jamo' };
   }
 
-  // 설정 변경 감지: "칠리소스 거래처 쿠치나 푸드로 바꿔 줘", "양파 최소수량 5로 바꿔줘"
+  // 설정 변경 감지 (값 포함): "칠리소스 거래처 식봄으로 설정", "양파 최소수량 5로 바꿔줘"
+  const _cfgVendor = s.match(/^(.+?)\s+거래처\s+(.+?)(?:으?로)\s*(?:바꿔\s*줘?|변경\s*해?\s*줘?|수정\s*해?\s*줘?|설정\s*해?\s*줘?)\s*$/);
+  if (_cfgVendor) {
+    return { request_type: '_config_change', item_name: _cfgVendor[1].trim(), field: 'vendor', value: _cfgVendor[2].trim(), text: s };
+  }
+  const _cfgNum = s.match(/^(.+?)\s+(최소\s*수량|목표\s*수량|min|target)\s+(\d+)(?:으?로)?\s*(?:바꿔\s*줘?|변경\s*해?\s*줘?|수정\s*해?\s*줘?|설정\s*해?\s*줘?)\s*$/);
+  if (_cfgNum) {
+    const field = /최소|min/.test(_cfgNum[2]) ? 'min_stock' : 'target_qty';
+    return { request_type: '_config_change', item_name: _cfgNum[1].trim(), field, value: parseInt(_cfgNum[3]), text: s };
+  }
+  // 값 없는 설정 변경: "브로콜리 거래처 바꿔줘"
   const _configMatch = s.match(/^(.+?)\s+(?:거래처|최소\s*수량|목표\s*수량|min|target)(?:\s+.*?)?(?:바꿔\s*줘?|변경\s*해?\s*줘?|수정\s*해?\s*줘?|설정\s*해?\s*줘?)\s*$/);
   if (_configMatch) {
     return { request_type: '_config_change', item_name: _configMatch[1].trim(), text: s };
@@ -1031,8 +1044,38 @@ async function handleNaturalInput() {
         return;
       }
 
-      // 설정 변경 카드 (Feature 5)
+      // 설정 변경 (Feature 5)
       if (cmd.request_type === '_config_change') {
+        // 값이 명확하면 확인 카드 없이 바로 처리
+        if (cmd.field && cmd.value != null) {
+          const item = _items.find(it =>
+            it.item_name === cmd.item_name ||
+            it.item_name.replace(/\s/g,'') === cmd.item_name.replace(/\s/g,'') ||
+            it.item_name.includes(cmd.item_name) || cmd.item_name.includes(it.item_name)
+          );
+          if (!item) { addResult(raw, `❌ "${cmd.item_name}" 품목을 찾을 수 없습니다.`, 'err'); return; }
+          if (cmd.field === 'vendor') {
+            const vendor = _vendors.find(v => v.vendor_name.replace(/\s/g,'').includes(cmd.value.replace(/\s/g,'')) || cmd.value.replace(/\s/g,'').includes(v.vendor_name.replace(/\s/g,'')));
+            if (vendor) {
+              await db.from('items').update({ vendor_id: vendor.vendor_id, updated_at: new Date().toISOString() }).eq('item_id', item.item_id);
+              item.vendor_id = vendor.vendor_id;
+              showToast(`${item.item_name} 거래처가 ${vendor.vendor_name}(으)로 설정되었습니다`, 2000);
+              addResult(raw, `✅ ${item.item_name} 거래처 → ${vendor.vendor_name}`, 'ok');
+              renderInventory();
+              return;
+            }
+          } else {
+            const num = typeof cmd.value === 'number' ? cmd.value : parseFloat(cmd.value) || 0;
+            await db.from('items').update({ [cmd.field]: num, updated_at: new Date().toISOString() }).eq('item_id', item.item_id);
+            item[cmd.field] = num;
+            const label = cmd.field === 'min_stock' ? '최소수량' : '목표수량';
+            showToast(`${item.item_name} ${label}이 ${num}(으)로 설정되었습니다`, 2000);
+            addResult(raw, `✅ ${item.item_name} ${label} → ${num}`, 'ok');
+            renderInventory();
+            return;
+          }
+        }
+        // 값 없으면 기존 설정 카드 표시
         await _showConfigCard(cmd.item_name, raw);
         return;
       }
@@ -1137,7 +1180,42 @@ async function handleNaturalInput() {
       if (it.item_name) it.item_name = it.item_name.replace(/(을|를|은|는|이|가)$/, '').trim();
     }
 
-    // 모든 탭에서 확인 카드 표시 (비입력 탭 포함)
+    // Fast-path: 확실한 파싱은 확인 카드 생략하고 바로 처리
+    const _canSkipReview = _draftItems.length > 0 && _draftItems.every(it => {
+      const exactMatch = _items.find(ex =>
+        ex.item_name === it.item_name ||
+        ex.item_name.replace(/\s/g,'') === it.item_name.replace(/\s/g,'')
+      );
+      if (!exactMatch) return false; // 신규 품목 → 확인 필요
+      if (!it.qtyParsed) return false; // 수량 미파싱 → 확인 필요
+      if (!it.action || !['inbound','consume','stock_check'].includes(it.action)) return false; // 액션 불명확
+      if (it.quantity >= 20) return false; // 이상값 → 확인 필요
+      const prev = _sessionInputs.find(s => s.item_name === it.item_name);
+      if (prev && it.action !== 'inbound') return false; // 세션 재입력 → 확인 필요
+      return true;
+    });
+    // 문장 내 동일 품목 중복도 체크
+    const _nameSet = new Set();
+    const _hasIntraDup = _draftItems.some(it => {
+      if (_nameSet.has(it.item_name)) return true;
+      _nameSet.add(it.item_name); return false;
+    });
+    if (_canSkipReview && !_hasIntraDup) {
+      const req = draftToRequest(_draftItems);
+      req._source = 'fast_path';
+      const result = await processRequest(req);
+      for (const it of _draftItems) {
+        const existing = _sessionInputs.find(s => s.item_name === it.item_name);
+        if (existing) { existing.quantity = it.quantity; existing.unit = it.unit; }
+        else _sessionInputs.push({ item_name: it.item_name, quantity: it.quantity, unit: it.unit });
+      }
+      const undoItems = (result.updated_items || []).filter(it => it.item_id && it.qty_before != null).map(it => ({ item_id: it.item_id, name: it.name, qty_before: it.qty_before, qty_after: it.quantity, unit: it.unit }));
+      addResult(raw, formatResult(result), result.status === 'success' ? 'ok' : 'warn', undoItems);
+      renderInventory();
+      if (document.getElementById('tab-order')?.classList.contains('active')) renderOrder();
+      _draftItems = [];
+      return;
+    }
 
     // Step 1: 한 문장에서 동일 품목 합산 (Fix 4)
     const _nameCountMap = new Map();
@@ -1443,7 +1521,7 @@ function ruleEngine(text) {
     const conf = _itemConfidence(name, confSeg);
     if (conf < minConf) minConf = conf;
     const defaultApplied = !seg.action && fallbackAction === 'stock_check';
-    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:action, confidence:conf >= 0.8 ? 'high' : 'low', _score:conf, _defaultApplied:defaultApplied });
+    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:action, confidence:conf >= 0.8 ? 'high' : 'low', _score:conf, _defaultApplied:defaultApplied, qtyParsed:seg.qtyParsed });
   }
   // 아이템 중 하나라도 confidence < 0.8 이면 전체 LLM fallback
   const needsFallback = !results.length || minConf < 0.8;
@@ -2078,14 +2156,21 @@ async function saveInvItem(id) {
     // 'keep' → 따로 유지, 아래로 계속 진행하여 이름만 변경
   }
 
+  const oldItem = _items.find(x => x.item_id === id);
+  const oldName = oldItem?.item_name || name;
+  const oldQty = oldItem?.current_qty;
   await db.from('items').update({
     item_name: name, current_qty: qty, unit, target_qty: tgt,
     vendor_id: vid, updated_at: new Date().toISOString()
   }).eq('item_id', id);
-  const loc = _items.find(x => x.item_id === id);
-  if (loc) Object.assign(loc, { item_name:name, current_qty:qty, unit, target_qty:tgt, vendor_id:vid });
+  if (oldItem) Object.assign(oldItem, { item_name:name, current_qty:qty, unit, target_qty:tgt, vendor_id:vid });
   renderInventory();
-  showToast('✅ ' + name + ' 수정 완료');
+  // 채팅 영역에 수정 결과 표시
+  const changes = [];
+  if (oldName !== name) changes.push(`이름: ${oldName} → ${name}`);
+  if (oldQty !== qty) changes.push(`수량: ${qty}${unit || '개'}`);
+  const detail = changes.length ? changes.join(', ') : '수정됨';
+  addResult(`${name} 수정`, `✅ ${name} — ${detail}`, 'ok');
 }
 
 function _showMergeCard(name, existing, newQty, unit) {
@@ -3057,6 +3142,39 @@ function updateJustTalk() {
 document.addEventListener('keydown', e=>{
   if (e.key==='Enter' && document.activeElement===document.getElementById('nlInput')) handleNaturalInput();
 });
+
+// Web Speech API — 마이크 입력
+let _recognition = null;
+let _micActive = false;
+function toggleMic() {
+  const btn = document.getElementById('micBtn');
+  if (_micActive) {
+    if (_recognition) _recognition.stop();
+    return;
+  }
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+    showToast('이 브라우저에서 음성 인식을 지원하지 않습니다.'); return;
+  }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  _recognition = new SR();
+  _recognition.lang = 'ko-KR';
+  _recognition.interimResults = true;
+  _recognition.continuous = false;
+  _recognition.onstart = () => { _micActive = true; btn.classList.add('rec'); };
+  _recognition.onend = () => { _micActive = false; btn.classList.remove('rec'); _recognition = null; };
+  _recognition.onerror = (e) => { _micActive = false; btn.classList.remove('rec'); if (e.error !== 'no-speech') showToast('음성 인식 오류: ' + e.error); };
+  _recognition.onresult = (e) => {
+    const inp = document.getElementById('nlInput');
+    let final = '', interim = '';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    inp.value = final || interim;
+    if (final) { _recognition.stop(); setTimeout(() => handleNaturalInput(), 200); }
+  };
+  _recognition.start();
+}
 
 // 모바일 키보드 대응: visualViewport 사용하여 입력창 위치 유지
 if (window.visualViewport) {
