@@ -24,8 +24,20 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .nav.active{background:var(--accent);border-color:var(--accent);color:#fff}
 /* 탭 */
 .tab-wrap{flex:1;overflow:hidden}
-.tab{display:none;height:calc(100dvh - 52px - 62px);overflow-y:auto;padding:14px 14px 24px;flex-direction:column;gap:12px}
+.tab{display:none;height:calc(100dvh - 52px - 62px);overflow-y:auto;padding:14px 14px 80px;flex-direction:column;gap:12px}
 .tab.active{display:flex}
+/* 입력탭: 채팅 구조 */
+#tab-input{display:none;flex-direction:column;padding:0 14px 14px;padding-bottom:80px}
+#tab-input.active{display:flex}
+#tab-input .chat-area{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:14px 0}
+.chat-bubble{max-width:85%;padding:11px 14px;border-radius:14px;font-size:14px;line-height:1.5;word-break:break-word}
+.chat-bubble.system{align-self:flex-start;background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:4px}
+.chat-bubble.user{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
+.chat-bubble .chat-time{font-size:10px;opacity:.5;margin-top:4px;display:block}
+.chat-bubble.system .chat-time{text-align:left}
+.chat-bubble.user .chat-time{text-align:right}
+.chat-bubble .res-undo{margin-top:6px}
+.chat-guide{align-self:flex-start;max-width:90%}
 /* 공통 카드 */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px}
 .card-title{font-size:13px;font-weight:700;color:var(--muted);letter-spacing:.05em;margin-bottom:12px}
@@ -123,7 +135,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 /* no item */
 .no-item{text-align:center;padding:40px;color:var(--muted);font-size:14px;grid-column:1/-1}
 /* ResultCard */
-.result-card-wrap{background:var(--surface);border:1.5px solid var(--accent);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px}
+#reviewPanel{position:fixed;bottom:62px;left:0;right:0;z-index:19;padding:0 10px 6px;max-height:60dvh;overflow-y:auto}
+.result-card-wrap{background:var(--surface);border:1.5px solid var(--accent);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 -2px 12px rgba(0,0,0,.08)}
 .result-card-title{font-size:15px;font-weight:700;color:var(--text);padding-bottom:10px;border-bottom:1px solid var(--border)}
 .result-card-body{display:flex;flex-direction:column;gap:6px}
 .rc-row{display:flex;align-items:baseline;gap:10px;padding:12px 0;border-bottom:1px solid var(--surface2)}
@@ -156,8 +169,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .rc-btn-cancel{flex:1;padding:14px;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text-muted);font-family:inherit;font-size:14px;cursor:pointer}
 .rc-btn-primary:disabled{opacity:.5}
 
-/* 자연어 입력존 — 전체 탭 공통 고정 */
-.global-input-zone{background:var(--surface);border-bottom:1px solid var(--border);padding:10px 14px;position:sticky;top:52px;z-index:9}
+/* 자연어 입력존 — 하단 고정 */
+.global-input-zone{background:var(--surface);border-top:1px solid var(--border);padding:10px 14px;position:fixed;bottom:0;left:0;right:0;z-index:20}
 .nl-input-zone{display:flex;gap:8px;align-items:center}
 .nl-input{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:16px;font-family:inherit;color:var(--text);outline:none;transition:border-color .15s}
 .nl-input:focus{border-color:var(--accent)}
@@ -214,7 +227,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .btn-review-cancel{padding:13px 20px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text-dim);font-family:inherit;font-size:14px;cursor:pointer}
 .btn-review-confirm{flex:1;padding:13px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer}
 .btn-review-confirm:disabled{opacity:.5}
-.parsing-indicator{display:flex;align-items:center;gap:8px;padding:12px 16px;background:var(--accent-lt);border:1px solid var(--accent);border-radius:10px;font-size:13px;color:var(--accent);font-weight:500}
+.parsing-indicator{display:flex;align-items:center;gap:8px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:14px;border-bottom-left-radius:4px;font-size:13px;color:var(--accent);font-weight:500;align-self:flex-start;max-width:60%}
 
 /* Vita 연동 안내 */
 .vita-notice{background:var(--accent-lt);border:1px solid var(--accent);border-radius:14px;padding:14px 16px;display:flex;gap:12px;align-items:flex-start}
@@ -267,7 +280,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .item-vendor-sel { background:var(--surface); border:1px solid var(--border); border-radius:6px; padding:4px 8px; font-size:12px; font-family:inherit; color:var(--text); outline:none; cursor:pointer; }
 
 /* 토스트 */
-#toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--text);border-radius:10px;padding:11px 18px;font-size:13px;font-weight:500;color:var(--bg);transition:transform .25s ease;z-index:300;white-space:nowrap;pointer-events:none}
+#toast{position:fixed;bottom:76px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--text);border-radius:10px;padding:11px 18px;font-size:13px;font-weight:500;color:var(--bg);transition:transform .25s ease;z-index:300;white-space:nowrap;pointer-events:none}
 #toast.show{transform:translateX(-50%) translateY(0)}
 .spin{display:inline-block;width:16px;height:16px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:rot .6s linear infinite;vertical-align:middle}
 @keyframes rot{to{transform:rotate(360deg)}}
@@ -286,48 +299,23 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
   </div>
 </div>
 
-<!-- 전체 탭 공통 입력존 -->
-<div class="global-input-zone">
-  <div class="nl-input-zone">
-    <input class="nl-input" id="nlInput" type="text"
-      placeholder="예: 치즈 2봉 양파 5개 브로콜리 세 개" autocomplete="off" enterkeyhint="send">
-    <button class="nl-send-btn" id="nlSendBtn" onclick="handleNaturalInput()">
-      <span id="nlBtnTxt">입력</span>
-    </button>
-  </div>
-</div>
-
-<!-- 확인 카드 (모든 탭에서 공통 표시) -->
-<div id="reviewPanel" style="display:none">
-  <div class="result-card-wrap">
-    <div class="result-card-title" id="resultCardTitle"></div>
-    <div class="result-card-body" id="reviewBody"></div>
-    <button class="result-add-btn" onclick="addReviewRow()">+ 품목 추가</button>
-    <div class="result-card-btns">
-      <button class="rc-btn-primary"   id="confirmReviewBtn" onclick="confirmReview()">확인 · 실행</button>
-      <button class="rc-btn-secondary" onclick="editReview()">수정</button>
-      <button class="rc-btn-cancel"    onclick="cancelReview()">취소</button>
-    </div>
-  </div>
-</div>
-
 <div class="tab-wrap">
 
-<!-- 입력탭 -->
+<!-- 입력탭 (채팅 구조) -->
 <div id="tab-input" class="tab active">
-  <!-- Just Talk 유도 ��역 -->
-  <div id="justTalk" class="just-talk">
-    <div class="just-talk-title">재고 확인과 발주를 말로 빠르게 처리합니다</div>
-    <div class="just-talk-sub">따라해 보세요</div>
-    <ul class="just-talk-list">
-      <li class="just-talk-item" onclick="fillExample(this)">치즈 몇 봉 남았지?</li>
-      <li class="just-talk-item" onclick="fillExample(this)">오늘 발주 뭐 해야 돼?</li>
-      <li class="just-talk-item" onclick="fillExample(this)">토마토소스 3봉 추가</li>
-    </ul>
+  <div class="chat-area" id="chatArea">
+    <!-- 가이드 메시지 -->
+    <div id="justTalk" class="chat-bubble system chat-guide">
+      <div style="font-weight:700;margin-bottom:6px">재고 확인과 발주를 말로 빠르게 처리합니다</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">따라해 보세요</div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <span class="just-talk-item" onclick="fillExample(this)">치즈 몇 봉 남았지?</span>
+        <span class="just-talk-item" onclick="fillExample(this)">오늘 발주 뭐 해야 돼?</span>
+        <span class="just-talk-item" onclick="fillExample(this)">토마토소스 3봉 추가</span>
+      </div>
+    </div>
+    <div id="resList"></div>
   </div>
-
-  <div class="res-hdr">처리 결과</div>
-  <div id="resList"></div>
 </div>
 
 <!-- 재고탭 -->
@@ -396,6 +384,31 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 </div>
 
 </div><!-- /tab-wrap -->
+
+<!-- 확인 카드 (입력창 바로 위, 고정) -->
+<div id="reviewPanel" style="display:none">
+  <div class="result-card-wrap">
+    <div class="result-card-title" id="resultCardTitle"></div>
+    <div class="result-card-body" id="reviewBody"></div>
+    <button class="result-add-btn" onclick="addReviewRow()">+ 품목 추가</button>
+    <div class="result-card-btns">
+      <button class="rc-btn-primary"   id="confirmReviewBtn" onclick="confirmReview()">확인 · 실행</button>
+      <button class="rc-btn-secondary" onclick="editReview()">수정</button>
+      <button class="rc-btn-cancel"    onclick="cancelReview()">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- 입력창 하단 고정 -->
+<div class="global-input-zone">
+  <div class="nl-input-zone">
+    <input class="nl-input" id="nlInput" type="text"
+      placeholder="예: 치즈 2봉 양파 5개 브로콜리 세 개" autocomplete="off" enterkeyhint="send">
+    <button class="nl-send-btn" id="nlSendBtn" onclick="handleNaturalInput()">
+      <span id="nlBtnTxt">입력</span>
+    </button>
+  </div>
+</div>
 
 <div id="toast"></div>
 
@@ -978,7 +991,9 @@ async function handleNaturalInput() {
   loadCard.className = 'parsing-indicator';
   loadCard.id = 'parseLoading';
   loadCard.innerHTML = '<span class="spin" style="border-color:var(--accent-dim);border-top-color:var(--accent)"></span> 파싱 중...';
-  resList.insertBefore(loadCard, resList.firstChild);
+  resList.appendChild(loadCard);
+  const chatArea = document.getElementById('chatArea');
+  if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
 
   try {
     // 0차: 명령 감지 (발주 조회, 재고 조회 등 — 품목 파싱 불필요)
@@ -1030,7 +1045,7 @@ async function handleNaturalInput() {
         const cardId = 'orderSuggest_' + Date.now();
         addResult(raw, text, 'ok');
         // 결과 카드에 버튼 삽입
-        const firstCard = document.getElementById('resList')?.firstChild;
+        const firstCard = document.getElementById('resList')?.lastChild;
         if (firstCard) {
           const btnRow = document.createElement('div');
           btnRow.className = 'order-action-inline';
@@ -2674,20 +2689,14 @@ async function switchTab(n, btn) {
 }
 
 function resetToHome() {
-  // 입력탭으로 전환
   const inputNav = document.querySelector('.nav');
   switchTab('input', inputNav);
-  // 처리 결과 초기화
   document.getElementById('resList').innerHTML = '';
-  // 리뷰 패널 닫기
   cancelReview();
-  // 입력창 초기화
   document.getElementById('nlInput').value = '';
-  // 버튼 로딩 상태 해제
   const btn = document.getElementById('nlSendBtn');
   btn.disabled = false;
   document.getElementById('nlBtnTxt').textContent = '입력';
-  // Just Talk 다시 표시
   updateJustTalk();
 }
 
@@ -2695,31 +2704,44 @@ let _undoCounter = 0;
 function addResult(raw, msg, type, undoItems) {
   const list = document.getElementById('resList');
   const now  = new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
-  const card = document.createElement('div');
-  card.className = 'res-card '+(type||'ok');
-  let footHtml = `<div class="res-time">${now}</div>`;
+
+  // 사용자 말풍선 (오른쪽)
+  const userBubble = document.createElement('div');
+  userBubble.className = 'chat-bubble user';
+  userBubble.innerHTML = `${raw}<span class="chat-time">${now}</span>`;
+  list.appendChild(userBubble);
+
+  // 시스템 응답 말풍선 (왼쪽)
+  const sysBubble = document.createElement('div');
+  const borderColor = type === 'err' ? 'var(--red)' : type === 'warn' ? 'var(--warn)' : 'var(--accent)';
+  sysBubble.className = 'chat-bubble system';
+  sysBubble.style.borderLeftColor = borderColor;
+  sysBubble.style.borderLeftWidth = '3px';
+  let undoHtml = '';
   if (undoItems && undoItems.length) {
     const uid = 'undo_' + (++_undoCounter);
-    footHtml = `<div class="res-foot"><button class="res-undo" id="${uid}">되돌리기</button><div class="res-time">${now}</div></div>`;
-    card.innerHTML = `<div class="res-raw">${raw}</div><div class="res-msg">${msg.replace(/\n/g,'<br>')}</div>${footHtml}`;
-    list.insertBefore(card, list.firstChild);
+    undoHtml = `<button class="res-undo" id="${uid}">되돌리기</button>`;
+    sysBubble.innerHTML = `${msg.replace(/\n/g,'<br>')}${undoHtml}<span class="chat-time">${now}</span>`;
+    list.appendChild(sysBubble);
     const btn = document.getElementById(uid);
-    // 30초 후 비활성화
     const timer = setTimeout(() => { btn.disabled = true; }, 30000);
     btn.onclick = async () => {
       btn.disabled = true;
       clearTimeout(timer);
       await _undoResult(undoItems);
-      // 되돌린 후 다시 되돌리기 가능하도록 새 undo 데이터 생성
       const reverseUndo = undoItems.map(it => ({ item_id: it.item_id, name: it.name, qty_before: it.qty_after, qty_after: it.qty_before, unit: it.unit }));
       const reMsg = undoItems.map(it => `↩️ ${it.name} → ${it.qty_before}${it.unit}`).join('\n');
       addResult('되돌리기', reMsg, 'ok', reverseUndo);
       renderInventory();
     };
   } else {
-    card.innerHTML = `<div class="res-raw">${raw}</div><div class="res-msg">${msg.replace(/\n/g,'<br>')}</div>${footHtml}`;
-    list.insertBefore(card, list.firstChild);
+    sysBubble.innerHTML = `${msg.replace(/\n/g,'<br>')}<span class="chat-time">${now}</span>`;
+    list.appendChild(sysBubble);
   }
+
+  // 스크롤을 맨 아래로
+  const chatArea = document.getElementById('chatArea');
+  if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
   updateJustTalk();
 }
 
@@ -3027,11 +3049,30 @@ function updateJustTalk() {
   if (!el) return;
   const hasResults = document.getElementById('resList')?.children.length > 0;
   el.style.display = hasResults ? 'none' : '';
+  // 채팅 영역 스크롤 맨 아래로
+  const chatArea = document.getElementById('chatArea');
+  if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
 }
 
 document.addEventListener('keydown', e=>{
   if (e.key==='Enter' && document.activeElement===document.getElementById('nlInput')) handleNaturalInput();
 });
+
+// 모바일 키보드 대응: visualViewport 사용하여 입력창 위치 유지
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    const vv = window.visualViewport;
+    const inputZone = document.querySelector('.global-input-zone');
+    const offset = window.innerHeight - vv.height - vv.offsetTop;
+    inputZone.style.bottom = offset + 'px';
+  });
+  window.visualViewport.addEventListener('scroll', () => {
+    const vv = window.visualViewport;
+    const inputZone = document.querySelector('.global-input-zone');
+    const offset = window.innerHeight - vv.height - vv.offsetTop;
+    inputZone.style.bottom = offset + 'px';
+  });
+}
 
 /* ── 시작 ── */
 setTimeout(()=>init(), 500);
