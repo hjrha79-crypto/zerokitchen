@@ -122,6 +122,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ord-empty-good .ord-empty-icon{font-size:32px;margin-bottom:8px}
 .ord-empty-good .ord-empty-title{font-size:15px;font-weight:600;margin-bottom:4px}
 .ord-empty-good .ord-empty-sub{font-size:12px;color:var(--muted)}
+.ord-defer-tag{font-size:10px;background:rgba(192,84,10,.1);color:var(--warn);padding:2px 6px;border-radius:4px;font-weight:600}
+.ord-defer-blocked{font-size:10px;background:rgba(217,48,37,.1);color:var(--red);padding:2px 6px;border-radius:4px;font-weight:600}
 .ord-card{background:var(--surface);border:1px solid var(--border);border-left:3px solid var(--warn);border-radius:12px;padding:13px}
 .ord-name{font-size:15px;font-weight:600}
 .ord-detail{font-size:13px;color:var(--dim);margin-top:3px;font-family:'JetBrains Mono',monospace}
@@ -2436,6 +2438,17 @@ async function renderOrder() {
     if (oErr) throw oErr;
     _orderRequests = pendingRows || [];
 
+    // 1.5) 이월된 발주 로드 (어제 이전 deferred)
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: deferredRows } = await db.from('daily_orders')
+      .select('*').eq('store_id', SID).eq('status', 'deferred')
+      .lt('order_date', today);
+    const _deferredItems = (deferredRows || []).map(r => ({
+      ...r,
+      isDeferred: true,
+      defer_count: r.defer_count || 0
+    }));
+
     // 2) 재고 부족 품목 (자동 제안용)
     await refreshItems();
     const pendingItemIds = new Set(_orderRequests.map(r => r.item_id));
@@ -2448,6 +2461,35 @@ async function renderOrder() {
         unit: it.unit || '', vendor_id: it.vendor_id || null,
         vendor: _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || null
       }));
+
+    // 이월 품목 합치기 (중복 제거)
+    for (const def of _deferredItems) {
+      const existing = suggestItems.find(s => s.item_id === def.item_id);
+      if (existing) {
+        // 재고 변동 반영하여 수량 재계산
+        existing.suggested_qty = Math.max(0, Number(def.recommended_qty));
+        existing.isDeferred = true;
+        existing.defer_count = def.defer_count;
+        existing.daily_order_id = def.id;
+      } else {
+        const item = _items.find(it => it.item_id === def.item_id);
+        if (item) {
+          suggestItems.push({
+            item_id: def.item_id,
+            name: def.item_name,
+            current_qty: Number(item.current_qty),
+            target_qty: Number(item.target_qty || def.recommended_qty),
+            suggested_qty: Math.max(0, Number(def.recommended_qty)),
+            unit: def.unit || '',
+            vendor_id: def.vendor_id || null,
+            vendor: _vendors.find(v => v.vendor_id === def.vendor_id)?.vendor_name || null,
+            isDeferred: true,
+            defer_count: def.defer_count,
+            daily_order_id: def.id
+          });
+        }
+      }
+    }
 
     if (!_orderRequests.length && !suggestItems.length) {
       const lastCheck = _items.reduce((latest, it) => {
@@ -2548,7 +2590,7 @@ async function renderOrder() {
           const recId = 'orec_' + it.item_id;
           html += `<div class="ord-recommend-card${isUrgent ? ' urgent' : ''}">
             <div class="ord-rec-left">
-              <div class="ord-rec-name">${isUrgent ? '🔴 ' : ''}${it.name}</div>
+              <div class="ord-rec-name">${isUrgent ? '🔴 ' : ''}${it.name}${it.isDeferred ? (it.defer_count >= 2 ? ' <span class="ord-defer-blocked">⚠️ 이월 2회</span>' : ' <span class="ord-defer-tag">↩️ 이월</span>') : ''}</div>
               <div class="ord-rec-info">현재 ${it.current_qty}${it.unit}</div>
               <div class="ord-rec-source">(목표재고 기준)</div>
             </div>
@@ -2571,6 +2613,7 @@ async function renderOrder() {
       // 전체 발주 확인 버튼
       html += `<div class="ord-today-actions">
         <button class="ord-btn-confirm-all" onclick="_confirmAllOrders()">전체 발주 확인</button>
+        <button style="background:var(--surface2);border:1px solid var(--border);color:var(--dim)" onclick="_deferAllOrders()">내일로 이월</button>
       </div>`;
       html += `</div>`;
     }
@@ -2613,6 +2656,8 @@ function _copyVendorOrder(vendorName, itemIds) {
 async function _confirmAllOrders() {
   const inputs = document.querySelectorAll('.ord-stepper-val');
   let count = 0;
+  const today = new Date().toISOString().slice(0, 10);
+
   for (const inp of inputs) {
     const qty = parseInt(inp.value) || 0;
     if (qty <= 0) continue;
@@ -2620,18 +2665,93 @@ async function _confirmAllOrders() {
     const name = inp.dataset.name;
     const unit = inp.dataset.unit;
     const vendorId = inp.dataset.vendorId ? parseInt(inp.dataset.vendorId) : null;
+
+    // order_requests에 등록
     await db.from('order_requests').insert({
       store_id: SID, item_id: itemId, item_name: name,
       qty: qty, unit: unit, vendor_id: vendorId, status: 'pending'
     });
+
+    // daily_orders에 기록
+    await db.from('daily_orders').insert({
+      store_id: SID, order_date: today,
+      item_id: itemId, item_name: name,
+      recommended_qty: parseInt(inp.defaultValue) || qty,
+      final_qty: qty,
+      unit: unit, vendor_id: vendorId,
+      status: 'confirmed', source: 'target_based'
+    });
+
+    // 이월 상태 정리
+    await db.from('daily_orders')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('item_id', itemId).eq('status', 'deferred');
+
     count++;
   }
+
   if (count) {
     showToast(`${count}개 품목 발주 등록됨`);
     renderOrder();
   } else {
     showToast('발주할 품목이 없습니다');
   }
+}
+
+async function _deferAllOrders() {
+  const inputs = document.querySelectorAll('.ord-stepper-val');
+  let count = 0;
+  let blocked = 0;
+  const today = new Date().toISOString().slice(0, 10);
+
+  for (const inp of inputs) {
+    const qty = parseInt(inp.value) || 0;
+    if (qty <= 0) continue;
+    const itemId = parseInt(inp.dataset.itemId);
+    const name = inp.dataset.name;
+    const unit = inp.dataset.unit;
+    const vendorId = inp.dataset.vendorId ? parseInt(inp.dataset.vendorId) : null;
+
+    // 기존 이월 횟수 확인
+    const { data: existingDefer } = await db.from('daily_orders')
+      .select('defer_count')
+      .eq('item_id', itemId).eq('status', 'deferred')
+      .order('created_at', { ascending: false })
+      .limit(1);
+    const currentDefers = existingDefer?.[0]?.defer_count || 0;
+
+    if (currentDefers >= 2) {
+      blocked++;
+      continue; // 이월 2회 제한
+    }
+
+    // 기존 deferred 있으면 업데이트, 없으면 새로 생성
+    if (existingDefer?.length) {
+      await db.from('daily_orders')
+        .update({
+          recommended_qty: qty, final_qty: qty,
+          defer_count: currentDefers + 1,
+          order_date: today,
+          updated_at: new Date().toISOString()
+        })
+        .eq('item_id', itemId).eq('status', 'deferred');
+    } else {
+      await db.from('daily_orders').insert({
+        store_id: SID, order_date: today,
+        item_id: itemId, item_name: name,
+        recommended_qty: qty, final_qty: qty,
+        unit: unit, vendor_id: vendorId,
+        status: 'deferred', source: 'target_based',
+        defer_count: 1
+      });
+    }
+    count++;
+  }
+
+  let msg = `${count}개 품목 내일로 이월됨`;
+  if (blocked > 0) msg += ` (${blocked}개는 이월 2회 초과로 제외)`;
+  showToast(msg, 3000);
+  renderOrder();
 }
 
 // 발주 완료 → status='done' + 재고 입고
