@@ -8,7 +8,9 @@
       "Bash(git config:*)",
       "Bash(git push:*)",
       "Bash(ls -la C:Usershjrhazerokitchen/fix_tonight*.txt)",
-      "Bash(ls -la /c/Users/hjrha/zerokitchen/fix_tonight*.txt)"
+      "Bash(ls -la /c/Users/hjrha/zerokitchen/fix_tonight*.txt)",
+      "Read(//c/Users/hjrha/**)",
+      "Read(//c/Users/hjrha/Desktop/**)"
     ]
   }
 }

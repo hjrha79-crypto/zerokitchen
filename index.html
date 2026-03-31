@@ -78,8 +78,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .inv-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .inv-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 12px;display:flex;flex-direction:column;gap:2px;cursor:pointer;transition:all .15s;-webkit-user-select:none;user-select:none}
 .inv-card:active{transform:scale(0.98)}
-.inv-card.low{border-left:3px solid var(--warn)}
-.inv-card.zero{border-left:3px solid var(--red)}
+.inv-card.low{border-left:3px solid var(--warn);background:rgba(192,84,10,.04)}
+.inv-card.zero{border-left:3px solid var(--red);background:rgba(217,48,37,.04)}
 .inv-card-main{display:flex;justify-content:space-between;align-items:center}
 .inv-card-main .inv-name{font-size:15px;font-weight:600;line-height:1.3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .inv-card-main .inv-qty-wrap{display:flex;align-items:baseline;gap:3px;flex-shrink:0}
@@ -200,6 +200,9 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .mic-wave-bar:nth-child(2){height:16px;animation-delay:0.15s}
 .mic-wave-bar:nth-child(3){height:12px;animation-delay:0.3s}
 @keyframes mic-wave-anim{0%,100%{transform:scaleY(0.4)}50%{transform:scaleY(1)}}
+.mic-hint{position:absolute;bottom:60px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;white-space:nowrap;pointer-events:none;animation:mic-hint-fade 0.3s ease;z-index:25}
+.mic-hint::after{content:'';position:absolute;bottom:-5px;left:50%;transform:translateX(-50%);border-left:6px solid transparent;border-right:6px solid transparent;border-top:6px solid var(--text)}
+@keyframes mic-hint-fade{from{opacity:0;transform:translateX(-50%) translateY(4px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 .mic-settings-popup{position:absolute;bottom:54px;left:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:0 -4px 16px rgba(0,0,0,.12);z-index:30;min-width:180px;display:none}
 .mic-settings-popup.open{display:block}
 .mic-settings-popup .msp-title{font-size:12px;font-weight:600;color:var(--dim);margin-bottom:8px}
@@ -208,6 +211,9 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .mic-settings-popup .msp-opt.active{border-color:var(--accent);background:var(--accent-lt);color:var(--accent);font-weight:600}
 .nl-send-btn{padding:14px 20px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity .15s;flex-shrink:0}
 .nl-send-btn:disabled{opacity:.5}
+.last-input-chip{display:none;padding:6px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:16px;font-size:12px;color:var(--dim);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;transition:all .15s}
+.last-input-chip:hover{border-color:var(--accent);color:var(--accent)}
+.last-input-chip.visible{display:inline-block}
 /* 동일 품목 재입력 확인 카드 */
 .dup-card{background:var(--surface);border:1.5px solid var(--warn);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;margin-bottom:10px;position:relative}
 .dup-card-title{font-size:14px;font-weight:700;color:var(--text)}
@@ -280,6 +286,13 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .inv-edit-form.open{display:flex}
 .inv-edit-inp{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 9px;font-size:13px;font-family:inherit;color:var(--text);outline:none;width:100%}
 .inv-edit-inp:focus{border-color:var(--accent)}
+.inv-stepper{display:flex;align-items:center;gap:0}
+.inv-stepper-btn{width:36px;height:36px;border:1px solid var(--border);background:var(--surface2);font-size:18px;font-weight:700;cursor:pointer;color:var(--text);display:flex;align-items:center;justify-content:center;transition:all .1s;flex-shrink:0}
+.inv-stepper-btn:first-child{border-radius:6px 0 0 6px}
+.inv-stepper-btn:last-child{border-radius:0 6px 6px 0}
+.inv-stepper-btn:active{background:var(--accent-lt);color:var(--accent)}
+.inv-stepper .inv-edit-inp{border-radius:0;border-left:none;border-right:none;text-align:center;width:60px;flex:0 0 60px}
+.inv-edit-label{font-size:11px;color:var(--muted);font-weight:600;margin-bottom:2px}
 .inv-save-btn{flex:1;padding:8px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-family:inherit;font-size:12px;font-weight:700;cursor:pointer}
 .inv-cancel-btn{padding:8px 12px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--muted);font-family:inherit;font-size:12px;cursor:pointer}
 
@@ -439,6 +452,9 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 
 <!-- 입력창 하단 고정 -->
 <div class="global-input-zone">
+  <div id="lastInputRow" style="display:none;padding:0 0 6px;overflow-x:auto">
+    <span class="last-input-chip visible" id="lastInputChip" onclick="_fillLastInput()"></span>
+  </div>
   <div class="nl-input-zone">
     <div style="position:relative;flex-shrink:0">
       <button class="nl-mic-btn" id="micBtn" onclick="toggleMic()" oncontextmenu="event.preventDefault();toggleMicSettings()">🎤</button>
@@ -1040,6 +1056,7 @@ async function handleNaturalInput() {
   const btn   = document.getElementById('nlSendBtn');
   const btnTxt = document.getElementById('nlBtnTxt');
   if (!raw) return;
+  _saveLastInput(raw);
 
   const _onInputTab = document.getElementById('tab-input').classList.contains('active');
 
@@ -2093,8 +2110,13 @@ function formatResult(result) {
     case 'inventory_update_result':
       return (result.updated_items||[]).map(it => {
         const a = _ACTION_LABEL[it.action] || _ACTION_LABEL['stock_check'];
-        const displayQty = it.inputQty != null ? it.inputQty : it.quantity;
-        return `${it.is_new ? '🆕' : '✅'} ${it.name} ${a.prefix}${displayQty}${it.unit||''} (${a.label}) → 현재 ${it.quantity}${it.unit||''}`;
+        const u = it.unit || '';
+        const before = it.qty_before != null ? it.qty_before : '?';
+        const after = it.quantity;
+        const diff = it.qty_before != null ? after - it.qty_before : null;
+        const diffStr = diff != null ? (diff > 0 ? ` <span style="color:var(--accent)">(+${diff})</span>` : diff < 0 ? ` <span style="color:var(--warn)">(${diff})</span>` : '') : '';
+        if (it.is_new) return `🆕 ${it.name} ${after}${u} 등록`;
+        return `✅ ${it.name} ${a.label}\n${before}${u} → ${after}${u}${diffStr}`;
       }).join('\n') + (result.errors?.length ? '\n' + result.errors.map(e=>`❌ ${e.name}: ${e.reason}`).join('\n') : '');
     case 'inventory_state':
       return (result.items||[]).map(it => `📦 ${it.name}: ${it.quantity}${it.unit||''}`).join('\n') || '품목 없음';
@@ -2134,33 +2156,30 @@ function _renderInvCard(it, qty, tgt, cls, vName) {
       </div>
     </div>
     <div class="inv-edit-form" id="ief_${it.item_id}">
-      <input class="inv-edit-inp" id="ien_${it.item_id}" value="${it.item_name}" placeholder="품목명">
-      <div style="display:flex;gap:5px">
-        <input class="inv-edit-inp" id="ieq_${it.item_id}" type="number" value="${qty}" placeholder="재고" style="flex:1">
-        <input class="inv-edit-inp" id="ieu_${it.item_id}" value="${it.unit||''}" placeholder="단위" style="flex:1">
+      <div><div class="inv-edit-label">품목명</div><input class="inv-edit-inp" id="ien_${it.item_id}" value="${it.item_name}" placeholder="품목명"></div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><div class="inv-edit-label">수량</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('ieq_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="ieq_${it.item_id}" type="number" value="${qty}" placeholder="0"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('ieq_${it.item_id}',1)">+</button></div></div>
+        <div style="flex:1"><div class="inv-edit-label">단위</div><input class="inv-edit-inp" id="ieu_${it.item_id}" value="${it.unit||''}" placeholder="봉/개/박스" style="width:100%"></div>
       </div>
-      <div style="display:flex;gap:5px">
-        <div style="flex:1;display:flex;flex-direction:column;gap:2px">
-          <label style="font-size:11px;color:var(--muted);font-weight:600">목표 재고</label>
-          <input class="inv-edit-inp" id="iet_${it.item_id}" type="number" value="${tgt}" placeholder="목표" style="width:100%">
-        </div>
-        <div style="flex:1;display:flex;flex-direction:column;gap:2px">
-          <label style="font-size:11px;color:var(--muted);font-weight:600">최소 재고</label>
-          <input class="inv-edit-inp" id="iem_${it.item_id}" type="number" value="${it.min_stock||0}" placeholder="최소" style="width:100%">
-        </div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><div class="inv-edit-label">목표 재고</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iet_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="iet_${it.item_id}" type="number" value="${tgt}" placeholder="0"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iet_${it.item_id}',1)">+</button></div></div>
+        <div style="flex:1"><div class="inv-edit-label">최소 재고</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iem_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="iem_${it.item_id}" type="number" value="${it.min_stock||0}" placeholder="0"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iem_${it.item_id}',1)">+</button></div></div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:2px">
-        <label style="font-size:11px;color:var(--muted);font-weight:600">거래처</label>
-        <select class="inv-edit-inp" id="iev_${it.item_id}" style="width:100%">
-          <option value="">거래처 없음</option>${vOpts}
-        </select>
-      </div>
+      <div><div class="inv-edit-label">거래처</div><select class="inv-edit-inp" id="iev_${it.item_id}" style="width:100%"><option value="">거래처 없음</option>${vOpts}</select></div>
       <div style="display:flex;gap:6px;margin-top:4px">
         <button class="inv-save-btn" onclick="event.stopPropagation();saveInvItem(${it.item_id})">저장</button>
         <button class="inv-cancel-btn" onclick="event.stopPropagation();toggleInvEdit(${it.item_id})">취소</button>
       </div>
     </div>
   </div>`;
+}
+
+function _stepVal(inputId, delta) {
+  const inp = document.getElementById(inputId);
+  if (!inp) return;
+  let val = parseFloat(inp.value) || 0;
+  val = Math.max(0, val + delta);
+  inp.value = val;
 }
 
 function renderInventory() {
@@ -2193,7 +2212,7 @@ function renderInventory() {
   let items = [..._items];
   const sort = document.getElementById('invSort')?.value || 'updated';
   if (q) items = items.filter(it => it.item_name.includes(q));
-  if (flt === 'low_stock') items = items.filter(it => Number(it.current_qty) < Number(it.target_qty));
+  if (flt === 'low_stock') items = items.filter(it => Number(it.current_qty) < Number(it.target_qty) || Number(it.current_qty) <= 0);
   if (sort === 'name') items.sort((a,b) => a.item_name < b.item_name ? -1 : 1);
   else if (sort === 'qty_asc') items.sort((a,b) => Number(a.current_qty) - Number(b.current_qty));
   else if (sort === 'qty_desc') items.sort((a,b) => Number(b.current_qty) - Number(a.current_qty));
@@ -3372,6 +3391,9 @@ let _micTimeout = parseInt(localStorage.getItem('zk_mic_timeout') || '10');
 let _micAccumulated = '';  // 누적 인식 텍스트
 
 function toggleMic() {
+  localStorage.setItem('zk_mic_used', 'true');
+  const hint = document.getElementById('micHint');
+  if (hint) hint.remove();
   const btn = document.getElementById('micBtn');
   if (_micActive) {
     _micShouldStop = true;
@@ -3559,6 +3581,51 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
 })();
 
 /* ── 시작 ── */
+// 마이크 힌트: 한번도 안 쓴 사용자에게 표시
+(function initMicHint() {
+  if (localStorage.getItem('zk_mic_used')) return;
+  setTimeout(() => {
+    const wrapper = document.getElementById('micBtn')?.parentElement;
+    if (!wrapper) return;
+    const hint = document.createElement('div');
+    hint.className = 'mic-hint';
+    hint.id = 'micHint';
+    hint.textContent = '말로도 입력할 수 있어요';
+    wrapper.appendChild(hint);
+  }, 2000);
+})();
+
+// 마지막 입력 반복
+let _lastRawInput = localStorage.getItem('zk_last_input') || '';
+
+function _saveLastInput(raw) {
+  _lastRawInput = raw;
+  localStorage.setItem('zk_last_input', raw);
+  _updateLastInputChip();
+}
+
+function _updateLastInputChip() {
+  const row = document.getElementById('lastInputRow');
+  const chip = document.getElementById('lastInputChip');
+  if (!row || !chip) return;
+  if (_lastRawInput) {
+    chip.textContent = '↩ ' + _lastRawInput;
+    row.style.display = '';
+  } else {
+    row.style.display = 'none';
+  }
+}
+
+function _fillLastInput() {
+  const inp = document.getElementById('nlInput');
+  if (inp && _lastRawInput) {
+    inp.value = _lastRawInput;
+    inp.focus();
+  }
+}
+
+setTimeout(() => _updateLastInputChip(), 600);
+
 setTimeout(()=>init(), 500);
 </script>
 </body>
