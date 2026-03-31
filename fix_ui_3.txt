@@ -1,0 +1,224 @@
+ZeroKitchen index.html 수정 3건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: 수정 폼 — 목표재고/최소재고 라벨 명확히
+━━━━━━━━━━━━━━━━━━━━━
+
+renderInventory 함수 안의 인라인 수정 폼 HTML에서:
+
+현재:
+        <div style="display:flex;gap:5px">
+          <input class="inv-edit-inp" id="iet_${it.item_id}" type="number" value="${tgt}" placeholder="목표재고" style="flex:1">
+          <select class="inv-edit-inp" id="iev_${it.item_id}" style="flex:1">
+
+변경 후:
+        <div style="display:flex;gap:5px">
+          <div style="flex:1;display:flex;flex-direction:column;gap:2px">
+            <label style="font-size:11px;color:var(--muted);font-weight:600">목표 재고</label>
+            <input class="inv-edit-inp" id="iet_${it.item_id}" type="number" value="${tgt}" placeholder="목표" style="width:100%">
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:2px">
+            <label style="font-size:11px;color:var(--muted);font-weight:600">최소 재고</label>
+            <input class="inv-edit-inp" id="iem_${it.item_id}" type="number" value="${it.min_stock||0}" placeholder="최소" style="width:100%">
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:2px">
+          <label style="font-size:11px;color:var(--muted);font-weight:600">거래처</label>
+          <select class="inv-edit-inp" id="iev_${it.item_id}" style="width:100%">
+
+그리고 saveInvItem 함수에서 min_stock도 저장하도록 수정 필요.
+saveInvItem 함수를 찾아서 patch 객체 생성 부분에 min_stock 추가:
+
+현재 saveInvItem에서 patch를 만드는 부분 (대략):
+    const patch = {};
+    if (name !== item.item_name) patch.item_name = name;
+    ...
+    if (tgt !== Number(item.target_qty)) patch.target_qty = tgt;
+
+이 근처에 추가:
+    const minVal = parseFloat(document.getElementById('iem_' + id)?.value) || 0;
+    if (minVal !== Number(item.min_stock || 0)) patch.min_stock = minVal;
+
+그리고 로컬 업데이트에도:
+    if (patch.min_stock != null) item.min_stock = patch.min_stock;
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: 수정 버튼 누르면 상세(수정/삭제) 숨기고 저장/취소만 표시
+━━━━━━━━━━━━━━━━━━━━━
+
+toggleInvEdit 함수를 수정.
+
+현재 toggleInvEdit를 찾아서 전체 교체:
+
+function toggleInvEdit(id) {
+  const form = document.getElementById('ief_' + id);
+  const detail = document.getElementById('icd_' + id);
+  const card = document.getElementById('ic_' + id);
+  if (!form) return;
+  const isOpen = form.style.display === 'flex';
+  if (isOpen) {
+    // 수정 폼 닫기 → 상세 다시 보이기
+    form.style.display = 'none';
+    if (detail) detail.style.display = '';
+  } else {
+    // 수정 폼 열기 → 상세 숨기기
+    if (detail) detail.style.display = 'none';
+    form.style.display = 'flex';
+    // 카드 expanded 유지
+    if (card) card.classList.add('expanded');
+  }
+}
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 3: 거래처별 정렬 시 일괄 거래처 변경 드롭다운
+━━━━━━━━━━━━━━━━━━━━━
+
+[3-A] CSS 추가
+
+.inv-vendor-group{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:10px}
+.inv-vendor-group-hdr{padding:10px 14px;display:flex;justify-content:space-between;align-items:center;background:var(--surface2);border-bottom:1px solid var(--border)}
+.inv-vendor-group-hdr span{font-size:14px;font-weight:700;color:var(--text)}
+.inv-vendor-group-hdr select{padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;color:var(--text);background:var(--surface);outline:none}
+.inv-vendor-group-body{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:10px}
+.inv-vendor-group-body .inv-card{border:1px solid var(--border)}
+
+[3-B] renderInventory 함수 수정 — 거래처순 정렬일 때 그룹 렌더링
+
+renderInventory 함수 맨 아래, 현재:
+  grid.innerHTML = items.map(it => {
+    ...
+  }).join('');
+
+이 부분을 다음으로 교체:
+
+  // 거래처순 정렬이면 그룹으로 렌더링
+  if (sort === 'vendor') {
+    const groups = {};
+    items.forEach(it => {
+      const vName = _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || '미지정';
+      if (!groups[vName]) groups[vName] = [];
+      groups[vName].push(it);
+    });
+    const vendorOpts = _vendors.map(v => `<option value="${v.vendor_id}">${v.vendor_name}</option>`).join('');
+    grid.innerHTML = Object.entries(groups).map(([vName, groupItems]) => {
+      const cards = groupItems.map(it => {
+        const qty = Number(it.current_qty), tgt = Number(it.target_qty);
+        const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+        const vN = _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || '';
+        return _renderInvCard(it, qty, tgt, cls, vN);
+      }).join('');
+      return `<div class="inv-vendor-group">
+        <div class="inv-vendor-group-hdr">
+          <span>${vName} (${groupItems.length})</span>
+          <select onchange="_batchChangeVendor('${vName}', this.value, [${groupItems.map(i=>i.item_id).join(',')}])">
+            <option value="">거래처 변경</option>
+            ${vendorOpts}
+          </select>
+        </div>
+        <div class="inv-vendor-group-body">${cards}</div>
+      </div>`;
+    }).join('');
+    grid.classList.remove('inv-grid');
+  } else {
+    grid.classList.add('inv-grid');
+    grid.innerHTML = items.map(it => {
+      const qty = Number(it.current_qty), tgt = Number(it.target_qty);
+      const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+      const vName = _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || '';
+      return _renderInvCard(it, qty, tgt, cls, vName);
+    }).join('');
+  }
+
+[3-C] 카드 HTML을 함수로 분리 — _renderInvCard
+
+기존 grid.innerHTML = items.map(it => { 안에 있던 카드 HTML을 별도 함수로 추출.
+renderInventory 함수 바로 위에 새 함수 추가:
+
+function _renderInvCard(it, qty, tgt, cls, vName) {
+  const vOpts = _vendors.map(v =>
+    `<option value="${v.vendor_id}" ${v.vendor_id===it.vendor_id?'selected':''}>${v.vendor_name}</option>`
+  ).join('');
+  return `<div class="inv-card ${cls}" id="ic_${it.item_id}" onclick="toggleInvDetail(${it.item_id}, event)">
+    <div class="inv-card-main">
+      <div class="inv-name">${it.item_name}</div>
+      <div class="inv-qty-wrap">
+        <span class="inv-qty ${cls}">${qty}</span>
+        <span class="inv-unit">${it.unit||''}</span>
+      </div>
+    </div>
+    <div class="inv-card-detail" id="icd_${it.item_id}">
+      ${vName ? `<div class="inv-card-detail-row"><span>거래처</span><span>${vName}</span></div>` : ''}
+      ${tgt > 0 ? `<div class="inv-card-detail-row"><span>목표</span><span>${tgt}${it.unit||''}</span></div>` : ''}
+      ${Number(it.min_stock) > 0 ? `<div class="inv-card-detail-row"><span>최소</span><span>${it.min_stock}${it.unit||''}</span></div>` : ''}
+      <div class="inv-card-detail-row"><span>업데이트</span><span>${it.updated_at ? new Date(it.updated_at).toLocaleDateString('ko-KR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'}</span></div>
+      <div class="inv-card-detail-acts">
+        <button class="inv-act-edit" onclick="event.stopPropagation();toggleInvEdit(${it.item_id})">수정</button>
+        <button class="inv-act-del" onclick="event.stopPropagation();deleteInvItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">삭제</button>
+      </div>
+    </div>
+    <div class="inv-edit-form" id="ief_${it.item_id}">
+      <input class="inv-edit-inp" id="ien_${it.item_id}" value="${it.item_name}" placeholder="품목명">
+      <div style="display:flex;gap:5px">
+        <input class="inv-edit-inp" id="ieq_${it.item_id}" type="number" value="${qty}" placeholder="재고" style="flex:1">
+        <input class="inv-edit-inp" id="ieu_${it.item_id}" value="${it.unit||''}" placeholder="단위" style="flex:1">
+      </div>
+      <div style="display:flex;gap:5px">
+        <div style="flex:1;display:flex;flex-direction:column;gap:2px">
+          <label style="font-size:11px;color:var(--muted);font-weight:600">목표 재고</label>
+          <input class="inv-edit-inp" id="iet_${it.item_id}" type="number" value="${tgt}" placeholder="목표" style="width:100%">
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;gap:2px">
+          <label style="font-size:11px;color:var(--muted);font-weight:600">최소 재고</label>
+          <input class="inv-edit-inp" id="iem_${it.item_id}" type="number" value="${it.min_stock||0}" placeholder="최소" style="width:100%">
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:2px">
+        <label style="font-size:11px;color:var(--muted);font-weight:600">거래처</label>
+        <select class="inv-edit-inp" id="iev_${it.item_id}" style="width:100%">
+          <option value="">거래처 없음</option>${vOpts}
+        </select>
+      </div>
+      <div style="display:flex;gap:6px;margin-top:4px">
+        <button class="inv-save-btn" onclick="event.stopPropagation();saveInvItem(${it.item_id})">저장</button>
+        <button class="inv-cancel-btn" onclick="event.stopPropagation();toggleInvEdit(${it.item_id})">취소</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+[3-D] JavaScript 추가 — _batchChangeVendor 함수
+
+async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
+  if (!newVendorId) return;
+  const newVendor = _vendors.find(v => v.vendor_id === parseInt(newVendorId));
+  if (!newVendor) return;
+  
+  // 같은 거래처면 무시
+  if (newVendor.vendor_name === currentVendorName) {
+    showToast('이미 같은 거래처입니다');
+    return;
+  }
+  
+  // 확인
+  const count = itemIds.length;
+  if (!confirm(`${currentVendorName} → ${newVendor.vendor_name}\n${count}개 품목 거래처를 변경하시겠습니까?`)) return;
+  
+  const now = new Date().toISOString();
+  for (const id of itemIds) {
+    await db.from('items').update({ vendor_id: parseInt(newVendorId), updated_at: now }).eq('item_id', id);
+    const item = _items.find(i => i.item_id === id);
+    if (item) item.vendor_id = parseInt(newVendorId);
+  }
+  showToast(`${count}개 품목 거래처 → ${newVendor.vendor_name}`);
+  renderInventory();
+}
+
+━━━━━━━━━━━━━━━━━━━━━
+확인 체크리스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 수정 폼에 "목표 재고" / "최소 재고" 라벨 표시
+□ 수정 버튼 누르면 수정/삭제 숨기고 저장/취소만 보임
+□ 취소 누르면 수정/삭제 다시 나타남
+□ 거래처순 정렬 → 거래처별 그룹 표시 + 거래처 변경 드롭다운
+□ 일괄 거래처 변경 → confirm 후 전체 적용
