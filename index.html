@@ -226,8 +226,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .mic-wave-bar:nth-child(2){height:16px;animation-delay:0.15s}
 .mic-wave-bar:nth-child(3){height:12px;animation-delay:0.3s}
 @keyframes mic-wave-anim{0%,100%{transform:scaleY(0.4)}50%{transform:scaleY(1)}}
-.mic-hint{position:absolute;bottom:60px;left:50%;transform:translateX(-50%);background:var(--text);color:var(--bg);font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;white-space:nowrap;pointer-events:none;animation:mic-hint-fade 0.3s ease;z-index:25}
-.mic-hint::after{content:'';position:absolute;bottom:-5px;left:50%;transform:translateX(-50%);border-left:6px solid transparent;border-right:6px solid transparent;border-top:6px solid var(--text)}
+.mic-hint{position:fixed;bottom:76px;left:14px;background:var(--text);color:var(--bg);font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;white-space:nowrap;pointer-events:none;animation:mic-hint-fade 0.3s ease;z-index:25}
+.mic-hint::after{content:'';position:absolute;bottom:-5px;left:20px;border-left:6px solid transparent;border-right:6px solid transparent;border-top:6px solid var(--text)}
 @keyframes mic-hint-fade{from{opacity:0;transform:translateX(-50%) translateY(4px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
 .mic-settings-popup{position:absolute;bottom:54px;left:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:0 -4px 16px rgba(0,0,0,.12);z-index:30;min-width:180px;display:none}
 .mic-settings-popup.open{display:block}
@@ -237,6 +237,9 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .mic-settings-popup .msp-opt.active{border-color:var(--accent);background:var(--accent-lt);color:var(--accent);font-weight:600}
 .nl-send-btn{padding:14px 20px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer;white-space:nowrap;transition:opacity .15s;flex-shrink:0}
 .nl-send-btn:disabled{opacity:.5}
+.inv-dup-bar{padding:10px 14px;background:rgba(217,48,37,.06);border:1px solid rgba(217,48,37,.15);border-radius:10px;cursor:pointer;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center}
+.inv-dup-bar span{font-size:13px;font-weight:600;color:var(--red)}
+.inv-dup-bar button{font-size:12px;padding:5px 12px;border:1px solid var(--red);border-radius:6px;background:rgba(217,48,37,.08);color:var(--red);font-family:inherit;font-weight:600;cursor:pointer}
 .last-input-chip{display:none;padding:6px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:16px;font-size:12px;color:var(--dim);cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:200px;transition:all .15s}
 .last-input-chip:hover{border-color:var(--accent);color:var(--accent)}
 .last-input-chip.visible{display:inline-block}
@@ -395,6 +398,10 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 <div id="tab-inventory" class="tab">
   <div id="invAlertBar" style="display:none;padding:10px 14px;background:rgba(192,84,10,.08);border:1px solid rgba(192,84,10,.2);border-radius:10px;cursor:pointer;margin-bottom:4px" onclick="document.getElementById('invFilter').value='low_stock';renderInventory()">
     <span style="font-size:13px;font-weight:600;color:var(--warn)" id="invAlertText"></span>
+  </div>
+  <div id="invDupBar" style="display:none" class="inv-dup-bar">
+    <span id="invDupText"></span>
+    <button onclick="_showDupCleanup()">정리하기</button>
   </div>
   <div style="display:flex;gap:8px;align-items:center">
     <input id="invSearch" style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit;color:var(--text);outline:none" placeholder="품목명 검색..." oninput="renderInventory()">
@@ -2233,6 +2240,25 @@ function renderInventory() {
       alertBar.style.display = 'none';
     }
   }
+  // 중복 품목 감지
+  const dupBar = document.getElementById('invDupBar');
+  const dupText = document.getElementById('invDupText');
+  if (dupBar && dupText) {
+    const nameCount = {};
+    _items.forEach(it => {
+      const key = it.item_name.replace(/\s/g, '').toLowerCase();
+      if (!nameCount[key]) nameCount[key] = [];
+      nameCount[key].push(it);
+    });
+    const dups = Object.entries(nameCount).filter(([k, v]) => v.length > 1);
+    if (dups.length > 0) {
+      const totalDup = dups.reduce((s, [k, v]) => s + v.length, 0);
+      dupText.textContent = `⚠️ 중복 품목 ${dups.length}종 (${totalDup}개)`;
+      dupBar.style.display = '';
+    } else {
+      dupBar.style.display = 'none';
+    }
+  }
   const q   = document.getElementById('invSearch')?.value.trim() || '';
   const flt = document.getElementById('invFilter')?.value || 'all';
   let items = [..._items];
@@ -2719,6 +2745,101 @@ async function renderOrder() {
   } catch(e) {
     list.innerHTML = `<div class="no-item">오류: ${e.message}</div>`;
   }
+}
+
+async function _showDupCleanup() {
+  // 중복 품목 찾기
+  const nameMap = {};
+  _items.forEach(it => {
+    const key = it.item_name.replace(/\s/g, '').toLowerCase();
+    if (!nameMap[key]) nameMap[key] = [];
+    nameMap[key].push(it);
+  });
+  const dups = Object.entries(nameMap).filter(([k, v]) => v.length > 1);
+  if (!dups.length) { showToast('중복 품목이 없습니다'); return; }
+
+  const panel = document.getElementById('reviewPanel');
+  panel.style.display = 'block';
+  const wrap = panel.querySelector('.result-card-wrap');
+  const origHTML = wrap.innerHTML;
+
+  let cardsHtml = dups.map(([key, items]) => {
+    const name = items[0].item_name;
+    const totalQty = items.reduce((s, it) => s + Number(it.current_qty), 0);
+    const unit = items[0].unit || '';
+    const detail = items.map(it => `${Number(it.current_qty)}${it.unit || ''}`).join(' + ');
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:600">${name}</div>
+      <div style="font-size:12px;color:var(--dim);margin:4px 0">${detail} = ${totalQty}${unit}</div>
+      <button class="ord-btn-done" style="font-size:12px;padding:6px 14px" onclick="_mergeDup('${key}')">합치기 (${totalQty}${unit})</button>
+    </div>`;
+  }).join('');
+
+  wrap.innerHTML = `
+    <div class="config-card">
+      <button class="card-close-x" onclick="document.getElementById('reviewPanel').style.display='none';this.closest('.result-card-wrap').innerHTML=\`${origHTML.replace(/`/g,'\\`')}\`">✕</button>
+      <div class="config-card-title">중복 품목 정리</div>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:8px">같은 이름의 품목을 하나로 합칩니다. 수량은 합산됩니다.</div>
+      ${cardsHtml}
+      <button class="rc-btn-primary" style="margin-top:12px;width:100%" onclick="_mergeAllDups()">전체 합치기</button>
+    </div>`;
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+async function _mergeDup(nameKey) {
+  const nameMap = {};
+  _items.forEach(it => {
+    const key = it.item_name.replace(/\s/g, '').toLowerCase();
+    if (!nameMap[key]) nameMap[key] = [];
+    nameMap[key].push(it);
+  });
+  const items = nameMap[nameKey];
+  if (!items || items.length < 2) return;
+
+  // 첫 번째 품목에 수량 합산, 나머지 삭제
+  const primary = items[0];
+  const totalQty = items.reduce((s, it) => s + Number(it.current_qty), 0);
+  await db.from('items').update({
+    current_qty: totalQty, updated_at: new Date().toISOString()
+  }).eq('item_id', primary.item_id);
+  primary.current_qty = totalQty;
+
+  for (let i = 1; i < items.length; i++) {
+    await db.from('items').delete().eq('item_id', items[i].item_id);
+    _items = _items.filter(x => x.item_id !== items[i].item_id);
+  }
+
+  showToast(`${primary.item_name} 합침 → ${totalQty}${primary.unit || ''}`);
+  renderInventory();
+  // 패널 업데이트
+  _showDupCleanup();
+}
+
+async function _mergeAllDups() {
+  const nameMap = {};
+  _items.forEach(it => {
+    const key = it.item_name.replace(/\s/g, '').toLowerCase();
+    if (!nameMap[key]) nameMap[key] = [];
+    nameMap[key].push(it);
+  });
+  const dups = Object.entries(nameMap).filter(([k, v]) => v.length > 1);
+  let count = 0;
+  for (const [key, items] of dups) {
+    const primary = items[0];
+    const totalQty = items.reduce((s, it) => s + Number(it.current_qty), 0);
+    await db.from('items').update({
+      current_qty: totalQty, updated_at: new Date().toISOString()
+    }).eq('item_id', primary.item_id);
+    primary.current_qty = totalQty;
+    for (let i = 1; i < items.length; i++) {
+      await db.from('items').delete().eq('item_id', items[i].item_id);
+      _items = _items.filter(x => x.item_id !== items[i].item_id);
+    }
+    count++;
+  }
+  document.getElementById('reviewPanel').style.display = 'none';
+  showToast(`${count}종 중복 품목 정리 완료`);
+  renderInventory();
 }
 
 function _ordStep(inputId, delta) {
