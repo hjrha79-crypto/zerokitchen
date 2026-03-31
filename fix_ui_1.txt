@@ -1,0 +1,133 @@
+ZeroKitchen index.html UI 개선 (1/2)
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+총 3건: 마이크 버튼 강조 / placeholder 간결화 / 테스트 탭 숨기기
+
+━━━━━━━━━━━━━━━━━━━━━
+UI-1: 마이크 버튼 강조 + 녹음 중 음파 애니메이션
+━━━━━━━━━━━━━━━━━━━━━
+
+[1-A] CSS 수정 — .nl-mic-btn 크기 및 스타일 변경
+
+현재:
+.nl-mic-btn{width:42px;height:42px;border-radius:50%;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
+.nl-mic-btn.rec{border-color:var(--red);background:rgba(217,48,37,.1);animation:pulse 1.2s ease-in-out infinite}
+
+변경 후:
+.nl-mic-btn{width:52px;height:52px;border-radius:50%;border:2px solid var(--accent);background:var(--accent-lt);cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
+.nl-mic-btn.rec{border-color:var(--red);background:rgba(217,48,37,.08);animation:none}
+.mic-wave{display:flex;align-items:center;gap:3px;height:22px}
+.mic-wave-bar{width:3px;border-radius:2px;background:var(--red);animation:mic-wave-anim 0.8s ease-in-out infinite}
+.mic-wave-bar:nth-child(1){height:8px;animation-delay:0s}
+.mic-wave-bar:nth-child(2){height:16px;animation-delay:0.15s}
+.mic-wave-bar:nth-child(3){height:12px;animation-delay:0.3s}
+@keyframes mic-wave-anim{0%,100%{transform:scaleY(0.4)}50%{transform:scaleY(1)}}
+
+[1-B] _stopMicUI 함수 수정 — 마이크 아이콘 복원
+
+현재 _stopMicUI에서:
+  btn.innerHTML = '🎤';
+
+이 부분은 그대로 유지 (이미 올바름)
+
+[1-C] _startMicCountdown 함수 수정 — 카운트다운에 음파 애니메이션 추가
+
+현재 _startMicCountdown에서 btn.innerHTML 설정 부분:
+  btn.innerHTML = '<span class="mic-countdown">' + remaining + '</span>';
+
+이 부분(2곳 모두 — 초기 설정 + setInterval 안)을 다음으로 변경:
+  btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + remaining + '</span>';
+
+그리고 마이크 버튼 감싸는 div에 position:relative 필요.
+현재 [4-B]에서 이미 style="position:relative" 가 있으므로 OK.
+
+실제로 이렇게 하면 버튼 안에 음파 + 버튼 아래에 카운트다운 숫자가 표시됨.
+
+_resetMicCountdown 함수도 동일하게 수정:
+현재:
+  if (_micActive) btn.innerHTML = '<span class="mic-countdown">' + _micRemaining + '</span>';
+
+변경 후:
+  if (_micActive) btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
+
+━━━━━━━━━━━━━━━━━━━━━
+UI-2: placeholder 간결화
+━━━━━━━━━━━━━━━━━━━━━
+
+HTML에서 입력창 placeholder 수정.
+
+현재:
+    <input class="nl-input" id="nlInput" type="text"
+      placeholder="예: 치즈 2봉 양파 5개 브로콜리 세 개" autocomplete="off" enterkeyhint="send">
+
+변경 후:
+    <input class="nl-input" id="nlInput" type="text"
+      placeholder="말하거나 입력하세요" autocomplete="off" enterkeyhint="send">
+
+━━━━━━━━━━━━━━━━━━━━━
+UI-3: 테스트 탭 숨기기 (로고 5회 탭으로 토글)
+━━━━━━━━━━━━━━━━━━━━━
+
+[3-A] HTML 수정 — 테스트 탭 버튼에 id 추가 + 기본 숨김
+
+현재 헤더의 nav 버튼들:
+    <button class="nav active" onclick="switchTab('input',this)">입력</button>
+    <button class="nav" onclick="switchTab('inventory',this)">재고</button>
+    <button class="nav" onclick="switchTab('order',this)">발주</button>
+    <button class="nav" onclick="switchTab('test',this)">테스트</button>
+
+변경 후:
+    <button class="nav active" onclick="switchTab('input',this)">입력</button>
+    <button class="nav" onclick="switchTab('inventory',this)">재고</button>
+    <button class="nav" onclick="switchTab('order',this)">발주</button>
+    <button class="nav" id="testTabBtn" onclick="switchTab('test',this)" style="display:none">테스트</button>
+
+[3-B] HTML 수정 — 로고에 클릭 이벤트 추가
+
+현재:
+  <span class="logo" onclick="location.reload()">ZeroKitchen</span>
+
+변경 후:
+  <span class="logo" id="logoBtn" onclick="location.reload()">ZeroKitchen</span>
+
+[3-C] JavaScript 추가 — 로고 5회 탭 → 개발자 모드 토글
+
+기존 코드 맨 아래 (setTimeout(()=>init(), 500); 바로 위)에 추가:
+
+// 개발자 모드: 로고 5회 탭으로 테스트 탭 토글
+let _devTapCount = 0;
+let _devTapTimer = null;
+let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
+(function initDevMode() {
+  if (_devMode) {
+    const tb = document.getElementById('testTabBtn');
+    if (tb) tb.style.display = '';
+  }
+  const logo = document.getElementById('logoBtn');
+  if (!logo) return;
+  logo.onclick = (e) => {
+    e.preventDefault();
+    _devTapCount++;
+    clearTimeout(_devTapTimer);
+    if (_devTapCount >= 5) {
+      _devTapCount = 0;
+      _devMode = !_devMode;
+      localStorage.setItem('zk_dev_mode', _devMode);
+      const tb = document.getElementById('testTabBtn');
+      if (tb) tb.style.display = _devMode ? '' : 'none';
+      showToast(_devMode ? '🔧 개발자 모드 ON' : '개발자 모드 OFF');
+      // 테스트 탭이 활성 상태에서 숨기면 입력 탭으로 전환
+      if (!_devMode && document.getElementById('tab-test')?.classList.contains('active')) {
+        switchTab('input', document.querySelector('.nav'));
+      }
+    }
+    _devTapTimer = setTimeout(() => { _devTapCount = 0; }, 1500);
+  };
+})();
+
+주의: 기존 logo의 onclick="location.reload()" 를 제거해야 함.
+위 [3-B]에서 onclick을 유지했지만, JS에서 logo.onclick을 재할당하므로 HTML의 onclick은 무시됨. 
+하지만 깔끔하게 하려면 HTML에서 onclick="location.reload()" 를 삭제하는게 좋음.
+
+최종 로고 HTML:
+  <span class="logo" id="logoBtn">ZeroKitchen</span>

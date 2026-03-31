@@ -178,9 +178,15 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .nl-input{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:16px;font-family:inherit;color:var(--text);outline:none;transition:border-color .15s}
 .nl-input:focus{border-color:var(--accent)}
 .nl-input::placeholder{color:var(--text-muted);font-size:14px}
-.nl-mic-btn{width:42px;height:42px;border-radius:50%;border:1px solid var(--border);background:var(--surface);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
-.nl-mic-btn.rec{border-color:var(--red);background:rgba(217,48,37,.1);animation:pulse 1.2s ease-in-out infinite}
+.nl-mic-btn{width:52px;height:52px;border-radius:50%;border:2px solid var(--accent);background:var(--accent-lt);cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
+.nl-mic-btn.rec{border-color:var(--red);background:rgba(217,48,37,.08);animation:none}
 .nl-mic-btn .mic-countdown{font-size:14px;font-weight:700;color:var(--red);line-height:1}
+.mic-wave{display:flex;align-items:center;gap:3px;height:22px}
+.mic-wave-bar{width:3px;border-radius:2px;background:var(--red);animation:mic-wave-anim 0.8s ease-in-out infinite}
+.mic-wave-bar:nth-child(1){height:8px;animation-delay:0s}
+.mic-wave-bar:nth-child(2){height:16px;animation-delay:0.15s}
+.mic-wave-bar:nth-child(3){height:12px;animation-delay:0.3s}
+@keyframes mic-wave-anim{0%,100%{transform:scaleY(0.4)}50%{transform:scaleY(1)}}
 .mic-settings-popup{position:absolute;bottom:54px;left:0;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;box-shadow:0 -4px 16px rgba(0,0,0,.12);z-index:30;min-width:180px;display:none}
 .mic-settings-popup.open{display:block}
 .mic-settings-popup .msp-title{font-size:12px;font-weight:600;color:var(--dim);margin-bottom:8px}
@@ -301,13 +307,13 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 <body>
 
 <div class="hdr">
-  <span class="logo" onclick="resetToHome()" style="cursor:pointer">ZeroKitchen</span>
+  <span class="logo" id="logoBtn" style="cursor:pointer">ZeroKitchen</span>
   <span class="store-nm" id="storeNm">로딩 중...</span>
   <div class="navs">
     <button class="nav active" onclick="switchTab('input',this)">입력</button>
     <button class="nav" onclick="switchTab('inventory',this)">재고</button>
     <button class="nav" onclick="switchTab('order',this)">발주</button>
-    <button class="nav" onclick="switchTab('test',this)">테스트</button>
+    <button class="nav" id="testTabBtn" onclick="switchTab('test',this)" style="display:none">테스트</button>
   </div>
 </div>
 
@@ -423,7 +429,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
       </div>
     </div>
     <input class="nl-input" id="nlInput" type="text"
-      placeholder="예: 치즈 2봉 양파 5개 브로콜리 세 개" autocomplete="off" enterkeyhint="send">
+      placeholder="말하거나 입력하세요" autocomplete="off" enterkeyhint="send">
     <button class="nl-send-btn" id="nlSendBtn" onclick="handleNaturalInput()">
       <span id="nlBtnTxt">입력</span>
     </button>
@@ -3302,7 +3308,7 @@ let _micRemaining = 0;
 function _startMicCountdown() {
   const btn = document.getElementById('micBtn');
   _micRemaining = _micTimeout;
-  btn.innerHTML = '<span class="mic-countdown">' + _micRemaining + '</span>';
+  btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
   _micCountdown = setInterval(() => {
     _micRemaining--;
     if (_micRemaining <= 0) {
@@ -3315,14 +3321,14 @@ function _startMicCountdown() {
       }
       return;
     }
-    btn.innerHTML = '<span class="mic-countdown">' + _micRemaining + '</span>';
+    btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
   }, 1000);
 }
 
 function _resetMicCountdown() {
   _micRemaining = _micTimeout;
   const btn = document.getElementById('micBtn');
-  if (_micActive) btn.innerHTML = '<span class="mic-countdown">' + _micRemaining + '</span>';
+  if (_micActive) btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
 }
 
 function _stopMic() {
@@ -3389,6 +3395,36 @@ if (window.visualViewport) {
     inputZone.style.bottom = offset + 'px';
   });
 }
+
+// 개발자 모드: 로고 5회 탭으로 테스트 탭 토글
+let _devTapCount = 0;
+let _devTapTimer = null;
+let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
+(function initDevMode() {
+  if (_devMode) {
+    const tb = document.getElementById('testTabBtn');
+    if (tb) tb.style.display = '';
+  }
+  const logo = document.getElementById('logoBtn');
+  if (!logo) return;
+  logo.onclick = (e) => {
+    e.preventDefault();
+    _devTapCount++;
+    clearTimeout(_devTapTimer);
+    if (_devTapCount >= 5) {
+      _devTapCount = 0;
+      _devMode = !_devMode;
+      localStorage.setItem('zk_dev_mode', _devMode);
+      const tb = document.getElementById('testTabBtn');
+      if (tb) tb.style.display = _devMode ? '' : 'none';
+      showToast(_devMode ? '🔧 개발자 모드 ON' : '개발자 모드 OFF');
+      if (!_devMode && document.getElementById('tab-test')?.classList.contains('active')) {
+        switchTab('input', document.querySelector('.nav'));
+      }
+    }
+    _devTapTimer = setTimeout(() => { _devTapCount = 0; }, 1500);
+  };
+})();
 
 /* ── 시작 ── */
 setTimeout(()=>init(), 500);
