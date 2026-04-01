@@ -1,0 +1,276 @@
+ZeroKitchen index.html 수정 — 음성인식 gpt-4o-mini-transcribe 전환
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+사전 준비: OpenAI API 키
+━━━━━━━━━━━━━━━━━━━━━
+1. platform.openai.com 접속
+2. 로그인 후 왼쪽 메뉴 API keys → Create new secret key
+3. 키 이름: "zerokitchen"
+4. 생성된 키 복사 (sk-... 형태)
+5. Settings → Billing → Add payment method → $5 충전
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: OpenAI API 키 상수 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+현재 (약 509~511번 줄):
+<script>
+const SUPABASE_URL='https://pmdkmiayyZailcnmjhyo.supabase.co';
+const SUPABASE_KEY='sb_publishable_bkRZfA2drD_M6dMQjRiriQ_EP3lCqO8';
+</script>
+
+변경 후:
+<script>
+const SUPABASE_URL='https://pmdkmiayyZailcnmjhyo.supabase.co';
+const SUPABASE_KEY='sb_publishable_bkRZfA2drD_M6dMQjRiriQ_EP3lCqO8';
+const OPENAI_API_KEY='';
+</script>
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: handleNaturalInput 마이크 종료 부분 수정
+━━━━━━━━━━━━━━━━━━━━━
+
+현재 (약 1081~1085번 줄):
+  // 마이크 활성 중이면 즉시 종료 (중복 입력 방지)
+  if (_micActive) {
+    _micShouldStop = true;
+    if (_recognition) { try { _recognition.stop(); } catch(e) {} _recognition = null; }
+    _stopMicUI();
+  }
+
+변경 후:
+  // 마이크 활성 중이면 즉시 종료 (중복 입력 방지)
+  if (_micActive) {
+    _micShouldStop = true;
+    _stopMicUI();
+  }
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 3: 마이크 전체 교체 — Web Speech API → MediaRecorder + OpenAI
+━━━━━━━━━━━━━━━━━━━━━
+
+아래 전체 블록을 찾아서 교체:
+시작: // Web Speech API — 마이크 입력
+끝: function _stopMicUI() { ... } 의 닫는 중괄호
+
+(약 3840번 줄 ~ 3958번 줄까지 전부 삭제하고 아래로 교체)
+
+=== 새 코드 시작 ===
+
+// OpenAI 음성 인식 (gpt-4o-mini-transcribe)
+let _micActive = false;
+let _micCountdown = null;
+let _micShouldStop = false;
+let _micTimeout = parseInt(localStorage.getItem('zk_mic_timeout') || '10');
+let _micRemaining = 0;
+let _mediaRecorder = null;
+let _audioChunks = [];
+
+function toggleMic() {
+  localStorage.setItem('zk_mic_used', 'true');
+  const hint = document.getElementById('micHint');
+  if (hint) hint.remove();
+
+  if (_micActive) {
+    _micShouldStop = true;
+    _stopRecording();
+    return;
+  }
+
+  // 마이크 권한 요청 + 녹음 시작
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(stream => {
+      _micShouldStop = false;
+      _micActive = true;
+      _audioChunks = [];
+
+      const btn = document.getElementById('micBtn');
+      btn.classList.add('rec');
+
+      // MediaRecorder 시작
+      _mediaRecorder = new MediaRecorder(stream, { mimeType: _getAudioMimeType() });
+      _mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) _audioChunks.push(e.data);
+      };
+      _mediaRecorder.onstop = () => {
+        // 스트림 트랙 정리
+        stream.getTracks().forEach(t => t.stop());
+        // 오디오 데이터가 있으면 변환 요청
+        if (_audioChunks.length > 0 && !_micShouldStop) {
+          _transcribeAudio();
+        } else if (_audioChunks.length > 0) {
+          // 수동 정지 (버튼 탭) — 변환 진행
+          _transcribeAudio();
+        }
+      };
+
+      _mediaRecorder.start(500); // 0.5초 간격으로 chunk 수집
+      _startMicCountdown();
+
+      // placeholder 힌트
+      const inp = document.getElementById('nlInput');
+      inp.dataset.prevPlaceholder = inp.placeholder;
+      inp.placeholder = '🎤 말씀하세요...';
+    })
+    .catch(err => {
+      showToast('마이크 접근 불가: ' + err.message);
+    });
+}
+
+function _getAudioMimeType() {
+  // 브라우저 호환성: webm > mp4 > wav
+  if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
+  if (MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
+  if (MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4';
+  return 'audio/wav';
+}
+
+function _stopRecording() {
+  if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+    _mediaRecorder.stop();
+  }
+  _stopMicUI();
+}
+
+async function _transcribeAudio() {
+  const inp = document.getElementById('nlInput');
+  const btn = document.getElementById('nlSendBtn');
+  const btnTxt = document.getElementById('nlBtnTxt');
+
+  // 변환 중 표시
+  inp.placeholder = '변환 중...';
+  btn.disabled = true;
+  btnTxt.innerHTML = '<span class="spin"></span>';
+
+  try {
+    const mimeType = _audioChunks[0]?.type || 'audio/webm';
+    const ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('wav') ? 'wav' : 'webm';
+    const blob = new Blob(_audioChunks, { type: mimeType });
+
+    // 너무 짧은 녹음 (0.5초 미만) 무시
+    if (blob.size < 5000) {
+      inp.placeholder = inp.dataset.prevPlaceholder || '말하거나 입력하세요';
+      btn.disabled = false;
+      btnTxt.textContent = '입력';
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', blob, 'recording.' + ext);
+    formData.append('model', 'gpt-4o-mini-transcribe');
+    formData.append('language', 'ko');
+
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + OPENAI_API_KEY
+      },
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error?.message || 'API 오류 ' + response.status);
+    }
+
+    const data = await response.json();
+    const text = (data.text || '').trim();
+
+    if (text) {
+      inp.value = text;
+      inp.placeholder = inp.dataset.prevPlaceholder || '말하거나 입력하세요';
+      btn.disabled = false;
+      btnTxt.textContent = '입력';
+      // 자동 전송
+      setTimeout(() => handleNaturalInput(), 200);
+    } else {
+      inp.placeholder = inp.dataset.prevPlaceholder || '말하거나 입력하세요';
+      btn.disabled = false;
+      btnTxt.textContent = '입력';
+      showToast('음성을 인식하지 못했습니다');
+    }
+  } catch (e) {
+    console.error('음성 변환 오류:', e);
+    inp.placeholder = inp.dataset.prevPlaceholder || '말하거나 입력하세요';
+    btn.disabled = false;
+    btnTxt.textContent = '입력';
+    showToast('음성 변환 실패: ' + e.message);
+  }
+}
+
+function _startMicCountdown() {
+  const btn = document.getElementById('micBtn');
+  _micRemaining = _micTimeout;
+  btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
+  _micCountdown = setInterval(() => {
+    _micRemaining--;
+    if (_micRemaining <= 0) {
+      _stopRecording();
+      return;
+    }
+    btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
+  }, 1000);
+}
+
+function _stopMic() {
+  _micShouldStop = true;
+  _stopRecording();
+}
+
+function _stopMicUI() {
+  _micActive = false;
+  const btn = document.getElementById('micBtn');
+  btn.classList.remove('rec');
+  btn.innerHTML = '🎤';
+  if (_micCountdown) { clearInterval(_micCountdown); _micCountdown = null; }
+  // placeholder 복원
+  const inp = document.getElementById('nlInput');
+  if (inp && inp.dataset.prevPlaceholder) {
+    inp.placeholder = inp.dataset.prevPlaceholder;
+  }
+}
+
+=== 새 코드 끝 ===
+
+주의: toggleMicSettings, _renderMicTimeoutOpts, _setMicTimeout 함수는 건드리지 않음. 그대로 유지.
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 4: _resetMicCountdown 제거
+━━━━━━━━━━━━━━━━━━━━━
+
+기존 _resetMicCountdown 함수를 찾아서 삭제:
+
+function _resetMicCountdown() {
+  _micRemaining = _micTimeout;
+  const btn = document.getElementById('micBtn');
+  if (_micActive) btn.innerHTML = '...';
+}
+
+이유: MediaRecorder 방식에서는 실시간 interim 결과가 없으므로 카운트다운 리셋이 필요 없음. 카운트다운은 최대 녹음 시간을 의미.
+
+━━━━━━━━━━━━━━━━━━━━━
+동작 변경 요약
+━━━━━━━━━━━━━━━━━━━━━
+
+기존 (Web Speech API):
+  마이크 탭 → 실시간 텍스트 표시 (부정확) → 카운트다운 0 → 전송
+
+변경 (gpt-4o-mini-transcribe):
+  마이크 탭 → "🎤 말씀하세요..." → 녹음 중 (음파 애니메이션)
+  → 마이크 다시 탭 OR 카운트다운 0
+  → "변환 중..." (1~2초)
+  → 정확한 텍스트 입력창에 표시
+  → 자동 전송
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 마이크 탭 → 마이크 권한 요청 → 승인
+□ 녹음 중 음파 애니메이션 + 카운트다운 표시
+□ "치즈 6봉지 브로콜리 2봉지" 말하기 → 정확하게 텍스트 변환
+□ 변환 후 자동 전송
+□ 마이크 다시 탭 → 즉시 녹음 종료 → 변환
+□ 카운트다운 0 → 자동 녹음 종료 → 변환
+□ 마이크 설정 (우클릭) → 대기시간 변경 → 정상 작동
+□ API 키 오류 시 → "음성 변환 실패" 토스트
