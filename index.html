@@ -1081,6 +1081,10 @@ async function handleNaturalInput() {
   // 마이크 활성 중이면 즉시 종료 (중복 입력 방지)
   if (_micActive) {
     _micShouldStop = true;
+    if (_recognition) { try { _recognition.stop(); } catch(e) {} _recognition = null; }
+    if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+      try { _mediaRecorder.stop(); } catch(e) {}
+    }
     _stopMicUI();
   }
   const inp   = document.getElementById('nlInput');
@@ -3836,14 +3840,20 @@ document.addEventListener('keydown', e=>{
   if (e.key==='Enter' && document.activeElement===document.getElementById('nlInput')) handleNaturalInput();
 });
 
-// OpenAI 음성 인식 (gpt-4o-mini-transcribe)
+// 하이브리드 음성인식: Web Speech(실시간 미리보기) + OpenAI(최종 정확 텍스트)
 let _micActive = false;
 let _micCountdown = null;
 let _micShouldStop = false;
 let _micTimeout = parseInt(localStorage.getItem('zk_mic_timeout') || '10');
 let _micRemaining = 0;
+let _micAccumulated = '';
+
+// MediaRecorder (OpenAI 전송용)
 let _mediaRecorder = null;
 let _audioChunks = [];
+
+// Web Speech API (실시간 미리보기용)
+let _recognition = null;
 
 function toggleMic() {
   localStorage.setItem('zk_mic_used', 'true');
@@ -3852,44 +3862,43 @@ function toggleMic() {
 
   if (_micActive) {
     _micShouldStop = true;
-    _stopRecording();
+    _stopAll();
     return;
   }
 
-  // 마이크 권한 요청 + 녹음 시작
+  // 마이크 권한 + 녹음 시작
   navigator.mediaDevices.getUserMedia({ audio: true })
     .then(stream => {
       _micShouldStop = false;
+      _micAccumulated = document.getElementById('nlInput').value.trim();
       _micActive = true;
       _audioChunks = [];
 
       const btn = document.getElementById('micBtn');
       btn.classList.add('rec');
 
-      // MediaRecorder 시작
+      // 1) MediaRecorder 시작 (OpenAI 전송용 녹음)
       _mediaRecorder = new MediaRecorder(stream, { mimeType: _getAudioMimeType() });
       _mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) _audioChunks.push(e.data);
       };
       _mediaRecorder.onstop = () => {
-        // 스트림 트랙 정리
         stream.getTracks().forEach(t => t.stop());
-        // 오디오 데이터가 있으면 변환 요청
-        if (_audioChunks.length > 0 && !_micShouldStop) {
-          _transcribeAudio();
-        } else if (_audioChunks.length > 0) {
-          // 수동 정지 (버튼 탭) — 변환 진행
+        if (_audioChunks.length > 0) {
           _transcribeAudio();
         }
       };
+      _mediaRecorder.start(500);
 
-      _mediaRecorder.start(500); // 0.5초 간격으로 chunk 수집
+      // 2) Web Speech API 시작 (실시간 미리보기)
+      _startPreview();
+
+      // 3) 카운트다운 시작
       _startMicCountdown();
 
-      // placeholder 힌트
+      // placeholder 변경
       const inp = document.getElementById('nlInput');
       inp.dataset.prevPlaceholder = inp.placeholder;
-      inp.placeholder = '🎤 말씀하세요...';
     })
     .catch(err => {
       showToast('마이크 접근 불가: ' + err.message);
@@ -3897,26 +3906,62 @@ function toggleMic() {
 }
 
 function _getAudioMimeType() {
-  // 브라우저 호환성: webm > mp4 > wav
   if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
   if (MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
   if (MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4';
   return 'audio/wav';
 }
 
-function _stopRecording() {
-  if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
-    _mediaRecorder.stop();
-  }
-  _stopMicUI();
+// Web Speech API — 실시간 미리보기
+function _startPreview() {
+  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return;
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  _recognition = new SR();
+  _recognition.lang = 'ko-KR';
+  _recognition.interimResults = true;
+  _recognition.continuous = false;
+
+  _recognition.onresult = (e) => {
+    let final = '', interim = '';
+    for (let i = 0; i < e.results.length; i++) {
+      if (e.results[i].isFinal) final += e.results[i][0].transcript;
+      else interim += e.results[i][0].transcript;
+    }
+    const inp = document.getElementById('nlInput');
+    if (final) {
+      _micAccumulated += (_micAccumulated ? ' ' : '') + final;
+      inp.value = _micAccumulated;
+    } else if (interim) {
+      inp.value = _micAccumulated + (_micAccumulated && interim ? ' ' : '') + interim;
+    }
+  };
+
+  _recognition.onend = () => {
+    _recognition = null;
+    // 아직 녹음 중이면 재시작 (브라우저 강제 종료 우회)
+    if (_micActive && !_micShouldStop) {
+      setTimeout(() => {
+        if (_micActive && !_micShouldStop) _startPreview();
+      }, 300);
+    }
+  };
+
+  _recognition.onerror = (e) => {
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    // 미리보기 오류는 무시 (OpenAI가 최종 처리)
+  };
+
+  try { _recognition.start(); } catch(e) {}
 }
 
+// OpenAI로 최종 변환
 async function _transcribeAudio() {
   const inp = document.getElementById('nlInput');
   const btn = document.getElementById('nlSendBtn');
   const btnTxt = document.getElementById('nlBtnTxt');
 
-  // 변환 중 표시
+  // 미리보기 텍스트 유지하면서 "변환 중..." 표시
+  const previewText = inp.value;
   inp.placeholder = '변환 중...';
   btn.disabled = true;
   btnTxt.innerHTML = '<span class="spin"></span>';
@@ -3926,11 +3971,14 @@ async function _transcribeAudio() {
     const ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('wav') ? 'wav' : 'webm';
     const blob = new Blob(_audioChunks, { type: mimeType });
 
-    // 너무 짧은 녹음 (0.5초 미만) 무시
+    // 너무 짧은 녹음 무시
     if (blob.size < 5000) {
-      inp.placeholder = inp.dataset.prevPlaceholder || '말하거나 입력하세요';
-      btn.disabled = false;
-      btnTxt.textContent = '입력';
+      _restoreUI(inp, btn, btnTxt);
+      if (previewText.trim()) {
+        // 미리보기 텍스트라도 있으면 그걸로 전송
+        inp.value = previewText;
+        setTimeout(() => handleNaturalInput(), 200);
+      }
       return;
     }
 
@@ -3951,44 +3999,78 @@ async function _transcribeAudio() {
     const text = (data.text || '').trim();
 
     if (text) {
+      // OpenAI 결과로 교체 (미리보기보다 정확)
       inp.value = text;
-      inp.placeholder = inp.dataset.prevPlaceholder || '말하거나 입력하세요';
-      btn.disabled = false;
-      btnTxt.textContent = '입력';
-      // 자동 전송
+      _restoreUI(inp, btn, btnTxt);
       setTimeout(() => handleNaturalInput(), 200);
     } else {
-      inp.placeholder = inp.dataset.prevPlaceholder || '말하거나 입력하세요';
-      btn.disabled = false;
-      btnTxt.textContent = '입력';
-      showToast('음성을 인식하지 못했습니다');
+      // OpenAI 결과 없으면 미리보기 텍스트 사용
+      _restoreUI(inp, btn, btnTxt);
+      if (previewText.trim()) {
+        inp.value = previewText;
+        setTimeout(() => handleNaturalInput(), 200);
+      } else {
+        showToast('음성을 인식하지 못했습니다');
+      }
     }
   } catch (e) {
     console.error('음성 변환 오류:', e);
-    inp.placeholder = inp.dataset.prevPlaceholder || '말하거나 입력하세요';
-    btn.disabled = false;
-    btnTxt.textContent = '입력';
-    showToast('음성 변환 실패: ' + e.message);
+    _restoreUI(inp, btn, btnTxt);
+    // OpenAI 실패 시 미리보기 텍스트로 대체 전송
+    if (previewText.trim()) {
+      inp.value = previewText;
+      showToast('정밀 변환 실패 — 미리보기 텍스트로 처리합니다');
+      setTimeout(() => handleNaturalInput(), 200);
+    } else {
+      showToast('음성 변환 실패: ' + e.message);
+    }
   }
 }
 
+function _restoreUI(inp, btn, btnTxt) {
+  inp.placeholder = inp.dataset.prevPlaceholder || '말하거나 입력하세요';
+  btn.disabled = false;
+  btnTxt.textContent = '입력';
+}
+
+// 카운트다운
 function _startMicCountdown() {
   const btn = document.getElementById('micBtn');
   _micRemaining = _micTimeout;
-  btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
+  _updateCountdownUI(btn);
   _micCountdown = setInterval(() => {
     _micRemaining--;
     if (_micRemaining <= 0) {
-      _stopRecording();
+      _stopAll();
       return;
     }
-    btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
+    _updateCountdownUI(btn);
   }, 1000);
+}
+
+function _updateCountdownUI(btn) {
+  btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
+}
+
+// 전체 정지
+function _stopAll() {
+  _micShouldStop = true;
+  // Web Speech 정지
+  if (_recognition) {
+    try { _recognition.stop(); } catch(e) {}
+    _recognition = null;
+  }
+  // MediaRecorder 정지 (onstop에서 _transcribeAudio 호출됨)
+  if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+    _mediaRecorder.stop();
+  } else {
+    _stopMicUI();
+  }
 }
 
 function _stopMic() {
   _micShouldStop = true;
-  _stopRecording();
+  _stopAll();
 }
 
 function _stopMicUI() {
@@ -3997,7 +4079,6 @@ function _stopMicUI() {
   btn.classList.remove('rec');
   btn.innerHTML = '🎤';
   if (_micCountdown) { clearInterval(_micCountdown); _micCountdown = null; }
-  // placeholder 복원
   const inp = document.getElementById('nlInput');
   if (inp && inp.dataset.prevPlaceholder) {
     inp.placeholder = inp.dataset.prevPlaceholder;
