@@ -221,6 +221,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .nl-mic-btn.rec{border-color:var(--red);background:rgba(217,48,37,.08);animation:none}
 .nl-mic-btn .mic-countdown{font-size:14px;font-weight:700;color:var(--red);line-height:1}
 .mic-wave{display:flex;align-items:center;gap:3px;height:22px}
+.mic-level-bar{height:4px;background:var(--accent);border-radius:2px;transition:width 0.1s ease;margin:0 4px}
 .mic-wave-bar{width:3px;border-radius:2px;background:var(--red);animation:mic-wave-anim 0.8s ease-in-out infinite}
 .mic-wave-bar:nth-child(1){height:8px;animation-delay:0s}
 .mic-wave-bar:nth-child(2){height:16px;animation-delay:0.15s}
@@ -469,7 +470,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 </div><!-- /tab-wrap -->
 
 <!-- 확인 카드 (입력창 바로 위, 고정) -->
-<div id="reviewPanel" style="display:none">
+<div id="reviewPanel" style="display:none;position:fixed;bottom:62px;left:0;right:0;z-index:25;max-height:60vh;overflow-y:auto;padding:0 10px">
   <div class="result-card-wrap" style="position:relative">
     <button class="card-close-x" onclick="cancelReview()">✕</button>
     <div class="result-card-title" id="resultCardTitle"></div>
@@ -1081,7 +1082,6 @@ async function handleNaturalInput() {
   // 마이크 활성 중이면 즉시 종료 (중복 입력 방지)
   if (_micActive) {
     _micShouldStop = true;
-    if (_recognition) { try { _recognition.stop(); } catch(e) {} _recognition = null; }
     if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
       try { _mediaRecorder.stop(); } catch(e) {}
     }
@@ -3840,20 +3840,17 @@ document.addEventListener('keydown', e=>{
   if (e.key==='Enter' && document.activeElement===document.getElementById('nlInput')) handleNaturalInput();
 });
 
-// 하이브리드 음성인식: Web Speech(실시간 미리보기) + OpenAI(최종 정확 텍스트)
+// 음성인식: MediaRecorder + OpenAI + 음성 레벨 시각화
 let _micActive = false;
 let _micCountdown = null;
 let _micShouldStop = false;
 let _micTimeout = parseInt(localStorage.getItem('zk_mic_timeout') || '10');
 let _micRemaining = 0;
-let _micAccumulated = '';
-
-// MediaRecorder (OpenAI 전송용)
 let _mediaRecorder = null;
 let _audioChunks = [];
-
-// Web Speech API (실시간 미리보기용)
-let _recognition = null;
+let _audioContext = null;
+let _audioAnalyser = null;
+let _levelInterval = null;
 
 function toggleMic() {
   localStorage.setItem('zk_mic_used', 'true');
@@ -3862,43 +3859,44 @@ function toggleMic() {
 
   if (_micActive) {
     _micShouldStop = true;
-    _stopAll();
+    _stopRecording();
     return;
   }
 
-  // 마이크 권한 + 녹음 시작
   navigator.mediaDevices.getUserMedia({ audio: true })
     .then(stream => {
       _micShouldStop = false;
-      _micAccumulated = document.getElementById('nlInput').value.trim();
       _micActive = true;
       _audioChunks = [];
 
       const btn = document.getElementById('micBtn');
       btn.classList.add('rec');
 
-      // 1) MediaRecorder 시작 (OpenAI 전송용 녹음)
+      // MediaRecorder 시작
       _mediaRecorder = new MediaRecorder(stream, { mimeType: _getAudioMimeType() });
       _mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) _audioChunks.push(e.data);
       };
       _mediaRecorder.onstop = () => {
         stream.getTracks().forEach(t => t.stop());
+        _stopLevelMonitor();
         if (_audioChunks.length > 0) {
           _transcribeAudio();
         }
       };
       _mediaRecorder.start(500);
 
-      // 2) Web Speech API 시작 (실시간 미리보기)
-      _startPreview();
+      // 음성 레벨 모니터 시작
+      _startLevelMonitor(stream);
 
-      // 3) 카운트다운 시작
+      // 카운트다운 시작
       _startMicCountdown();
 
-      // placeholder 변경
+      // 입력창 안내
       const inp = document.getElementById('nlInput');
       inp.dataset.prevPlaceholder = inp.placeholder;
+      inp.value = '';
+      inp.placeholder = '🎤 말씀하세요...';
     })
     .catch(err => {
       showToast('마이크 접근 불가: ' + err.message);
@@ -3912,57 +3910,71 @@ function _getAudioMimeType() {
   return 'audio/wav';
 }
 
-// Web Speech API — 실시간 미리보기
-function _startPreview() {
-  if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) return;
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  _recognition = new SR();
-  _recognition.lang = 'ko-KR';
-  _recognition.interimResults = true;
-  _recognition.continuous = false;
+// 음성 레벨 모니터 — 입력창에 음량 바 표시 + 카운트다운 리셋
+function _startLevelMonitor(stream) {
+  try {
+    _audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = _audioContext.createMediaStreamSource(stream);
+    _audioAnalyser = _audioContext.createAnalyser();
+    _audioAnalyser.fftSize = 256;
+    source.connect(_audioAnalyser);
 
-  _recognition.onresult = (e) => {
-    let final = '', interim = '';
-    for (let i = 0; i < e.results.length; i++) {
-      if (e.results[i].isFinal) final += e.results[i][0].transcript;
-      else interim += e.results[i][0].transcript;
-    }
+    const dataArray = new Uint8Array(_audioAnalyser.frequencyBinCount);
     const inp = document.getElementById('nlInput');
-    if (final) {
-      _micAccumulated += (_micAccumulated ? ' ' : '') + final;
-      inp.value = _micAccumulated;
-    } else if (interim) {
-      inp.value = _micAccumulated + (_micAccumulated && interim ? ' ' : '') + interim;
-    }
-  };
+    let silenceCount = 0;
 
-  _recognition.onend = () => {
-    _recognition = null;
-    // 아직 녹음 중이면 재시작 (브라우저 강제 종료 우회)
-    if (_micActive && !_micShouldStop) {
-      setTimeout(() => {
-        if (_micActive && !_micShouldStop) _startPreview();
-      }, 300);
-    }
-  };
+    _levelInterval = setInterval(() => {
+      if (!_micActive) return;
+      _audioAnalyser.getByteFrequencyData(dataArray);
+      const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+      const level = Math.min(100, Math.round(avg * 1.5));
 
-  _recognition.onerror = (e) => {
-    if (e.error === 'no-speech' || e.error === 'aborted') return;
-    // 미리보기 오류는 무시 (OpenAI가 최종 처리)
-  };
-
-  try { _recognition.start(); } catch(e) {}
+      // 입력창에 레벨 바 표시
+      if (level > 5) {
+        inp.placeholder = '🎤 ' + '▮'.repeat(Math.ceil(level / 10)) + '▯'.repeat(10 - Math.ceil(level / 10));
+        silenceCount = 0;
+        // 음성 감지 → 카운트다운 리셋
+        if (_micRemaining < _micTimeout - 1) {
+          _micRemaining = _micTimeout;
+          _updateCountdownUI(document.getElementById('micBtn'));
+        }
+      } else {
+        silenceCount++;
+        if (silenceCount > 10) {
+          inp.placeholder = '🎤 말씀하세요...';
+        }
+      }
+    }, 100);
+  } catch(e) {
+    // AudioContext 불가 시 무시
+  }
 }
 
-// OpenAI로 최종 변환
+function _stopLevelMonitor() {
+  if (_levelInterval) { clearInterval(_levelInterval); _levelInterval = null; }
+  if (_audioContext) {
+    try { _audioContext.close(); } catch(e) {}
+    _audioContext = null;
+    _audioAnalyser = null;
+  }
+}
+
+function _stopRecording() {
+  if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+    _mediaRecorder.stop();
+  } else {
+    _stopMicUI();
+  }
+}
+
 async function _transcribeAudio() {
   const inp = document.getElementById('nlInput');
   const btn = document.getElementById('nlSendBtn');
   const btnTxt = document.getElementById('nlBtnTxt');
 
-  // 미리보기 텍스트 유지하면서 "변환 중..." 표시
-  const previewText = inp.value;
+  _stopMicUI();
   inp.placeholder = '변환 중...';
+  inp.value = '';
   btn.disabled = true;
   btnTxt.innerHTML = '<span class="spin"></span>';
 
@@ -3971,14 +3983,8 @@ async function _transcribeAudio() {
     const ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('wav') ? 'wav' : 'webm';
     const blob = new Blob(_audioChunks, { type: mimeType });
 
-    // 너무 짧은 녹음 무시
     if (blob.size < 5000) {
       _restoreUI(inp, btn, btnTxt);
-      if (previewText.trim()) {
-        // 미리보기 텍스트라도 있으면 그걸로 전송
-        inp.value = previewText;
-        setTimeout(() => handleNaturalInput(), 200);
-      }
       return;
     }
 
@@ -3999,31 +4005,17 @@ async function _transcribeAudio() {
     const text = (data.text || '').trim();
 
     if (text) {
-      // OpenAI 결과로 교체 (미리보기보다 정확)
       inp.value = text;
       _restoreUI(inp, btn, btnTxt);
       setTimeout(() => handleNaturalInput(), 200);
     } else {
-      // OpenAI 결과 없으면 미리보기 텍스트 사용
       _restoreUI(inp, btn, btnTxt);
-      if (previewText.trim()) {
-        inp.value = previewText;
-        setTimeout(() => handleNaturalInput(), 200);
-      } else {
-        showToast('음성을 인식하지 못했습니다');
-      }
+      showToast('음성을 인식하지 못했습니다');
     }
   } catch (e) {
     console.error('음성 변환 오류:', e);
     _restoreUI(inp, btn, btnTxt);
-    // OpenAI 실패 시 미리보기 텍스트로 대체 전송
-    if (previewText.trim()) {
-      inp.value = previewText;
-      showToast('정밀 변환 실패 — 미리보기 텍스트로 처리합니다');
-      setTimeout(() => handleNaturalInput(), 200);
-    } else {
-      showToast('음성 변환 실패: ' + e.message);
-    }
+    showToast('음성 변환 실패: ' + e.message);
   }
 }
 
@@ -4033,7 +4025,6 @@ function _restoreUI(inp, btn, btnTxt) {
   btnTxt.textContent = '입력';
 }
 
-// 카운트다운
 function _startMicCountdown() {
   const btn = document.getElementById('micBtn');
   _micRemaining = _micTimeout;
@@ -4041,7 +4032,8 @@ function _startMicCountdown() {
   _micCountdown = setInterval(() => {
     _micRemaining--;
     if (_micRemaining <= 0) {
-      _stopAll();
+      _micShouldStop = true;
+      _stopRecording();
       return;
     }
     _updateCountdownUI(btn);
@@ -4052,25 +4044,9 @@ function _updateCountdownUI(btn) {
   btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
 }
 
-// 전체 정지
-function _stopAll() {
-  _micShouldStop = true;
-  // Web Speech 정지
-  if (_recognition) {
-    try { _recognition.stop(); } catch(e) {}
-    _recognition = null;
-  }
-  // MediaRecorder 정지 (onstop에서 _transcribeAudio 호출됨)
-  if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
-    _mediaRecorder.stop();
-  } else {
-    _stopMicUI();
-  }
-}
-
 function _stopMic() {
   _micShouldStop = true;
-  _stopAll();
+  _stopRecording();
 }
 
 function _stopMicUI() {
@@ -4079,6 +4055,7 @@ function _stopMicUI() {
   btn.classList.remove('rec');
   btn.innerHTML = '🎤';
   if (_micCountdown) { clearInterval(_micCountdown); _micCountdown = null; }
+  _stopLevelMonitor();
   const inp = document.getElementById('nlInput');
   if (inp && inp.dataset.prevPlaceholder) {
     inp.placeholder = inp.dataset.prevPlaceholder;

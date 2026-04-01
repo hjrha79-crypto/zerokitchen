@@ -1,0 +1,281 @@
+ZeroKitchen index.html 수정 3건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: 확인 카드가 채팅에 가려지는 문제
+━━━━━━━━━━━━━━━━━━━━━
+
+확인 카드(reviewPanel)의 CSS 또는 스타일을 수정.
+
+reviewPanel을 찾아서 (HTML):
+현재:
+<div id="reviewPanel" style="display:none">
+
+변경 후:
+<div id="reviewPanel" style="display:none;position:fixed;bottom:62px;left:0;right:0;z-index:25;max-height:60vh;overflow-y:auto;padding:0 10px">
+
+이렇게 하면 확인 카드가 입력창 바로 위에 고정되어 채팅에 가려지지 않음.
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: 마이크 전체 교체 — 음성 레벨 시각화 + 카운트다운 리셋
+━━━━━━━━━━━━━━━━━━━━━
+
+[2-A] CSS 추가
+
+.mic-level-bar{height:4px;background:var(--accent);border-radius:2px;transition:width 0.1s ease;margin:0 4px}
+
+[2-B] 마이크 코드 전체 교체
+
+현재 마이크 관련 코드 블록을 전부 삭제 (toggleMicSettings 전까지).
+아래로 교체:
+
+=== 새 코드 시작 ===
+
+// 음성인식: MediaRecorder + OpenAI + 음성 레벨 시각화
+let _micActive = false;
+let _micCountdown = null;
+let _micShouldStop = false;
+let _micTimeout = parseInt(localStorage.getItem('zk_mic_timeout') || '10');
+let _micRemaining = 0;
+let _mediaRecorder = null;
+let _audioChunks = [];
+let _audioContext = null;
+let _audioAnalyser = null;
+let _levelInterval = null;
+
+function toggleMic() {
+  localStorage.setItem('zk_mic_used', 'true');
+  const hint = document.getElementById('micHint');
+  if (hint) hint.remove();
+
+  if (_micActive) {
+    _micShouldStop = true;
+    _stopRecording();
+    return;
+  }
+
+  navigator.mediaDevices.getUserMedia({ audio: true })
+    .then(stream => {
+      _micShouldStop = false;
+      _micActive = true;
+      _audioChunks = [];
+
+      const btn = document.getElementById('micBtn');
+      btn.classList.add('rec');
+
+      // MediaRecorder 시작
+      _mediaRecorder = new MediaRecorder(stream, { mimeType: _getAudioMimeType() });
+      _mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) _audioChunks.push(e.data);
+      };
+      _mediaRecorder.onstop = () => {
+        stream.getTracks().forEach(t => t.stop());
+        _stopLevelMonitor();
+        if (_audioChunks.length > 0) {
+          _transcribeAudio();
+        }
+      };
+      _mediaRecorder.start(500);
+
+      // 음성 레벨 모니터 시작
+      _startLevelMonitor(stream);
+
+      // 카운트다운 시작
+      _startMicCountdown();
+
+      // 입력창 안내
+      const inp = document.getElementById('nlInput');
+      inp.dataset.prevPlaceholder = inp.placeholder;
+      inp.value = '';
+      inp.placeholder = '🎤 말씀하세요...';
+    })
+    .catch(err => {
+      showToast('마이크 접근 불가: ' + err.message);
+    });
+}
+
+function _getAudioMimeType() {
+  if (MediaRecorder.isTypeSupported('audio/webm;codecs=opus')) return 'audio/webm;codecs=opus';
+  if (MediaRecorder.isTypeSupported('audio/webm')) return 'audio/webm';
+  if (MediaRecorder.isTypeSupported('audio/mp4')) return 'audio/mp4';
+  return 'audio/wav';
+}
+
+// 음성 레벨 모니터 — 입력창에 음량 바 표시 + 카운트다운 리셋
+function _startLevelMonitor(stream) {
+  try {
+    _audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    const source = _audioContext.createMediaStreamSource(stream);
+    _audioAnalyser = _audioContext.createAnalyser();
+    _audioAnalyser.fftSize = 256;
+    source.connect(_audioAnalyser);
+
+    const dataArray = new Uint8Array(_audioAnalyser.frequencyBinCount);
+    const inp = document.getElementById('nlInput');
+    let silenceCount = 0;
+
+    _levelInterval = setInterval(() => {
+      if (!_micActive) return;
+      _audioAnalyser.getByteFrequencyData(dataArray);
+      const avg = dataArray.reduce((a, b) => a + b, 0) / dataArray.length;
+      const level = Math.min(100, Math.round(avg * 1.5));
+
+      // 입력창에 레벨 바 표시
+      if (level > 5) {
+        inp.placeholder = '🎤 ' + '▮'.repeat(Math.ceil(level / 10)) + '▯'.repeat(10 - Math.ceil(level / 10));
+        silenceCount = 0;
+        // 음성 감지 → 카운트다운 리셋
+        if (_micRemaining < _micTimeout - 1) {
+          _micRemaining = _micTimeout;
+          _updateCountdownUI(document.getElementById('micBtn'));
+        }
+      } else {
+        silenceCount++;
+        if (silenceCount > 10) {
+          inp.placeholder = '🎤 말씀하세요...';
+        }
+      }
+    }, 100);
+  } catch(e) {
+    // AudioContext 불가 시 무시
+  }
+}
+
+function _stopLevelMonitor() {
+  if (_levelInterval) { clearInterval(_levelInterval); _levelInterval = null; }
+  if (_audioContext) {
+    try { _audioContext.close(); } catch(e) {}
+    _audioContext = null;
+    _audioAnalyser = null;
+  }
+}
+
+function _stopRecording() {
+  if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+    _mediaRecorder.stop();
+  } else {
+    _stopMicUI();
+  }
+}
+
+async function _transcribeAudio() {
+  const inp = document.getElementById('nlInput');
+  const btn = document.getElementById('nlSendBtn');
+  const btnTxt = document.getElementById('nlBtnTxt');
+
+  _stopMicUI();
+  inp.placeholder = '변환 중...';
+  inp.value = '';
+  btn.disabled = true;
+  btnTxt.innerHTML = '<span class="spin"></span>';
+
+  try {
+    const mimeType = _audioChunks[0]?.type || 'audio/webm';
+    const ext = mimeType.includes('mp4') ? 'mp4' : mimeType.includes('wav') ? 'wav' : 'webm';
+    const blob = new Blob(_audioChunks, { type: mimeType });
+
+    if (blob.size < 5000) {
+      _restoreUI(inp, btn, btnTxt);
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', blob, 'recording.' + ext);
+
+    const response = await fetch('/api/transcribe', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.error?.message || 'API 오류 ' + response.status);
+    }
+
+    const data = await response.json();
+    const text = (data.text || '').trim();
+
+    if (text) {
+      inp.value = text;
+      _restoreUI(inp, btn, btnTxt);
+      setTimeout(() => handleNaturalInput(), 200);
+    } else {
+      _restoreUI(inp, btn, btnTxt);
+      showToast('음성을 인식하지 못했습니다');
+    }
+  } catch (e) {
+    console.error('음성 변환 오류:', e);
+    _restoreUI(inp, btn, btnTxt);
+    showToast('음성 변환 실패: ' + e.message);
+  }
+}
+
+function _restoreUI(inp, btn, btnTxt) {
+  inp.placeholder = inp.dataset.prevPlaceholder || '말하거나 입력하세요';
+  btn.disabled = false;
+  btnTxt.textContent = '입력';
+}
+
+function _startMicCountdown() {
+  const btn = document.getElementById('micBtn');
+  _micRemaining = _micTimeout;
+  _updateCountdownUI(btn);
+  _micCountdown = setInterval(() => {
+    _micRemaining--;
+    if (_micRemaining <= 0) {
+      _micShouldStop = true;
+      _stopRecording();
+      return;
+    }
+    _updateCountdownUI(btn);
+  }, 1000);
+}
+
+function _updateCountdownUI(btn) {
+  btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
+}
+
+function _stopMic() {
+  _micShouldStop = true;
+  _stopRecording();
+}
+
+function _stopMicUI() {
+  _micActive = false;
+  const btn = document.getElementById('micBtn');
+  btn.classList.remove('rec');
+  btn.innerHTML = '🎤';
+  if (_micCountdown) { clearInterval(_micCountdown); _micCountdown = null; }
+  _stopLevelMonitor();
+  const inp = document.getElementById('nlInput');
+  if (inp && inp.dataset.prevPlaceholder) {
+    inp.placeholder = inp.dataset.prevPlaceholder;
+  }
+}
+
+=== 새 코드 끝 ===
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 3: handleNaturalInput 마이크 종료
+━━━━━━━━━━━━━━━━━━━━━
+
+현재 handleNaturalInput 시작부분의 마이크 종료 코드를 교체:
+
+변경 후:
+  if (_micActive) {
+    _micShouldStop = true;
+    if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+      try { _mediaRecorder.stop(); } catch(e) {}
+    }
+    _stopMicUI();
+  }
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 확인 카드가 입력창 위에 고정되어 보이는지
+□ 마이크 탭 → 입력창에 음량 바 (▮▮▮▯▯▯▯▯▯▯) 표시
+□ 소리 내면 바가 움직이는지
+□ 소리 감지 시 카운트다운 리셋
+□ 녹음 끝 → "변환 중..." → 정확한 텍스트 표시
+□ 자동 전송
