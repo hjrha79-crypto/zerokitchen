@@ -4041,7 +4041,7 @@ function _startMicCountdown() {
 }
 
 function _updateCountdownUI(btn) {
-  btn.innerHTML = '<div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span class="mic-countdown" style="position:absolute;bottom:-18px;font-size:11px;color:var(--red);font-weight:700">' + _micRemaining + '</span>';
+  btn.innerHTML = '<div style="display:flex;flex-direction:column;align-items:center;gap:1px"><div class="mic-wave"><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div><div class="mic-wave-bar"></div></div><span style="font-size:10px;color:var(--red);font-weight:700;line-height:1">' + _micRemaining + '</span></div>';
 }
 
 function _stopMic() {
