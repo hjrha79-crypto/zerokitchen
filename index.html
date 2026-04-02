@@ -84,22 +84,23 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .inv-view-toggle{display:flex;gap:4px}
 .inv-view-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;font-family:inherit}
 .inv-view-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
-.inv-table{width:100%;border-collapse:collapse;font-size:13px}
-.inv-table th{position:sticky;top:0;background:var(--surface2);padding:8px 6px;text-align:left;font-size:11px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap}
-.inv-table td{padding:6px;border-bottom:1px solid var(--border);vertical-align:middle}
-.inv-table tr:active{background:var(--accent-lt)}
-.inv-table tr.low{background:rgba(192,84,10,.04)}
-.inv-table tr.zero{background:rgba(217,48,37,.04)}
-.inv-table .inv-t-name{font-weight:600;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.inv-table .inv-t-qty{font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--accent);text-align:right;width:50px}
-.inv-table .inv-t-qty.low{color:var(--warn)}
-.inv-table .inv-t-qty.zero{color:var(--red)}
-.inv-t-input{width:100%;border:none;background:transparent;font-size:13px;font-family:inherit;color:var(--text);outline:none;padding:2px 0}
-.inv-t-input:focus{border-bottom:2px solid var(--accent)}
-.inv-t-input[type=number]{text-align:right;font-family:'JetBrains Mono',monospace;font-weight:700;-moz-appearance:textfield}
-.inv-t-input[type=number]::-webkit-outer-spin-button,.inv-t-input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
-.inv-t-select{border:none;background:transparent;font-size:12px;font-family:inherit;color:var(--text);outline:none;padding:2px 0;width:100%;max-width:80px}
-.inv-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.inv-list-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:6px}
+.inv-list-card.low{border-left:3px solid var(--warn)}
+.inv-list-card.zero{border-left:3px solid var(--red)}
+.inv-lc-row1{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.inv-lc-name{font-size:14px;font-weight:700;color:var(--text);flex:1;border:none;background:transparent;outline:none;padding:0;font-family:inherit}
+.inv-lc-name:focus{border-bottom:2px solid var(--accent)}
+.inv-lc-del{border:none;background:none;cursor:pointer;font-size:14px;padding:4px;color:var(--muted)}
+.inv-lc-row2{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+.inv-lc-field{display:flex;align-items:center;gap:2px}
+.inv-lc-num{width:48px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 4px;font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;text-align:center;color:var(--accent);outline:none;box-sizing:border-box}
+.inv-lc-num:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(30,110,60,.12)}
+.inv-lc-num.dim{color:var(--muted);font-weight:400}
+.inv-lc-sel{border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 2px;font-size:12px;font-family:inherit;color:var(--text);outline:none;box-sizing:border-box}
+.inv-lc-sel:focus{border-color:var(--accent)}
+.inv-lc-label{font-size:10px;color:var(--muted);margin-right:1px}
+.inv-lc-arrow{font-size:10px;color:var(--muted);margin:0 2px}
+.inv-lc-row3{display:flex;gap:6px;align-items:center}
 .inv-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 12px;display:flex;flex-direction:column;gap:2px;cursor:pointer;transition:all .15s;-webkit-user-select:none;user-select:none}
 .inv-card:active{transform:scale(0.98)}
 .inv-card.low{border-left:3px solid var(--warn);background:rgba(192,84,10,.04)}
@@ -2367,13 +2368,9 @@ async function _saveListField(el) {
   const item = _items.find(i => i.item_id === id);
   if (item) item[field] = value;
 
-  // 행 색상 업데이트
-  const row = document.getElementById('tr_' + id);
-  if (row) {
-    const qty = Number(item?.current_qty || 0);
-    const tgt = Number(item?.target_qty || 0);
-    row.className = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
-  }
+  // 저장 피드백
+  el.style.borderColor = 'var(--accent)';
+  setTimeout(() => { el.style.borderColor = ''; }, 600);
 }
 
 async function _deleteListItem(id, name) {
@@ -2463,30 +2460,44 @@ function renderInventory() {
   document.getElementById('invCount').textContent = items.length + '개';
   if (!items.length) { grid.innerHTML = '<div class="no-item">품목 없음</div>'; return; }
 
-  // 목록뷰
+  // 목록뷰 — 콤팩트 카드
   if (_invView === 'list') {
     grid.classList.remove('inv-grid');
+    const unitOpts = ['개','봉지','박스','팩','캔','통','병','kg','g','장','묶음','롤'];
     const vOpts = _vendors.map(v => `<option value="${v.vendor_id}">${v.vendor_name}</option>`).join('');
-    grid.innerHTML = `<div class="inv-table-wrap"><table class="inv-table">
-      <thead><tr>
-        <th>품목명</th><th style="text-align:right">수량</th><th>단위</th><th style="text-align:right">목표</th><th style="text-align:right">최소</th><th>거래처</th><th></th>
-      </tr></thead>
-      <tbody>${items.map(it => {
-        const qty = Number(it.current_qty), tgt = Number(it.target_qty);
-        const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
-        return `<tr class="${cls}" id="tr_${it.item_id}">
-          <td class="inv-t-name"><input class="inv-t-input" value="${it.item_name}" data-id="${it.item_id}" data-field="item_name" onchange="_saveListField(this)"></td>
-          <td class="inv-t-qty ${cls}"><input class="inv-t-input" type="number" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)" style="color:inherit"></td>
-          <td><input class="inv-t-input" value="${it.unit||''}" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:40px;text-align:center"></td>
-          <td><input class="inv-t-input" type="number" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)" style="width:45px;text-align:right"></td>
-          <td><input class="inv-t-input" type="number" value="${Number(it.min_stock||0)}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)" style="width:45px;text-align:right"></td>
-          <td><select class="inv-t-select" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)">
-            <option value="">-</option>${vOpts.replace(`value="${it.vendor_id}"`, `value="${it.vendor_id}" selected`)}
-          </select></td>
-          <td><button style="border:none;background:none;cursor:pointer;font-size:14px;padding:2px" onclick="_deleteListItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">🗑</button></td>
-        </tr>`;
-      }).join('')}</tbody>
-    </table></div>`;
+    grid.innerHTML = items.map(it => {
+      const qty = Number(it.current_qty), tgt = Number(it.target_qty), min = Number(it.min_stock || 0);
+      const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+      const uSel = unitOpts.map(u => `<option value="${u}"${(it.unit||'개')===u?' selected':''}>${u}</option>`).join('');
+      const vSel = vOpts.replace(new RegExp(`value="${it.vendor_id}"`), `value="${it.vendor_id}" selected`);
+      return `<div class="inv-list-card ${cls}">
+        <div class="inv-lc-row1">
+          <input class="inv-lc-name" value="${it.item_name}" data-id="${it.item_id}" data-field="item_name" onchange="_saveListField(this)">
+          <button class="inv-lc-del" onclick="_deleteListItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">🗑</button>
+        </div>
+        <div class="inv-lc-row2">
+          <div class="inv-lc-field">
+            <input class="inv-lc-num" type="number" inputmode="numeric" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)" style="color:${cls==='zero'?'var(--red)':cls==='low'?'var(--warn)':'var(--accent)'}">
+            <select class="inv-lc-sel" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:56px">${uSel}</select>
+          </div>
+          <span class="inv-lc-arrow">→</span>
+          <div class="inv-lc-field">
+            <span class="inv-lc-label">목표</span>
+            <input class="inv-lc-num ${tgt===0?'dim':''}" type="number" inputmode="numeric" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)" style="width:42px">
+          </div>
+          <div class="inv-lc-field">
+            <span class="inv-lc-label">최소</span>
+            <input class="inv-lc-num ${min===0?'dim':''}" type="number" inputmode="numeric" value="${min}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)" style="width:42px">
+          </div>
+        </div>
+        <div class="inv-lc-row3">
+          <span class="inv-lc-label">거래처</span>
+          <select class="inv-lc-sel" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="flex:1;max-width:180px">
+            <option value="">미지정</option>${vSel}
+          </select>
+        </div>
+      </div>`;
+    }).join('');
     return;
   }
 
