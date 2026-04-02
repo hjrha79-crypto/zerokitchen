@@ -538,6 +538,8 @@ let _vendors = [];      // 거래처 캐시
 let _orderRequests = []; // 발주 요청 캐시
 let _dupOrigHTML = '';
 let _stores = [];      // 전체 매장 목록
+let _currentSessionId = null;
+let _sessionStartedAt = null;
 
 /*  order_requests 테이블 (Supabase SQL Editor에서 실행):
     CREATE TABLE IF NOT EXISTS order_requests (
@@ -3026,13 +3028,16 @@ async function _confirmAllOrders() {
     });
 
     // daily_orders에 기록
+    const editCount = Math.abs((parseInt(inp.defaultValue) || 0) - qty);
     await db.from('daily_orders').insert({
       store_id: SID, order_date: today,
       item_id: itemId, item_name: name,
       recommended_qty: parseInt(inp.defaultValue) || qty,
       final_qty: qty,
       unit: unit, vendor_id: vendorId,
-      status: 'confirmed', source: inp.dataset.source || 'target_based'
+      status: 'confirmed', source: inp.dataset.source || 'target_based',
+      session_id: _currentSessionId,
+      edit_count: editCount > 0 ? 1 : 0
     });
 
     // 이월 상태 정리
@@ -3043,6 +3048,7 @@ async function _confirmAllOrders() {
     count++;
   }
 
+  await _endOrderSession();
   if (count) {
     showToast(`${count}개 품목 발주 등록됨`);
     renderOrder();
@@ -3550,7 +3556,37 @@ async function switchTab(n, btn) {
   const rp = document.getElementById('reviewPanel');
   if (rp) rp.style.display = 'none';
   if (n==='inventory') { if (!_items.length) await refreshItems(); renderInventory(); }
-  if (n==='order') renderOrder();
+  if (n==='order') { _startOrderSession(); renderOrder(); }
+}
+
+async function _startOrderSession() {
+  try {
+    _sessionStartedAt = new Date();
+    const { data, error } = await db.from('order_sessions').insert({
+      store_id: SID,
+      order_date: new Date().toISOString().slice(0, 10),
+      started_at: _sessionStartedAt.toISOString()
+    }).select('id').single();
+    if (!error && data) _currentSessionId = data.id;
+  } catch(e) {
+    console.warn('세션 생성 실패:', e.message);
+  }
+}
+
+async function _endOrderSession() {
+  if (!_currentSessionId || !_sessionStartedAt) return;
+  try {
+    const now = new Date();
+    const duration = Math.round((now - _sessionStartedAt) / 1000);
+    await db.from('order_sessions').update({
+      confirmed_at: now.toISOString(),
+      duration_sec: duration
+    }).eq('id', _currentSessionId);
+  } catch(e) {
+    console.warn('세션 종료 실패:', e.message);
+  }
+  _currentSessionId = null;
+  _sessionStartedAt = null;
 }
 
 function resetToHome() {

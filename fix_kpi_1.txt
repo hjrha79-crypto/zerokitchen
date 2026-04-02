@@ -1,0 +1,174 @@
+ZeroKitchen index.html 수정 — KPI 이벤트 연결
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: 전역 변수 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+기존 전역 상태 영역에 추가:
+
+let _currentSessionId = null;
+let _sessionStartedAt = null;
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: 발주 탭 진입 시 세션 생성
+━━━━━━━━━━━━━━━━━━━━━
+
+switchTab 함수에서 order 탭 진입 시 세션 생성:
+
+현재:
+  if (n==='order') renderOrder();
+
+변경 후:
+  if (n==='order') { _startOrderSession(); renderOrder(); }
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 3: JavaScript — 세션 관리 함수들
+━━━━━━━━━━━━━━━━━━━━━
+
+switchTab 함수 아래에 추가:
+
+async function _startOrderSession() {
+  try {
+    _sessionStartedAt = new Date();
+    const { data, error } = await db.from('order_sessions').insert({
+      store_id: SID,
+      order_date: new Date().toISOString().slice(0, 10),
+      started_at: _sessionStartedAt.toISOString()
+    }).select('id').single();
+    if (!error && data) _currentSessionId = data.id;
+  } catch(e) {
+    console.warn('세션 생성 실패:', e.message);
+  }
+}
+
+async function _endOrderSession() {
+  if (!_currentSessionId || !_sessionStartedAt) return;
+  try {
+    const now = new Date();
+    const duration = Math.round((now - _sessionStartedAt) / 1000);
+    await db.from('order_sessions').update({
+      confirmed_at: now.toISOString(),
+      duration_sec: duration
+    }).eq('id', _currentSessionId);
+  } catch(e) {
+    console.warn('세션 종료 실패:', e.message);
+  }
+  _currentSessionId = null;
+  _sessionStartedAt = null;
+}
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 4: 발주 확인 시 세션 종료 + edit_count 저장
+━━━━━━━━━━━━━━━━━━━━━
+
+_confirmAllOrders 함수에서 daily_orders insert 시 session_id와 edit_count 추가.
+
+daily_orders insert 부분을 찾아서:
+
+현재:
+    await db.from('daily_orders').insert({
+      store_id: SID, order_date: today,
+      item_id: itemId, item_name: name,
+      recommended_qty: parseInt(inp.defaultValue) || qty,
+      final_qty: qty,
+      unit: unit, vendor_id: vendorId,
+      status: 'confirmed', source: inp.dataset.source || 'target_based'
+    });
+
+변경 후:
+    const editCount = Math.abs((parseInt(inp.defaultValue) || 0) - qty);
+    await db.from('daily_orders').insert({
+      store_id: SID, order_date: today,
+      item_id: itemId, item_name: name,
+      recommended_qty: parseInt(inp.defaultValue) || qty,
+      final_qty: qty,
+      unit: unit, vendor_id: vendorId,
+      status: 'confirmed', source: inp.dataset.source || 'target_based',
+      session_id: _currentSessionId,
+      edit_count: editCount > 0 ? 1 : 0
+    });
+
+그리고 _confirmAllOrders 함수 맨 끝, renderOrder() 호출 직전에 추가:
+    await _endOrderSession();
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 5: 재고 입력 시 품절 감지 (is_stockout)
+━━━━━━━━━━━━━━━━━━━━━
+
+kitchen_logs insert 부분을 찾기. 현재 kitchen_logs insert가 2곳 있음.
+
+각 kitchen_logs insert에서 is_stockout 필드 추가.
+
+검색: db.from('kitchen_logs').insert({
+
+각 insert 객체에 추가:
+      is_stockout: (() => {
+        const item = _items.find(i => i.item_name === (파싱된 품목명));
+        return item ? Number(item.current_qty) <= 0 : false;
+      })()
+
+이건 복잡하므로 더 간단한 방식: kitchen_logs insert 직후에 별도 업데이트.
+
+대신 가장 간단한 방법 — processRequest에서 재고 업데이트 후 qty가 0이면 표시.
+
+processRequest 함수 안에서 item.current_qty를 업데이트하는 부분 (약 612번 줄 근처):
+
+현재 kitchen_logs insert 부분들을 찾아서 각각에 추가:
+      is_stockout: (newQty <= 0)
+
+구체적으로, kitchen_logs insert가 있는 모든 곳에서 insert 객체에 is_stockout 추가.
+
+가장 확실한 방법: 각 kitchen_logs insert를 찾아서 (대략 2곳):
+
+1곳: 기존 품목 업데이트 후 (약 1269번 줄):
+현재:
+      db.from('kitchen_logs').insert({
+        store_id: SID, raw_input: raw, parsed_items: null,
+
+이 insert 객체에 추가:
+        is_stockout: false,
+
+→ 이건 파싱 로그라 품목별 qty 정보가 없음. 파싱 로그에는 is_stockout 불필요.
+
+실제로 is_stockout이 의미 있는 곳은 processRequest 안의 재고 업데이트 시점.
+하지만 kitchen_logs는 파싱 로그용이고, 실제 재고 변경은 kitchen_operations에 기록됨.
+
+→ 가장 간단한 대안: kitchen_logs가 아닌 kitchen_operations에서 is_stockout 판단.
+하지만 KPI View가 kitchen_logs 기준으로 만들어졌으므로...
+
+실용적 해결: kpi_stock View를 kitchen_operations 기준으로 변경.
+
+Supabase에서 실행:
+
+CREATE OR REPLACE VIEW kpi_stock AS
+SELECT store_id, DATE(created_at) AS log_date,
+  COUNT(*) AS input_count,
+  COUNT(*) FILTER (WHERE qty_after <= 0) AS stockout_count
+FROM kitchen_operations
+GROUP BY store_id, DATE(created_at);
+
+이렇게 하면 코드 수정 없이 기존 kitchen_operations 데이터에서 품절을 감지할 수 있음.
+
+━━━━━━━━━━━━━━━━━━━━━
+사전 작업: Supabase에서 kpi_stock View 변경
+━━━━━━━━━━━━━━━━━━━━━
+
+Supabase SQL Editor에서 실행:
+
+CREATE OR REPLACE VIEW kpi_stock AS
+SELECT store_id, DATE(created_at) AS log_date,
+  COUNT(*) AS input_count,
+  COUNT(*) FILTER (WHERE qty_after <= 0) AS stockout_count
+FROM kitchen_operations
+GROUP BY store_id, DATE(created_at);
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 발주 탭 진입 → order_sessions에 row 생성 (started_at 기록)
+□ 전체 발주 확인 → confirmed_at + duration_sec 기록
+□ daily_orders에 session_id + edit_count 기록
+□ kpi_order View → 평균 발주 시간 확인 가능
+□ kpi_recommendation View → 추천 수용률 확인 가능
+□ kpi_stock View → 일별 입력 횟수 + 품절 횟수 확인 가능
