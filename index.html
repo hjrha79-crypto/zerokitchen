@@ -91,16 +91,17 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .inv-lc-name{font-size:14px;font-weight:700;color:var(--text);flex:1;border:none;background:transparent;outline:none;padding:0;font-family:inherit}
 .inv-lc-name:focus{border-bottom:2px solid var(--accent)}
 .inv-lc-del{border:none;background:none;cursor:pointer;font-size:14px;padding:4px;color:var(--muted)}
-.inv-lc-row2{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+.inv-lc-row2{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;justify-content:space-between}
 .inv-lc-field{display:flex;align-items:center;gap:2px}
-.inv-lc-num{width:48px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 4px;font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;text-align:center;color:var(--accent);outline:none;box-sizing:border-box}
+.inv-lc-num{width:48px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 4px;font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;text-align:center;color:var(--accent);outline:none;box-sizing:border-box;-moz-appearance:textfield;appearance:textfield}
+.inv-lc-num::-webkit-outer-spin-button,.inv-lc-num::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .inv-lc-num:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(30,110,60,.12)}
 .inv-lc-num.dim{color:var(--muted);font-weight:400}
 .inv-lc-sel{border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 2px;font-size:12px;font-family:inherit;color:var(--text);outline:none;box-sizing:border-box}
 .inv-lc-sel:focus{border-color:var(--accent)}
 .inv-lc-label{font-size:10px;color:var(--muted);margin-right:1px}
 .inv-lc-arrow{font-size:10px;color:var(--muted);margin:0 2px}
-.inv-lc-row3{display:flex;gap:6px;align-items:center}
+.inv-lc-row3{display:flex;gap:6px;align-items:center;width:100%}
 .inv-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 12px;display:flex;flex-direction:column;gap:2px;cursor:pointer;transition:all .15s;-webkit-user-select:none;user-select:none}
 .inv-card:active{transform:scale(0.98)}
 .inv-card.low{border-left:3px solid var(--warn);background:rgba(192,84,10,.04)}
@@ -2477,22 +2478,21 @@ function renderInventory() {
         </div>
         <div class="inv-lc-row2">
           <div class="inv-lc-field">
-            <input class="inv-lc-num" type="number" inputmode="numeric" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)" style="color:${cls==='zero'?'var(--red)':cls==='low'?'var(--warn)':'var(--accent)'}">
-            <select class="inv-lc-sel" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:56px">${uSel}</select>
+            <input class="inv-lc-num" type="number" inputmode="numeric" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)" style="width:52px;font-size:16px;color:${cls==='zero'?'var(--red)':cls==='low'?'var(--warn)':'var(--accent)'}">
+            <select class="inv-lc-sel" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:60px">${uSel}</select>
           </div>
-          <span class="inv-lc-arrow">→</span>
           <div class="inv-lc-field">
             <span class="inv-lc-label">목표</span>
-            <input class="inv-lc-num ${tgt===0?'dim':''}" type="number" inputmode="numeric" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)" style="width:42px">
+            <input class="inv-lc-num ${tgt===0?'dim':''}" type="number" inputmode="numeric" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)" style="width:46px">
           </div>
           <div class="inv-lc-field">
             <span class="inv-lc-label">최소</span>
-            <input class="inv-lc-num ${min===0?'dim':''}" type="number" inputmode="numeric" value="${min}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)" style="width:42px">
+            <input class="inv-lc-num ${min===0?'dim':''}" type="number" inputmode="numeric" value="${min}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)" style="width:46px">
           </div>
         </div>
         <div class="inv-lc-row3">
           <span class="inv-lc-label">거래처</span>
-          <select class="inv-lc-sel" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="flex:1;max-width:180px">
+          <select class="inv-lc-sel" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="flex:1">
             <option value="">미지정</option>${vSel}
           </select>
         </div>

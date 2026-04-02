@@ -1,0 +1,95 @@
+ZeroKitchen index.html 수정 2건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: CSS — 숫자 화살표 제거 + 카드 전체 폭 활용
+━━━━━━━━━━━━━━━━━━━━━
+
+기존 .inv-lc-num CSS에 화살표 제거 추가:
+
+현재:
+.inv-lc-num{width:48px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 4px;font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;text-align:center;color:var(--accent);outline:none;box-sizing:border-box}
+
+변경 후:
+.inv-lc-num{width:48px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 4px;font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;text-align:center;color:var(--accent);outline:none;box-sizing:border-box;-moz-appearance:textfield;appearance:textfield}
+.inv-lc-num::-webkit-outer-spin-button,.inv-lc-num::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+
+그리고 .inv-lc-row2에 justify 추가:
+
+현재:
+.inv-lc-row2{display:flex;gap:6px;align-items:center;margin-bottom:6px;flex-wrap:wrap}
+
+변경 후:
+.inv-lc-row2{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;justify-content:space-between}
+
+.inv-lc-row3도 전체 폭:
+
+현재:
+.inv-lc-row3{display:flex;gap:6px;align-items:center}
+
+변경 후:
+.inv-lc-row3{display:flex;gap:6px;align-items:center;width:100%}
+
+거래처 select 폭 확대:
+
+현재:
+.inv-lc-sel:focus{border-color:var(--accent)}
+
+바로 뒤에 추가 (또는 기존 .inv-lc-sel 수정):
+
+renderInventory의 거래처 select에서:
+style="flex:1;max-width:180px"
+
+변경 후:
+style="flex:1"
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: 콤팩트 카드 HTML — 2행 구조 개선
+━━━━━━━━━━━━━━━━━━━━━
+
+renderInventory의 목록뷰 카드 HTML 전체 교체:
+
+현재 return 문 전체를 아래로 교체:
+
+      return `<div class="inv-list-card ${cls}">
+        <div class="inv-lc-row1">
+          <input class="inv-lc-name" value="${it.item_name}" data-id="${it.item_id}" data-field="item_name" onchange="_saveListField(this)">
+          <button class="inv-lc-del" onclick="_deleteListItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">🗑</button>
+        </div>
+        <div class="inv-lc-row2">
+          <div class="inv-lc-field">
+            <input class="inv-lc-num" type="number" inputmode="numeric" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)" style="width:52px;font-size:16px;color:${cls==='zero'?'var(--red)':cls==='low'?'var(--warn)':'var(--accent)'}">
+            <select class="inv-lc-sel" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:60px">${uSel}</select>
+          </div>
+          <div class="inv-lc-field">
+            <span class="inv-lc-label">목표</span>
+            <input class="inv-lc-num ${tgt===0?'dim':''}" type="number" inputmode="numeric" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)" style="width:46px">
+          </div>
+          <div class="inv-lc-field">
+            <span class="inv-lc-label">최소</span>
+            <input class="inv-lc-num ${min===0?'dim':''}" type="number" inputmode="numeric" value="${min}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)" style="width:46px">
+          </div>
+        </div>
+        <div class="inv-lc-row3">
+          <span class="inv-lc-label">거래처</span>
+          <select class="inv-lc-sel" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="flex:1">
+            <option value="">미지정</option>${vSel}
+          </select>
+        </div>
+      </div>`;
+
+변경 포인트:
+- row2에서 → 화살표 제거 (수량+단위 | 목표 | 최소 3그룹 가로 배치)
+- justify-content:space-between으로 전체 폭 활용
+- 수량 숫자 16px로 키움 (탭 쉽게)
+- 거래처 드롭다운 flex:1로 전체 폭
+- 숫자 화살표 완전 제거 (탭 → 키패드)
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 카드가 전체 폭 활용
+□ 숫자 필드에 화살표 없음
+□ 숫자 탭 → 모바일 숫자 키패드
+□ 수량/목표/최소가 가로로 고르게 배치
+□ 거래처 드롭다운 전체 폭
