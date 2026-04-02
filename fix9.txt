@@ -1,9 +1,0 @@
-index.html 재고 탭 정렬 옵션 수정해줘.
-
-기존 "수량순"을 아래 두 개로 분리:
-- 수량 적은순 (current_qty 낮은 순, 부족한 품목 먼저)
-- 수량 많은순 (current_qty 높은 순)
-
-최종 정렬 옵션: 업데이트순 / 이름순 / 수량 적은순 / 수량 많은순 / 거래처순
-
-완료 후 git add index.html && git commit -m "Split quantity sort into ascending and descending" && git push
