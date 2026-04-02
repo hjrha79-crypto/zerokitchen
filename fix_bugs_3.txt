@@ -1,0 +1,43 @@
+ZeroKitchen index.html 수정 2건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: 부족만 필터 → "전체 보기" 버튼 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+invAlertBar 클릭으로 부족만 필터가 적용되면, 알림바 대신 "전체 보기" 버튼이 보여야 함.
+
+renderInventory 함수의 alertBar 로직에서, 부족 필터 선택 시 숨기는 부분을 수정:
+
+현재:
+    if (document.getElementById('invFilter')?.value === 'low_stock') {
+      alertBar.style.display = 'none';
+    }
+
+변경 후:
+    if (document.getElementById('invFilter')?.value === 'low_stock') {
+      alertText.textContent = '🔙 전체 보기';
+      alertBar.style.display = '';
+      alertBar.style.background = 'var(--surface2)';
+      alertBar.style.borderColor = 'var(--border)';
+      alertBar.onclick = () => { document.getElementById('invFilter').value='all'; renderInventory(); };
+    } else {
+      alertBar.style.background = 'rgba(192,84,10,.08)';
+      alertBar.style.borderColor = 'rgba(192,84,10,.2)';
+      alertBar.onclick = () => { document.getElementById('invFilter').value='low_stock'; renderInventory(); };
+    }
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: 중복 정리 — 개별 "무시" 버튼 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+_showDupCleanup 함수의 카드 HTML에서 합치기 버튼 옆에 "무시" 버튼 추가:
+
+현재:
+      <button class="ord-btn-done" style="font-size:12px;padding:6px 14px" onclick="_mergeDup('${key}')">합치기 (${totalQty}${unit})</button>
+
+변경 후:
+      <div style="display:flex;gap:6px;margin-top:4px">
+        <button class="ord-btn-done" style="font-size:12px;padding:6px 14px" onclick="_mergeDup('${key}')">합치기 (${totalQty}${unit})</button>
+        <button style="font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);cursor:pointer;font-family:inherit" onclick="this.closest('div[style*=padding]').parentElement.style.display='none'">무시</button>
+      </div>
