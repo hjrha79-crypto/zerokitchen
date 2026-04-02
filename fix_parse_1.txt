@@ -1,0 +1,36 @@
+ZeroKitchen index.html 수정 2건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: 문장 끝 동작어(입고/추가/차감)를 전체 품목에 적용
+━━━━━━━━━━━━━━━━━━━━━
+
+원인: "치즈 3봉 양파 2kg 우유 4박스 입고"에서 "입고"가 마지막 품목(우유)에만 붙고, 치즈/양파는 stock_check가 됨.
+
+ruleEngine 함수에서 fallbackAction 결정 로직 수정.
+
+현재 (약 1617번 줄):
+  const fallbackAction = segs[0]?.action || 'stock_check';
+
+변경 후:
+  // 문장 끝 동작어 → 전체 적용: 마지막 세그먼트에만 action이 있고 나머지는 없으면, 마지막 action을 전체 fallback으로 사용
+  let fallbackAction = 'stock_check';
+  const segsWithAction = segs.filter(s => s.action);
+  if (segsWithAction.length === 1 && segs[segs.length - 1].action) {
+    // 마지막 세그먼트에만 동작어 → 전체 적용 (예: "치즈 3봉 양파 2kg 우유 4박스 입고")
+    fallbackAction = segs[segs.length - 1].action;
+  } else if (segsWithAction.length === 1 && segs[0].action) {
+    // 첫 번째 세그먼트에만 동작어 → 전체 적용 (예: "입고 치즈 3봉 양파 2kg")
+    fallbackAction = segs[0].action;
+  } else if (segsWithAction.length > 0) {
+    // 여러 세그먼트에 동작어 → 첫 번째 기준 (기존 로직)
+    fallbackAction = segs[0]?.action || 'stock_check';
+  }
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: "삼발이" 조사 제거 방지 — alias 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+_ALIAS 객체에 추가:
+
+  '피자 삼발':'피자 삼발이','삼발':'삼발이',

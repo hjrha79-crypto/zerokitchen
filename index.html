@@ -19,6 +19,11 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .hdr{background:var(--surface);border-bottom:1px solid var(--border);padding:0 14px;display:flex;align-items:center;gap:8px;height:52px;flex-shrink:0;position:sticky;top:0;z-index:10}
 .logo{font-size:18px;font-weight:700;color:var(--accent)}
 .store-nm{font-size:12px;color:var(--muted);font-weight:500}
+.store-tabs{display:flex;gap:4px;align-items:center;overflow-x:auto;max-width:180px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.store-tabs::-webkit-scrollbar{display:none}
+.store-tab{padding:3px 8px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);font-size:11px;font-weight:600;color:var(--dim);cursor:pointer;white-space:nowrap;transition:all .15s;font-family:inherit}
+.store-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.store-tab-add{padding:3px 8px;border-radius:12px;border:1px dashed var(--border);background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:inherit;white-space:nowrap}
 .navs{display:flex;gap:5px;margin-left:auto}
 .nav{padding:6px 11px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--dim);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
 .nav.active{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -367,7 +372,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 
 <div class="hdr">
   <span class="logo" id="logoBtn" style="cursor:pointer">ZeroKitchen</span>
-  <span class="store-nm" id="storeNm">로딩 중...</span>
+  <div class="store-tabs" id="storeTabs"><span class="store-nm" id="storeNm">로딩 중...</span></div>
   <div class="navs">
     <button class="nav active" onclick="switchTab('input',this)">입력</button>
     <button class="nav" onclick="switchTab('inventory',this)">재고</button>
@@ -532,6 +537,7 @@ let _pendingSeq = 0;
 let _vendors = [];      // 거래처 캐시
 let _orderRequests = []; // 발주 요청 캐시
 let _dupOrigHTML = '';
+let _stores = [];      // 전체 매장 목록
 
 /*  order_requests 테이블 (Supabase SQL Editor에서 실행):
     CREATE TABLE IF NOT EXISTS order_requests (
@@ -556,14 +562,84 @@ let _dupOrigHTML = '';
 ════════════════════════════════════════════════════════ */
 async function init() {
   try {
-    const { data: stores } = await db.from('stores').select('*').limit(1);
-    if (stores?.length) {
-      SID = stores[0].store_id;
-      document.getElementById('storeNm').textContent = stores[0].store_name;
+    const { data: stores } = await db.from('stores').select('*').order('store_name');
+    _stores = stores || [];
+    if (!_stores.length) {
+      showToast('매장 정보가 없습니다');
+      return;
     }
+    // localStorage에서 마지막 선택 매장 복원
+    const savedSid = parseInt(localStorage.getItem('zk_store_id'));
+    const savedStore = savedSid && _stores.find(s => s.store_id === savedSid);
+    SID = savedStore ? savedStore.store_id : _stores[0].store_id;
+
+    _renderStoreTabs();
     await refreshItems();
+    _lastRawInput = localStorage.getItem('zk_last_input_' + SID) || '';
+    _updateLastInputChip();
   } catch(e) {
     showToast('초기화 실패: ' + e.message);
+  }
+}
+
+function _renderStoreTabs() {
+  const container = document.getElementById('storeTabs');
+  if (!container) return;
+
+  if (_stores.length === 1) {
+    // 매장 1개면 기존처럼 텍스트만 표시
+    container.innerHTML = `<span class="store-nm">${_stores[0].store_name}</span>`;
+    return;
+  }
+
+  // 매장 2개 이상이면 탭 표시
+  let html = _stores.map(s =>
+    `<button class="store-tab${s.store_id === SID ? ' active' : ''}" onclick="_switchStore(${s.store_id})">${s.store_name}</button>`
+  ).join('');
+  html += `<button class="store-tab-add" onclick="_addStore()">+</button>`;
+  container.innerHTML = html;
+}
+
+async function _switchStore(storeId) {
+  if (storeId === SID) return;
+  SID = storeId;
+  localStorage.setItem('zk_store_id', storeId);
+
+  // UI 업데이트
+  _renderStoreTabs();
+  showToast(_stores.find(s => s.store_id === storeId)?.store_name + ' 전환');
+
+  // 데이터 재로드
+  _items = [];
+  _vendors = [];
+  _orderRequests = [];
+  await refreshItems();
+
+  // 현재 탭 재렌더링
+  const activeTab = document.querySelector('.tab.active');
+  if (activeTab?.id === 'tab-inventory') renderInventory();
+  else if (activeTab?.id === 'tab-order') renderOrder();
+
+  // 채팅 영역 초기화
+  const resList = document.getElementById('resList');
+  if (resList) resList.innerHTML = '';
+  updateJustTalk();
+}
+
+async function _addStore() {
+  const name = prompt('새 매장 이름을 입력하세요');
+  if (!name || !name.trim()) return;
+
+  try {
+    const { data, error } = await db.from('stores').insert({ store_name: name.trim() }).select().single();
+    if (error) throw error;
+    _stores.push(data);
+    showToast(`"${name.trim()}" 매장 추가됨`);
+    _renderStoreTabs();
+    // 새 매장으로 전환
+    await _switchStore(data.store_id);
+  } catch(e) {
+    showToast('매장 추가 실패: ' + e.message);
   }
 }
 
@@ -1455,6 +1531,7 @@ const _ALIAS = {
   '알리오 올리오 소스':'알리오올리오소스','토마토 비프 소스':'토마토비프소스',
   '냉동 가리비':'냉동가리비',
   '브로컬리':'브로콜리','블로콜리':'브로콜리','부로콜리':'브로콜리','브로커리':'브로콜리','브르콜리':'브로콜리',
+  '피자 삼발':'피자 삼발이','삼발':'삼발이',
 };
 
 function _ruleNormalize(text) {
@@ -1619,9 +1696,19 @@ function ruleEngine(text) {
   const norm = _ruleNormalize(text);
   const segs = _ruleTokenize(norm);
   if (!segs.length) return { results:[], needsFallback:true, confidence:0 };
-  // 전체 폴백 action: 첫 번째 세그먼트의 action만 사용 (Fix 2)
-  // 문장 끝 동작어(추가 등)는 바로 앞 품목에만 적용, 나머지는 stock_check
-  const fallbackAction = segs[0]?.action || 'stock_check';
+  // 문장 끝 동작어 → 전체 적용: 마지막 세그먼트에만 action이 있고 나머지는 없으면, 마지막 action을 전체 fallback으로 사용
+  let fallbackAction = 'stock_check';
+  const segsWithAction = segs.filter(s => s.action);
+  if (segsWithAction.length === 1 && segs[segs.length - 1].action) {
+    // 마지막 세그먼트에만 동작어 → 전체 적용 (예: "치즈 3봉 양파 2kg 우유 4박스 입고")
+    fallbackAction = segs[segs.length - 1].action;
+  } else if (segsWithAction.length === 1 && segs[0].action) {
+    // 첫 번째 세그먼트에만 동작어 → 전체 적용 (예: "입고 치즈 3봉 양파 2kg")
+    fallbackAction = segs[0].action;
+  } else if (segsWithAction.length > 0) {
+    // 여러 세그먼트에 동작어 → 첫 번째 기준 (기존 로직)
+    fallbackAction = segs[0]?.action || 'stock_check';
+  }
   const results=[], fails=[];
   let minConf = 1;
   for (const seg of segs) {
@@ -4208,11 +4295,11 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
 })();
 
 // 마지막 입력 반복
-let _lastRawInput = localStorage.getItem('zk_last_input') || '';
+let _lastRawInput = '';
 
 function _saveLastInput(raw) {
   _lastRawInput = raw;
-  localStorage.setItem('zk_last_input', raw);
+  localStorage.setItem('zk_last_input_' + SID, raw);
   _updateLastInputChip();
 }
 

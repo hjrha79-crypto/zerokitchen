@@ -1,0 +1,169 @@
+ZeroKitchen index.html 수정 — 다점포 구조
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: CSS 추가 — 매장 선택 UI
+━━━━━━━━━━━━━━━━━━━━━
+
+기존 .store-nm CSS 근처에 추가:
+
+.store-tabs{display:flex;gap:4px;align-items:center;overflow-x:auto;max-width:180px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.store-tabs::-webkit-scrollbar{display:none}
+.store-tab{padding:3px 8px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);font-size:11px;font-weight:600;color:var(--dim);cursor:pointer;white-space:nowrap;transition:all .15s;font-family:inherit}
+.store-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.store-tab-add{padding:3px 8px;border-radius:12px;border:1px dashed var(--border);background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:inherit;white-space:nowrap}
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: HTML — 헤더의 store-nm을 매장 탭으로 변경
+━━━━━━━━━━━━━━━━━━━━━
+
+현재:
+  <span class="logo" id="logoBtn" style="cursor:pointer">ZeroKitchen</span>
+  <span class="store-nm" id="storeNm">로딩 중...</span>
+
+변경 후:
+  <span class="logo" id="logoBtn" style="cursor:pointer">ZeroKitchen</span>
+  <div class="store-tabs" id="storeTabs"><span class="store-nm" id="storeNm">로딩 중...</span></div>
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 3: 전역 변수 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+기존 전역 상태 영역에 추가:
+
+let _stores = [];      // 전체 매장 목록
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 4: init 함수 교체
+━━━━━━━━━━━━━━━━━━━━━
+
+현재 init 함수 전체 교체:
+
+async function init() {
+  try {
+    const { data: stores } = await db.from('stores').select('*').order('store_name');
+    _stores = stores || [];
+    if (!_stores.length) {
+      showToast('매장 정보가 없습니다');
+      return;
+    }
+    // localStorage에서 마지막 선택 매장 복원
+    const savedSid = parseInt(localStorage.getItem('zk_store_id'));
+    const savedStore = savedSid && _stores.find(s => s.store_id === savedSid);
+    SID = savedStore ? savedStore.store_id : _stores[0].store_id;
+    
+    _renderStoreTabs();
+    await refreshItems();
+  } catch(e) {
+    showToast('초기화 실패: ' + e.message);
+  }
+}
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 5: JavaScript — 매장 탭 렌더링 + 전환 + 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+init 함수 바로 아래에 추가:
+
+function _renderStoreTabs() {
+  const container = document.getElementById('storeTabs');
+  if (!container) return;
+  
+  if (_stores.length === 1) {
+    // 매장 1개면 기존처럼 텍스트만 표시
+    container.innerHTML = `<span class="store-nm">${_stores[0].store_name}</span>`;
+    return;
+  }
+  
+  // 매장 2개 이상이면 탭 표시
+  let html = _stores.map(s =>
+    `<button class="store-tab${s.store_id === SID ? ' active' : ''}" onclick="_switchStore(${s.store_id})">${s.store_name}</button>`
+  ).join('');
+  html += `<button class="store-tab-add" onclick="_addStore()">+</button>`;
+  container.innerHTML = html;
+}
+
+async function _switchStore(storeId) {
+  if (storeId === SID) return;
+  SID = storeId;
+  localStorage.setItem('zk_store_id', storeId);
+  
+  // UI 업데이트
+  _renderStoreTabs();
+  showToast(_stores.find(s => s.store_id === storeId)?.store_name + ' 전환');
+  
+  // 데이터 재로드
+  _items = [];
+  _vendors = [];
+  _orderRequests = [];
+  await refreshItems();
+  
+  // 현재 탭 재렌더링
+  const activeTab = document.querySelector('.tab.active');
+  if (activeTab?.id === 'tab-inventory') renderInventory();
+  else if (activeTab?.id === 'tab-order') renderOrder();
+  
+  // 채팅 영역 초기화
+  const resList = document.getElementById('resList');
+  if (resList) resList.innerHTML = '';
+  updateJustTalk();
+}
+
+async function _addStore() {
+  const name = prompt('새 매장 이름을 입력하세요');
+  if (!name || !name.trim()) return;
+  
+  try {
+    const { data, error } = await db.from('stores').insert({ store_name: name.trim() }).select().single();
+    if (error) throw error;
+    _stores.push(data);
+    showToast(`"${name.trim()}" 매장 추가됨`);
+    _renderStoreTabs();
+    // 새 매장으로 전환
+    await _switchStore(data.store_id);
+  } catch(e) {
+    showToast('매장 추가 실패: ' + e.message);
+  }
+}
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 6: localStorage 키에 store_id 접미사 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+_saveLastInput 함수 수정:
+
+현재:
+function _saveLastInput(raw) {
+  _lastRawInput = raw;
+  localStorage.setItem('zk_last_input', raw);
+  _updateLastInputChip();
+}
+
+변경 후:
+function _saveLastInput(raw) {
+  _lastRawInput = raw;
+  localStorage.setItem('zk_last_input_' + SID, raw);
+  _updateLastInputChip();
+}
+
+_updateLastInputChip 함수도 수정:
+
+현재:
+let _lastRawInput = localStorage.getItem('zk_last_input') || '';
+
+변경 후:
+let _lastRawInput = '';
+
+그리고 init 함수 마지막 (await refreshItems() 이후)에 추가:
+    _lastRawInput = localStorage.getItem('zk_last_input_' + SID) || '';
+    _updateLastInputChip();
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 매장 1개일 때 → 기존처럼 텍스트 표시 (변화 없음)
+□ 매장 2개 이상 → 탭 표시 + 전환 가능
+□ 탭 클릭 → 데이터 전체 재로드 (재고/발주/거래처)
+□ + 버튼 → 새 매장 추가 → 자동 전환
+□ 새로고침 → 마지막 선택 매장 유지
+□ 경기광주점 데이터 → 다른 매장에 안 보임
