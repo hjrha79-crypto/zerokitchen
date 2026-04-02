@@ -1,0 +1,46 @@
+ZeroKitchen index.html 수정 1건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+_showDupCleanup 함수의 카드 HTML 생성 부분 수정.
+
+현재 cardsHtml 생성하는 map 안:
+
+    const name = items[0].item_name;
+    const totalQty = items.reduce((s, it) => s + Number(it.current_qty), 0);
+    const unit = items[0].unit || '';
+    const detail = items.map(it => `${Number(it.current_qty)}${it.unit || ''}`).join(' + ');
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:600">${name}</div>
+      <div style="font-size:12px;color:var(--dim);margin:4px 0">${detail} = ${totalQty}${unit}</div>
+      <div style="display:flex;gap:6px;margin-top:4px">
+        <button class="ord-btn-done" style="font-size:12px;padding:6px 14px" onclick="_mergeDup('${key}')">합치기 (${totalQty}${unit})</button>
+        <button style="font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);cursor:pointer;font-family:inherit" onclick="this.closest('div[style*=padding]').parentElement.style.display='none'">무시</button>
+      </div>
+    </div>`;
+
+변경 후:
+
+    const name = items[0].item_name;
+    const sameUnit = items.every(it => (it.unit || '') === (items[0].unit || ''));
+    const unit = items[0].unit || '';
+    const detail = items.map(it => `${Number(it.current_qty)}${it.unit || '개'}`).join(' + ');
+    if (!sameUnit) {
+      const units = [...new Set(items.map(it => it.unit || '개'))].join('/');
+      return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="font-size:14px;font-weight:600">${name}</div>
+        <div style="font-size:12px;color:var(--red);margin:4px 0">⚠️ 단위 다름 (${units}) — ${detail}</div>
+        <div style="font-size:11px;color:var(--dim);margin-bottom:4px">단위를 통일한 후 합쳐주세요</div>
+        <div style="display:flex;gap:6px;margin-top:4px">
+          <button style="font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);cursor:pointer;font-family:inherit" onclick="this.parentElement.parentElement.style.display='none'">무시</button>
+        </div>
+      </div>`;
+    }
+    const totalQty = items.reduce((s, it) => s + Number(it.current_qty), 0);
+    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      <div style="font-size:14px;font-weight:600">${name}</div>
+      <div style="font-size:12px;color:var(--dim);margin:4px 0">${detail} = ${totalQty}${unit}</div>
+      <div style="display:flex;gap:6px;margin-top:4px">
+        <button class="ord-btn-done" style="font-size:12px;padding:6px 14px" onclick="_mergeDup('${key}')">합치기 (${totalQty}${unit})</button>
+        <button style="font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);cursor:pointer;font-family:inherit" onclick="this.parentElement.parentElement.style.display='none'">무시</button>
+      </div>
+    </div>`;
