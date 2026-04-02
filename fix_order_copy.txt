@@ -1,0 +1,36 @@
+ZeroKitchen index.html 수정 1건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+진행 중 발주(Section A)에 거래처별 카톡 복사 버튼 추가.
+
+renderOrder 함수 안, Section A의 거래처 그룹 렌더링에서:
+
+현재 (각 거래처 그룹 닫기 직전):
+          }).join('')}
+        </div>`;
+
+변경 후:
+          }).join('')}
+          <div style="padding:8px 12px">
+            <button class="ord-btn-kakao" style="width:100%;padding:10px;border-radius:8px;font-size:13px" onclick="_copyPendingOrder('${vName.replace(/'/g,"\\'")}')">📋 ${vName} 발주 복사</button>
+          </div>
+        </div>`;
+
+그리고 JavaScript에 _copyPendingOrder 함수 추가 (_copyVendorOrder 함수 근처):
+
+function _copyPendingOrder(vendorName) {
+  const items = _orderRequests.filter(r => {
+    const vn = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
+    return vn === vendorName;
+  });
+  if (!items.length) { showToast('발주 품목이 없습니다'); return; }
+  const lines = items.filter(r => Number(r.qty) > 0).map(r => `${r.item_name} ${r.qty}${r.unit}`);
+  if (!lines.length) { showToast('발주 품목이 없습니다'); return; }
+  const text = `[발주]\n${lines.join('\n')}`;
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('발주 내용 복사됨 — 카카오톡에 붙여넣기 해주세요', 3000);
+    setTimeout(() => { try { window.open('kakaotalk://'); } catch(e) {} }, 800);
+  }).catch(() => {
+    showToast('복사 실패');
+  });
+}
