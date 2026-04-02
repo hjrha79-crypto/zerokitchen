@@ -81,6 +81,25 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .res-undo:disabled{opacity:.4;cursor:default}
 /* 재고 그리드 */
 .inv-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.inv-view-toggle{display:flex;gap:4px}
+.inv-view-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;font-family:inherit}
+.inv-view-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.inv-table{width:100%;border-collapse:collapse;font-size:13px}
+.inv-table th{position:sticky;top:0;background:var(--surface2);padding:8px 6px;text-align:left;font-size:11px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap}
+.inv-table td{padding:6px;border-bottom:1px solid var(--border);vertical-align:middle}
+.inv-table tr:active{background:var(--accent-lt)}
+.inv-table tr.low{background:rgba(192,84,10,.04)}
+.inv-table tr.zero{background:rgba(217,48,37,.04)}
+.inv-table .inv-t-name{font-weight:600;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inv-table .inv-t-qty{font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--accent);text-align:right;width:50px}
+.inv-table .inv-t-qty.low{color:var(--warn)}
+.inv-table .inv-t-qty.zero{color:var(--red)}
+.inv-t-input{width:100%;border:none;background:transparent;font-size:13px;font-family:inherit;color:var(--text);outline:none;padding:2px 0}
+.inv-t-input:focus{border-bottom:2px solid var(--accent)}
+.inv-t-input[type=number]{text-align:right;font-family:'JetBrains Mono',monospace;font-weight:700;-moz-appearance:textfield}
+.inv-t-input[type=number]::-webkit-outer-spin-button,.inv-t-input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
+.inv-t-select{border:none;background:transparent;font-size:12px;font-family:inherit;color:var(--text);outline:none;padding:2px 0;width:100%;max-width:80px}
+.inv-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
 .inv-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 12px;display:flex;flex-direction:column;gap:2px;cursor:pointer;transition:all .15s;-webkit-user-select:none;user-select:none}
 .inv-card:active{transform:scale(0.98)}
 .inv-card.low{border-left:3px solid var(--warn);background:rgba(192,84,10,.04)}
@@ -376,7 +395,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
   <span class="logo" id="logoBtn" style="cursor:pointer">ZeroKitchen</span>
   <div class="store-tabs" id="storeTabs"><span class="store-nm" id="storeNm">로딩 중...</span></div>
   <div class="navs">
-    <button class="nav active" onclick="switchTab('input',this)">입력</button>
+    <button class="nav active" onclick="switchTab('input',this)">홈</button>
     <button class="nav" onclick="switchTab('inventory',this)">재고</button>
     <button class="nav" onclick="switchTab('order',this)">발주</button>
     <button class="nav" id="testTabBtn" onclick="switchTab('test',this)" style="display:none">테스트</button>
@@ -411,8 +430,12 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
     <span id="invDupText"></span>
     <button onclick="_showDupCleanup()">정리하기</button>
   </div>
-  <div style="display:flex;gap:8px;align-items:center">
-    <input id="invSearch" style="flex:1;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit;color:var(--text);outline:none" placeholder="품목명 검색..." oninput="renderInventory()">
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <input id="invSearch" style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit;color:var(--text);outline:none" placeholder="품목명 검색..." oninput="renderInventory()">
+    <div class="inv-view-toggle">
+      <button class="inv-view-btn active" id="viewCard" onclick="_setInvView('card')">카드</button>
+      <button class="inv-view-btn" id="viewList" onclick="_setInvView('list')">목록</button>
+    </div>
     <select id="invFilter" onchange="renderInventory()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;color:var(--text);outline:none">
       <option value="all">전체</option>
       <option value="low_stock">부족만</option>
@@ -543,6 +566,7 @@ let _stores = [];      // 전체 매장 목록
 let _currentSessionId = null;
 let _sessionStartedAt = null;
 let _dismissedItemIds = new Set();  // 이번 세션에서 취소/이월한 품목
+let _invView = localStorage.getItem('zk_inv_view') || 'card';
 
 /*  order_requests 테이블 (Supabase SQL Editor에서 실행):
     CREATE TABLE IF NOT EXISTS order_requests (
@@ -582,6 +606,9 @@ async function init() {
     await refreshItems();
     _lastRawInput = localStorage.getItem('zk_last_input_' + SID) || '';
     _updateLastInputChip();
+    // 뷰 토글 초기 상태
+    document.getElementById('viewCard')?.classList.toggle('active', _invView === 'card');
+    document.getElementById('viewList')?.classList.toggle('active', _invView === 'list');
   } catch(e) {
     showToast('초기화 실패: ' + e.message);
   }
@@ -2312,6 +2339,51 @@ function _renderInvCard(it, qty, tgt, cls, vName) {
   </div>`;
 }
 
+function _setInvView(view) {
+  _invView = view;
+  localStorage.setItem('zk_inv_view', view);
+  document.getElementById('viewCard').classList.toggle('active', view === 'card');
+  document.getElementById('viewList').classList.toggle('active', view === 'list');
+  renderInventory();
+}
+
+async function _saveListField(el) {
+  const id = parseInt(el.dataset.id);
+  const field = el.dataset.field;
+  let value = el.value;
+
+  if (field === 'current_qty' || field === 'target_qty' || field === 'min_stock') {
+    value = parseFloat(value) || 0;
+  } else if (field === 'vendor_id') {
+    value = value ? parseInt(value) : null;
+  } else {
+    value = value.trim();
+    if (field === 'item_name' && !value) { showToast('품목명을 입력해 주세요'); renderInventory(); return; }
+  }
+
+  const patch = { [field]: value, updated_at: new Date().toISOString() };
+  await db.from('items').update(patch).eq('item_id', id);
+
+  const item = _items.find(i => i.item_id === id);
+  if (item) item[field] = value;
+
+  // 행 색상 업데이트
+  const row = document.getElementById('tr_' + id);
+  if (row) {
+    const qty = Number(item?.current_qty || 0);
+    const tgt = Number(item?.target_qty || 0);
+    row.className = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+  }
+}
+
+async function _deleteListItem(id, name) {
+  if (!confirm(`${name}을(를) 삭제하시겠습니까?`)) return;
+  await db.from('items').delete().eq('item_id', id);
+  _items = _items.filter(i => i.item_id !== id);
+  renderInventory();
+  showToast('🗑 삭제됨');
+}
+
 function _stepVal(inputId, delta) {
   const inp = document.getElementById(inputId);
   if (!inp) return;
@@ -2390,6 +2462,35 @@ function renderInventory() {
   else items.sort((a,b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
   document.getElementById('invCount').textContent = items.length + '개';
   if (!items.length) { grid.innerHTML = '<div class="no-item">품목 없음</div>'; return; }
+
+  // 목록뷰
+  if (_invView === 'list') {
+    grid.classList.remove('inv-grid');
+    const vOpts = _vendors.map(v => `<option value="${v.vendor_id}">${v.vendor_name}</option>`).join('');
+    grid.innerHTML = `<div class="inv-table-wrap"><table class="inv-table">
+      <thead><tr>
+        <th>품목명</th><th style="text-align:right">수량</th><th>단위</th><th style="text-align:right">목표</th><th style="text-align:right">최소</th><th>거래처</th><th></th>
+      </tr></thead>
+      <tbody>${items.map(it => {
+        const qty = Number(it.current_qty), tgt = Number(it.target_qty);
+        const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+        return `<tr class="${cls}" id="tr_${it.item_id}">
+          <td class="inv-t-name"><input class="inv-t-input" value="${it.item_name}" data-id="${it.item_id}" data-field="item_name" onchange="_saveListField(this)"></td>
+          <td class="inv-t-qty ${cls}"><input class="inv-t-input" type="number" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)" style="color:inherit"></td>
+          <td><input class="inv-t-input" value="${it.unit||''}" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:40px;text-align:center"></td>
+          <td><input class="inv-t-input" type="number" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)" style="width:45px;text-align:right"></td>
+          <td><input class="inv-t-input" type="number" value="${Number(it.min_stock||0)}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)" style="width:45px;text-align:right"></td>
+          <td><select class="inv-t-select" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)">
+            <option value="">-</option>${vOpts.replace(`value="${it.vendor_id}"`, `value="${it.vendor_id}" selected`)}
+          </select></td>
+          <td><button style="border:none;background:none;cursor:pointer;font-size:14px;padding:2px" onclick="_deleteListItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">🗑</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+    return;
+  }
+
+  // 카드뷰 (기존)
   // 거래처순 정렬이면 그룹으로 렌더링
   if (sort === 'vendor') {
     const groups = {};

@@ -1,0 +1,235 @@
+ZeroKitchen index.html 수정 — 재고 목록뷰 + 탭 이름 변경
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: CSS 추가 — 목록뷰 + 뷰 토글
+━━━━━━━━━━━━━━━━━━━━━
+
+기존 .inv-grid CSS 근처에 추가:
+
+.inv-view-toggle{display:flex;gap:4px}
+.inv-view-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;font-family:inherit}
+.inv-view-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.inv-table{width:100%;border-collapse:collapse;font-size:13px}
+.inv-table th{position:sticky;top:0;background:var(--surface2);padding:8px 6px;text-align:left;font-size:11px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap}
+.inv-table td{padding:6px;border-bottom:1px solid var(--border);vertical-align:middle}
+.inv-table tr:active{background:var(--accent-lt)}
+.inv-table tr.low{background:rgba(192,84,10,.04)}
+.inv-table tr.zero{background:rgba(217,48,37,.04)}
+.inv-table .inv-t-name{font-weight:600;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inv-table .inv-t-qty{font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--accent);text-align:right;width:50px}
+.inv-table .inv-t-qty.low{color:var(--warn)}
+.inv-table .inv-t-qty.zero{color:var(--red)}
+.inv-t-input{width:100%;border:none;background:transparent;font-size:13px;font-family:inherit;color:var(--text);outline:none;padding:2px 0}
+.inv-t-input:focus{border-bottom:2px solid var(--accent)}
+.inv-t-input[type=number]{text-align:right;font-family:'JetBrains Mono',monospace;font-weight:700;-moz-appearance:textfield}
+.inv-t-input[type=number]::-webkit-outer-spin-button,.inv-t-input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
+.inv-t-select{border:none;background:transparent;font-size:12px;font-family:inherit;color:var(--text);outline:none;padding:2px 0;width:100%;max-width:80px}
+.inv-table-wrap{overflow-x:auto;-webkit-overflow-scrolling:touch}
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: HTML — 탭 이름 변경 + 뷰 토글 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+[2-A] 탭 버튼 이름 변경:
+
+현재:
+    <button class="nav active" onclick="switchTab('input',this)">입력</button>
+
+변경 후:
+    <button class="nav active" onclick="switchTab('input',this)">홈</button>
+
+[2-B] 재고 탭 검색/필터 줄에 뷰 토글 추가:
+
+현재:
+  <div style="display:flex;gap:8px;align-items:center">
+    <input id="invSearch" ...>
+    <select id="invFilter" ...>
+    <select id="invSort" ...>
+    <span id="invCount" ...></span>
+  </div>
+
+변경 후:
+  <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+    <input id="invSearch" style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit;color:var(--text);outline:none" placeholder="품목명 검색..." oninput="renderInventory()">
+    <div class="inv-view-toggle">
+      <button class="inv-view-btn active" id="viewCard" onclick="_setInvView('card')">카드</button>
+      <button class="inv-view-btn" id="viewList" onclick="_setInvView('list')">목록</button>
+    </div>
+    <select id="invFilter" onchange="renderInventory()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;color:var(--text);outline:none">
+      <option value="all">전체</option>
+      <option value="low_stock">부족만</option>
+    </select>
+    <select id="invSort" onchange="renderInventory()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;color:var(--text);outline:none">
+      <option value="updated">업데이트순</option>
+      <option value="name">이름순</option>
+      <option value="qty_asc">수량 적은순</option>
+      <option value="qty_desc">수량 많은순</option>
+      <option value="vendor">거래처순</option>
+    </select>
+    <span id="invCount" style="font-size:12px;color:var(--muted);white-space:nowrap"></span>
+  </div>
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 3: JavaScript — 뷰 전환 + 목록뷰 렌더링
+━━━━━━━━━━━━━━━━━━━━━
+
+[3-A] 전역 변수:
+
+let _invView = localStorage.getItem('zk_inv_view') || 'card';
+
+[3-B] 뷰 전환 함수:
+
+function _setInvView(view) {
+  _invView = view;
+  localStorage.setItem('zk_inv_view', view);
+  document.getElementById('viewCard').classList.toggle('active', view === 'card');
+  document.getElementById('viewList').classList.toggle('active', view === 'list');
+  renderInventory();
+}
+
+[3-C] renderInventory 함수 수정 — 마지막 렌더링 부분에 뷰 분기 추가
+
+현재 renderInventory 함수의 맨 마지막 렌더링 부분 (if (!items.length) 이후, 거래처 그룹 포함):
+
+기존:
+  if (!items.length) { grid.innerHTML = '<div class="no-item">품목 없음</div>'; return; }
+  // 거래처순 정렬이면 그룹으로 렌더링
+  if (sort === 'vendor') {
+    ...
+  } else {
+    grid.classList.add('inv-grid');
+    grid.innerHTML = items.map(it => {
+      ...
+      return _renderInvCard(it, qty, tgt, cls, vName);
+    }).join('');
+  }
+
+변경 후:
+  if (!items.length) { grid.innerHTML = '<div class="no-item">품목 없음</div>'; return; }
+
+  // 목록뷰
+  if (_invView === 'list') {
+    grid.classList.remove('inv-grid');
+    const vOpts = _vendors.map(v => `<option value="${v.vendor_id}">${v.vendor_name}</option>`).join('');
+    grid.innerHTML = `<div class="inv-table-wrap"><table class="inv-table">
+      <thead><tr>
+        <th>품목명</th><th style="text-align:right">수량</th><th>단위</th><th style="text-align:right">목표</th><th style="text-align:right">최소</th><th>거래처</th><th></th>
+      </tr></thead>
+      <tbody>${items.map(it => {
+        const qty = Number(it.current_qty), tgt = Number(it.target_qty);
+        const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+        return `<tr class="${cls}" id="tr_${it.item_id}">
+          <td class="inv-t-name"><input class="inv-t-input" value="${it.item_name}" data-id="${it.item_id}" data-field="item_name" onchange="_saveListField(this)"></td>
+          <td class="inv-t-qty ${cls}"><input class="inv-t-input" type="number" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)" style="color:inherit"></td>
+          <td><input class="inv-t-input" value="${it.unit||''}" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:40px;text-align:center"></td>
+          <td><input class="inv-t-input" type="number" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)" style="width:45px;text-align:right"></td>
+          <td><input class="inv-t-input" type="number" value="${Number(it.min_stock||0)}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)" style="width:45px;text-align:right"></td>
+          <td><select class="inv-t-select" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)">
+            <option value="">-</option>${vOpts.replace(`value="${it.vendor_id}"`, `value="${it.vendor_id}" selected`)}
+          </select></td>
+          <td><button style="border:none;background:none;cursor:pointer;font-size:14px;padding:2px" onclick="_deleteListItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">🗑</button></td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table></div>`;
+    return;
+  }
+
+  // 카드뷰 (기존)
+  // 거래처순 정렬이면 그룹으로 렌더링
+  if (sort === 'vendor') {
+    const groups = {};
+    items.forEach(it => {
+      const vName = _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || '미지정';
+      if (!groups[vName]) groups[vName] = [];
+      groups[vName].push(it);
+    });
+    const vendorOpts = _vendors.map(v => `<option value="${v.vendor_id}">${v.vendor_name}</option>`).join('');
+    grid.innerHTML = Object.entries(groups).map(([vName, groupItems]) => {
+      const cards = groupItems.map(it => {
+        const qty = Number(it.current_qty), tgt = Number(it.target_qty);
+        const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+        const vN = _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || '';
+        return _renderInvCard(it, qty, tgt, cls, vN);
+      }).join('');
+      return `<div class="inv-vendor-group">
+        <div class="inv-vendor-group-hdr">
+          <span>${vName} (${groupItems.length})</span>
+          <select onchange="_batchChangeVendor('${vName}', this.value, [${groupItems.map(i=>i.item_id).join(',')}])">
+            <option value="">거래처 변경</option>
+            ${vendorOpts}
+          </select>
+        </div>
+        <div class="inv-vendor-group-body">${cards}</div>
+      </div>`;
+    }).join('');
+    grid.classList.remove('inv-grid');
+  } else {
+    grid.classList.add('inv-grid');
+    grid.innerHTML = items.map(it => {
+      const qty = Number(it.current_qty), tgt = Number(it.target_qty);
+      const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+      const vName = _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || '';
+      return _renderInvCard(it, qty, tgt, cls, vName);
+    }).join('');
+  }
+
+[3-D] 목록뷰 인라인 저장 함수:
+
+async function _saveListField(el) {
+  const id = parseInt(el.dataset.id);
+  const field = el.dataset.field;
+  let value = el.value;
+
+  if (field === 'current_qty' || field === 'target_qty' || field === 'min_stock') {
+    value = parseFloat(value) || 0;
+  } else if (field === 'vendor_id') {
+    value = value ? parseInt(value) : null;
+  } else {
+    value = value.trim();
+    if (field === 'item_name' && !value) { showToast('품목명을 입력해 주세요'); renderInventory(); return; }
+  }
+
+  const patch = { [field]: value, updated_at: new Date().toISOString() };
+  await db.from('items').update(patch).eq('item_id', id);
+
+  const item = _items.find(i => i.item_id === id);
+  if (item) item[field] = value;
+
+  // 행 색상 업데이트
+  const row = document.getElementById('tr_' + id);
+  if (row) {
+    const qty = Number(item?.current_qty || 0);
+    const tgt = Number(item?.target_qty || 0);
+    row.className = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+  }
+}
+
+async function _deleteListItem(id, name) {
+  if (!confirm(`${name}을(를) 삭제하시겠습니까?`)) return;
+  await db.from('items').delete().eq('item_id', id);
+  _items = _items.filter(i => i.item_id !== id);
+  renderInventory();
+  showToast('🗑 삭제됨');
+}
+
+[3-E] 초기화 시 뷰 토글 상태 반영
+
+init 함수 마지막 (await refreshItems() 이후)에 추가:
+    // 뷰 토글 초기 상태
+    document.getElementById('viewCard')?.classList.toggle('active', _invView === 'card');
+    document.getElementById('viewList')?.classList.toggle('active', _invView === 'list');
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 탭 이름 "입력" → "홈" 변경
+□ 재고 탭 — [카드] [목록] 토글 버튼 표시
+□ 목록뷰 — 전체 품목 테이블로 표시
+□ 셀 탭 → 직접 수정 → blur 시 자동 저장
+□ 거래처 드롭다운 작동
+□ 목표/최소 값 없는 품목 빠르게 식별
+□ 부족 행 배경색 표시
+□ 삭제 버튼 작동
+□ 뷰 전환 → localStorage 저장 → 새로고침 유지
+□ 카드뷰 기존 기능 정상 작동
