@@ -2773,7 +2773,13 @@ async function renderOrder() {
               ${vendorDisplay}
             </div>
             <div class="ord-item-right">
-              <span class="ord-item-qty">현재 ${curQty}${r.unit} / 발주 <strong>${r.qty}${r.unit}</strong></span>
+              <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                <span style="font-size:12px;color:var(--dim)">현재 ${curQty}${r.unit} / 발주</span>
+                <button class="ord-stepper-btn" onclick="_updatePendingQty(${r.id},-1)">−</button>
+                <input class="ord-stepper-val" id="pqty_${r.id}" type="number" value="${r.qty}" style="width:40px" onchange="_savePendingQty(${r.id})">
+                <button class="ord-stepper-btn" onclick="_updatePendingQty(${r.id},1)">+</button>
+                <span style="font-size:12px;color:var(--dim)">${r.unit}</span>
+              </div>
               <div class="ord-status-btns">
                 <button class="ord-btn-done" onclick="completeOrder(${r.id})">입고 완료</button>
                 <button class="ord-btn-cancel" onclick="cancelOrder(${r.id})">취소</button>
@@ -2990,6 +2996,24 @@ function _ordStep(inputId, delta) {
   inp.value = val;
 }
 
+function _updatePendingQty(orderId, delta) {
+  const inp = document.getElementById('pqty_' + orderId);
+  if (!inp) return;
+  let val = parseInt(inp.value) || 0;
+  val = Math.max(0, val + delta);
+  inp.value = val;
+  _savePendingQty(orderId);
+}
+
+async function _savePendingQty(orderId) {
+  const inp = document.getElementById('pqty_' + orderId);
+  if (!inp) return;
+  const qty = parseInt(inp.value) || 0;
+  await db.from('order_requests').update({ qty: qty, updated_at: new Date().toISOString() }).eq('id', orderId);
+  const r = _orderRequests.find(x => x.id === orderId);
+  if (r) r.qty = qty;
+}
+
 function _copyPendingOrder(vendorName) {
   const items = _orderRequests.filter(r => {
     const vn = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
@@ -3000,8 +3024,7 @@ function _copyPendingOrder(vendorName) {
   if (!lines.length) { showToast('발주 품목이 없습니다'); return; }
   const text = `[발주]\n${lines.join('\n')}`;
   navigator.clipboard.writeText(text).then(() => {
-    showToast('발주 내용 복사됨 — 카카오톡에 붙여넣기 해주세요', 3000);
-    setTimeout(() => { try { window.open('kakaotalk://'); } catch(e) {} }, 800);
+    showToast('📋 발주 내용 복사됨', 2000);
   }).catch(() => {
     showToast('복사 실패');
   });
@@ -3021,8 +3044,7 @@ function _copyVendorOrder(vendorName, itemIds) {
   if (!lines.length) { showToast('발주할 품목이 없습니다'); return; }
   const text = `[발주]\n${lines.join('\n')}`;
   navigator.clipboard.writeText(text).then(() => {
-    showToast('발주 내용 복사됨 — 카카오톡에 붙여넣기 해주세요', 3000);
-    setTimeout(() => { try { window.open('kakaotalk://'); } catch(e) {} }, 800);
+    showToast('📋 발주 내용 복사됨', 2000);
   }).catch(() => {
     showToast('복사 실패');
   });

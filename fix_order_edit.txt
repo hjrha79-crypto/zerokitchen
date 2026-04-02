@@ -1,0 +1,94 @@
+ZeroKitchen index.html 수정 2건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: 진행 중 발주 — 수량 수정 가능하게 (스테퍼)
+━━━━━━━━━━━━━━━━━━━━━
+
+renderOrder 함수 Section A에서 각 품목의 수량 표시 부분 수정.
+
+현재:
+              <span class="ord-item-qty">현재 ${curQty}${r.unit} / 발주 <strong>${r.qty}${r.unit}</strong></span>
+              <div class="ord-status-btns">
+                <button class="ord-btn-done" onclick="completeOrder(${r.id})">입고 완료</button>
+                <button class="ord-btn-cancel" onclick="cancelOrder(${r.id})">취소</button>
+              </div>
+
+변경 후:
+              <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                <span style="font-size:12px;color:var(--dim)">현재 ${curQty}${r.unit} / 발주</span>
+                <button class="ord-stepper-btn" onclick="_updatePendingQty(${r.id},-1)">−</button>
+                <input class="ord-stepper-val" id="pqty_${r.id}" type="number" value="${r.qty}" style="width:40px" onchange="_savePendingQty(${r.id})">
+                <button class="ord-stepper-btn" onclick="_updatePendingQty(${r.id},1)">+</button>
+                <span style="font-size:12px;color:var(--dim)">${r.unit}</span>
+              </div>
+              <div class="ord-status-btns">
+                <button class="ord-btn-done" onclick="completeOrder(${r.id})">입고 완료</button>
+                <button class="ord-btn-cancel" onclick="cancelOrder(${r.id})">취소</button>
+              </div>
+
+JavaScript 추가:
+
+function _updatePendingQty(orderId, delta) {
+  const inp = document.getElementById('pqty_' + orderId);
+  if (!inp) return;
+  let val = parseInt(inp.value) || 0;
+  val = Math.max(0, val + delta);
+  inp.value = val;
+  _savePendingQty(orderId);
+}
+
+async function _savePendingQty(orderId) {
+  const inp = document.getElementById('pqty_' + orderId);
+  if (!inp) return;
+  const qty = parseInt(inp.value) || 0;
+  await db.from('order_requests').update({ qty: qty, updated_at: new Date().toISOString() }).eq('id', orderId);
+  const r = _orderRequests.find(x => x.id === orderId);
+  if (r) r.qty = qty;
+}
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: 복사 버튼 — 카톡 대신 일반 복사 (거래처 채널에 맞게)
+━━━━━━━━━━━━━━━━━━━━━
+
+_copyPendingOrder 함수 수정 — 카카오톡 열기 제거, 일반 복사로 변경:
+
+현재 _copyPendingOrder:
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('발주 내용 복사됨 — 카카오톡에 붙여넣기 해주세요', 3000);
+    setTimeout(() => { try { window.open('kakaotalk://'); } catch(e) {} }, 800);
+  }).catch(() => {
+    showToast('복사 실패');
+  });
+
+변경 후:
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('📋 발주 내용 복사됨', 2000);
+  }).catch(() => {
+    showToast('복사 실패');
+  });
+
+_copyVendorOrder 함수도 동일하게 수정 (추천 섹션 복사):
+
+현재:
+    showToast('발주 내용 복사됨 — 카카오톡에 붙여넣기 해주세요', 3000);
+    setTimeout(() => { try { window.open('kakaotalk://'); } catch(e) {} }, 800);
+
+변경 후:
+    showToast('📋 발주 내용 복사됨', 2000);
+
+그리고 버튼 텍스트 변경:
+
+진행 중 발주 복사 버튼:
+현재: 📋 ${vName} 발주 복사
+변경: 📋 ${vName} 발주 복사
+
+이건 그대로 유지 (이미 적절)
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 진행 중 발주 — [-] [수량] [+] 스테퍼 표시
+□ 수량 변경 → DB 즉시 저장
+□ 복사 버튼 → 클립보드 복사만 (카톡 자동 열기 없음)
+□ 복사된 텍스트 → "[발주]\n루꼴라 2kg\n핫소스 2병"
