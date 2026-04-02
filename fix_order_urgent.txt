@@ -1,0 +1,121 @@
+ZeroKitchen index.html 수정 3건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: bigint "null" 오류 — _startOrderSession 방어
+━━━━━━━━━━━━━━━━━━━━━
+
+_startOrderSession 함수 교체:
+
+async function _startOrderSession() {
+  if (!SID) return;  // store_id 없으면 스킵
+  try {
+    _sessionStartedAt = new Date();
+    const { data, error } = await db.from('order_sessions').insert({
+      store_id: SID,
+      order_date: new Date().toISOString().slice(0, 10),
+      started_at: _sessionStartedAt.toISOString()
+    }).select('id').single();
+    if (!error && data) _currentSessionId = data.id;
+  } catch(e) {
+    console.warn('세션 생성 실패:', e.message);
+    _currentSessionId = null;
+  }
+}
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: "진행 중인 발주가 없습니다" 섹션 제거
+━━━━━━━━━━━━━━━━━━━━━
+
+renderOrder 함수에서 Section A 렌더링 전체 수정.
+
+현재 Section A 부분 (// ── Section A 부터 html += `</div>`; 까지) 전체 교체:
+
+    // ── Section A: 진행 중 발주 (order_requests pending) ──
+    if (_orderRequests.length) {
+      html += `<div class="ord-section">`;
+      html += `<div class="ord-section-title"><span class="ord-icon">📋</span> 진행 중 발주 <span class="ord-pending-badge">${_orderRequests.length}</span></div>`;
+
+      const grpMap = new Map();
+      for (const r of _orderRequests) {
+        const vName = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
+        if (!grpMap.has(vName)) grpMap.set(vName, []);
+        grpMap.get(vName).push(r);
+      }
+
+      for (const [vName, rows] of grpMap) {
+        html += `
+        <div class="ord-vendor-group">
+          <div class="ord-vendor-hdr">
+            <span class="ord-vendor-name">${vName}</span>
+          </div>
+          ${rows.map(r => {
+            const item = _items.find(it => it.item_id === r.item_id);
+            const curQty = item ? Number(item.current_qty) : '?';
+            const rVendor = _vendors.find(v => v.vendor_id === r.vendor_id);
+            const vendorDisplay = rVendor
+              ? `<button class="ord-vendor-assign" data-vendor-change="${r.id}" data-item-name="${r.item_name}" data-current-vendor="${rVendor.vendor_name}">${rVendor.vendor_name}</button>`
+              : `<button class="ord-vendor-assign" data-vendor-assign="${r.id}">거래처 지정</button>`;
+            return `
+          <div class="ord-item-row">
+            <div>
+              <span class="ord-item-name" data-editable data-order-id="${r.id}">${r.item_name}</span>
+              ${vendorDisplay}
+            </div>
+            <div class="ord-item-right">
+              <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                <span style="font-size:12px;color:var(--dim)">현재 ${curQty}${r.unit} / 발주</span>
+                <button class="ord-stepper-btn" onclick="_updatePendingQty(${r.id},-1)">−</button>
+                <input class="ord-stepper-val" id="pqty_${r.id}" type="number" value="${r.qty}" style="width:40px" onchange="_savePendingQty(${r.id})">
+                <button class="ord-stepper-btn" onclick="_updatePendingQty(${r.id},1)">+</button>
+                <span style="font-size:12px;color:var(--dim)">${r.unit}</span>
+              </div>
+              <div class="ord-status-btns">
+                <button class="ord-btn-done" onclick="completeOrder(${r.id})">입고 완료</button>
+                <button class="ord-btn-cancel" onclick="cancelOrder(${r.id})">취소</button>
+              </div>
+            </div>
+          </div>`;
+          }).join('')}
+          <div style="padding:8px 12px">
+            <button class="ord-btn-kakao" style="width:100%;padding:10px;border-radius:8px;font-size:13px" onclick="_copyPendingOrder('${vName.replace(/'/g,"\\'")}')">📋 ${vName} 발주 복사</button>
+          </div>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 3: 이월 데이터 정리 + 이월 2회 초과 처리 개선
+━━━━━━━━━━━━━━━━━━━━━
+
+[3-A] 기존 테스트 이월 데이터 정리 — Supabase SQL Editor에서 실행:
+
+DELETE FROM daily_orders WHERE status = 'deferred';
+
+이러면 이전 테스트로 쌓인 이월 데이터가 깨끗하게 제거됨.
+
+[3-B] _deferAllOrders 함수에서 이월 2회 초과 시 UX 개선:
+
+현재:
+  let msg = `${count}개 품목 내일로 이월됨`;
+  if (blocked > 0) msg += ` (${blocked}개는 이월 2회 초과로 제외)`;
+
+변경 후:
+  let msg = '';
+  if (count > 0) msg = `${count}개 품목 내일로 이월됨`;
+  if (blocked > 0) {
+    if (count === 0) msg = `이월 불가 — ${blocked}개 품목이 이미 2회 이월되었습니다. 발주를 확인해 주세요.`;
+    else msg += ` (${blocked}개는 이월 제한 초과)`;
+  }
+  if (!msg) msg = '이월할 품목이 없습니다';
+
+[3-C] 추천 카드에 이월 횟수 표시 추가 — 이미 구현됨 (defer_tag). OK.
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 발주 탭 진입 → bigint 오류 안 남
+□ 진행 중 발주 없으면 섹션 안 보임
+□ Supabase에서 deferred 삭제 후 → 이월 정상 작동
+□ 이월 2회 초과 시 명확한 안내 메시지

@@ -2745,12 +2745,10 @@ async function renderOrder() {
     let html = '';
 
     // ── Section A: 진행 중 발주 (order_requests pending) ──
-    html += `<div class="ord-section">`;
-    html += `<div class="ord-section-title"><span class="ord-icon">📋</span> 진행 중 발주`;
-    if (_orderRequests.length) html += ` <span class="ord-pending-badge">${_orderRequests.length}</span>`;
-    html += `</div>`;
-
     if (_orderRequests.length) {
+      html += `<div class="ord-section">`;
+      html += `<div class="ord-section-title"><span class="ord-icon">📋</span> 진행 중 발주 <span class="ord-pending-badge">${_orderRequests.length}</span></div>`;
+
       const grpMap = new Map();
       for (const r of _orderRequests) {
         const vName = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
@@ -2797,10 +2795,6 @@ async function renderOrder() {
           </div>
         </div>`;
       }
-    }
-    if (!_orderRequests.length) {
-      html = ''; // 진행 중 없으면 섹션 자체 제거
-    } else {
       html += `</div>`;
     }
 
@@ -3167,8 +3161,13 @@ async function _deferAllOrders() {
     count++;
   }
 
-  let msg = `${count}개 품목 내일로 이월됨`;
-  if (blocked > 0) msg += ` (${blocked}개는 이월 2회 초과로 제외)`;
+  let msg = '';
+  if (count > 0) msg = `${count}개 품목 내일로 이월됨`;
+  if (blocked > 0) {
+    if (count === 0) msg = `이월 불가 — ${blocked}개 품목이 이미 2회 이월되었습니다. 발주를 확인해 주세요.`;
+    else msg += ` (${blocked}개는 이월 제한 초과)`;
+  }
+  if (!msg) msg = '이월할 품목이 없습니다';
   showToast(msg, 3000);
   renderOrder();
 }
@@ -3626,6 +3625,7 @@ async function switchTab(n, btn) {
 }
 
 async function _startOrderSession() {
+  if (!SID) return;  // store_id 없으면 스킵
   try {
     _sessionStartedAt = new Date();
     const { data, error } = await db.from('order_sessions').insert({
@@ -3636,6 +3636,7 @@ async function _startOrderSession() {
     if (!error && data) _currentSessionId = data.id;
   } catch(e) {
     console.warn('세션 생성 실패:', e.message);
+    _currentSessionId = null;
   }
 }
 
