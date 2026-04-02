@@ -1,0 +1,254 @@
+ZeroKitchen index.html 수정 — 파싱 대량 테스트
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+테스트 탭(개발자 모드)에 자동 테스트 기능 추가.
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: 테스트 탭에 자동 테스트 버튼 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+테스트 패널 HTML (tab-test) 안에, 기존 템플릿 카드 위에 추가:
+
+현재 테스트 탭:
+<div id="tab-test" class="tab">
+  <div class="card">
+    <div class="card-title">템플릿</div>
+
+변경 후:
+<div id="tab-test" class="tab">
+  <div class="card">
+    <div class="card-title">파싱 자동 테스트</div>
+    <button class="btn-run" onclick="_runParseTest()" id="parseTestBtn">▶ 1000개 테스트 실행</button>
+    <div id="parseTestResult" style="margin-top:10px;font-size:12px;max-height:400px;overflow-y:auto"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">템플릿</div>
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: JavaScript — 테스트 엔진
+━━━━━━━━━━━━━━━━━━━━━
+
+파일 하단 (setTimeout(()=>init(), 500); 바로 위)에 추가:
+
+// ═══════════════════════════════════════
+// 파싱 대량 테스트 엔진
+// ═══════════════════════════════════════
+
+const _TEST_SEEDS = [
+  '까르보나라 소스 세 봉지',
+  '생크림 1통 차감',
+  '치즈 12봉',
+  '치즈 2봉지 추가',
+  '치즈 3봉 양파 2kg 우유 4박스 입고',
+  '치즈 3봉 입고',
+  '치즈 8봉지 브로컬리 4',
+  '치즈 여덟 봉지',
+  '칠리소스 두 봉지 토마토 비프 소스 한 봉지 알리오 올리오 소스 두 봉지',
+  '토마토 소스 8봉지 까르보나라 소스 다섯 개 칠리소스 두 개',
+  '토마토 소스 세 봉지 까르보나라 소스 4봉지 칠리소스 두 봉지',
+  '토마토소스 2개 차감',
+  '토마토소스 3봉 추가',
+  '토마토소스 8개 추가',
+  '트러플오일 1병 입고',
+  '파마산 치즈 200g',
+  '현미 0',
+  '현미 없음',
+  '현미 재고 없음',
+  '옥수수 가루 한 봉지',
+  '알리오 올리오 소스 세 봉지 추가',
+  '스파게티니 네 개 혼다시 한 봉지 레드페퍼 세 봉지',
+  '피자 삼발이 세 봉지 멸균우유 세 박스 올리브유 두 개',
+  '치즈 4봉 치즈 4봉',
+  '토마토 소스네 봉지',
+  '현미 1키로',
+  '누룽지 두 봉지',
+  '칠리소스 세 봉지',
+  '피자 소스 4캔 블랙 올리브 네 캔',
+  '우유 3박스',
+];
+
+// 변형 생성기
+function _generateVariations(seed) {
+  const variations = [seed]; // 원본
+
+  // 1. 띄어쓰기 변형
+  variations.push(seed.replace(/\s+/g, ''));  // 전부 붙임
+  variations.push(seed.replace(/(\d)([가-힣])/g, '$1 $2'));  // 숫자+한글 분리
+
+  // 2. 단위 변형
+  variations.push(seed.replace(/봉지/g, '봉'));
+  variations.push(seed.replace(/봉/g, '봉지'));
+
+  // 3. 숫자 표현 변형
+  const numMap = {'1':'한','2':'두','3':'세','4':'네','5':'다섯','6':'여섯','7':'일곱','8':'여덟'};
+  const korMap = {'한':1,'두':2,'세':3,'네':4,'다섯':5,'여섯':6,'일곱':7,'여덟':8};
+  let v = seed;
+  for (const [n, k] of Object.entries(numMap)) {
+    v = v.replace(new RegExp('(^|\\s)' + n + '(\\s*(?:개|봉지?|박스|팩|캔|통|병|kg|g))', 'g'), '$1' + k + '$2');
+  }
+  if (v !== seed) variations.push(v);
+
+  v = seed;
+  for (const [k, n] of Object.entries(korMap)) {
+    v = v.replace(new RegExp('(^|\\s)' + k + '(\\s)', 'g'), '$1' + n + '$2');
+  }
+  if (v !== seed) variations.push(v);
+
+  // 4. 조사 추가
+  variations.push(seed.replace(/(\s)(\d+)/g, '$1$2개'));
+
+  // 5. 음성 오타 변형
+  const typos = {
+    '브로콜리':'브로컬리','칠리소스':'첼리소스','비프':'피프',
+    '토마토':'도마도','까르보나라':'까르보나나','알리오':'알리우',
+    '파마산':'파미산','올리브':'올리부','스파게티':'스파게디'
+  };
+  for (const [correct, typo] of Object.entries(typos)) {
+    if (seed.includes(correct)) {
+      variations.push(seed.replace(correct, typo));
+    }
+  }
+
+  // 6. 액션 변형
+  if (!seed.includes('추가') && !seed.includes('입고') && !seed.includes('차감')) {
+    variations.push(seed + ' 입고');
+    variations.push(seed + ' 추가');
+  }
+  if (seed.includes('추가')) {
+    variations.push(seed.replace('추가', '입고'));
+  }
+  if (seed.includes('입고')) {
+    variations.push(seed.replace('입고', '추가'));
+  }
+
+  // 7. 쉼표/마침표 추가
+  variations.push(seed + '.');
+  variations.push(seed.replace(/\s([가-힣]{2,})\s/g, ', $1 '));
+
+  return [...new Set(variations)]; // 중복 제거
+}
+
+function _runParseTest() {
+  const btn = document.getElementById('parseTestBtn');
+  const result = document.getElementById('parseTestResult');
+  btn.disabled = true;
+  btn.textContent = '테스트 중...';
+  result.innerHTML = '';
+
+  setTimeout(() => {
+    let allCases = [];
+    // 시드에서 변형 생성
+    for (const seed of _TEST_SEEDS) {
+      const vars = _generateVariations(seed);
+      for (const v of vars) {
+        allCases.push({ input: v, seed: seed });
+      }
+    }
+
+    // 1000개까지 추가 변형
+    while (allCases.length < 1000) {
+      const seed = _TEST_SEEDS[Math.floor(Math.random() * _TEST_SEEDS.length)];
+      const vars = _generateVariations(seed);
+      const picked = vars[Math.floor(Math.random() * vars.length)];
+      // 랜덤 조합: 2~3개 품목 합치기
+      if (Math.random() > 0.5) {
+        const seed2 = _TEST_SEEDS[Math.floor(Math.random() * _TEST_SEEDS.length)];
+        allCases.push({ input: picked + ' ' + seed2, seed: picked + ' + ' + seed2 });
+      } else {
+        allCases.push({ input: picked, seed: seed });
+      }
+    }
+    allCases = allCases.slice(0, 1000);
+
+    // 테스트 실행
+    let pass = 0, fail = 0;
+    const failures = [];
+
+    for (const tc of allCases) {
+      try {
+        const r = ruleEngine(tc.input);
+        // 실패 기준:
+        // 1. 결과 0개 (파싱 실패)
+        // 2. needsFallback인데 결과도 없음
+        // 3. 품목명이 1글자
+        // 4. 품목명이 단위명
+        // 5. 수량이 음수
+        let failed = false;
+        let reason = '';
+
+        if (!r.results.length && r.needsFallback) {
+          failed = true;
+          reason = '파싱 실패 (결과 0개)';
+        }
+
+        for (const item of r.results) {
+          if (item.item_name.length <= 1 && !/\d/.test(item.item_name)) {
+            failed = true;
+            reason = `품목명 1글자: "${item.item_name}"`;
+          }
+          if (_UNITS.includes(item.item_name.replace(/\s/g, ''))) {
+            failed = true;
+            reason = `단위명이 품목: "${item.item_name}"`;
+          }
+          if (item.quantity < 0) {
+            failed = true;
+            reason = `음수 수량: ${item.item_name} ${item.quantity}`;
+          }
+        }
+
+        if (failed) {
+          fail++;
+          failures.push({
+            input: tc.input,
+            seed: tc.seed,
+            reason: reason,
+            result: r.results.map(i => `${i.item_name} ${i.quantity}${i.unit} (${i.action})`).join(' / ')
+          });
+        } else {
+          pass++;
+        }
+      } catch(e) {
+        fail++;
+        failures.push({
+          input: tc.input,
+          seed: tc.seed,
+          reason: '예외: ' + e.message,
+          result: ''
+        });
+      }
+    }
+
+    // 결과 표시
+    const passRate = ((pass / allCases.length) * 100).toFixed(1);
+    let html = `<div style="padding:10px;background:${fail === 0 ? 'var(--accent-lt)' : 'rgba(217,48,37,.08)'};border-radius:8px;margin-bottom:10px">
+      <strong>총 ${allCases.length}개 | ✅ ${pass} (${passRate}%) | ❌ ${fail}</strong>
+    </div>`;
+
+    if (failures.length) {
+      // 패턴별 그룹핑
+      const reasonMap = {};
+      for (const f of failures) {
+        if (!reasonMap[f.reason]) reasonMap[f.reason] = [];
+        reasonMap[f.reason].push(f);
+      }
+
+      html += `<div style="font-weight:700;margin-bottom:8px">실패 패턴 (${Object.keys(reasonMap).length}종)</div>`;
+      for (const [reason, items] of Object.entries(reasonMap)) {
+        html += `<div style="margin-bottom:12px;padding:8px;background:var(--surface);border:1px solid var(--border);border-radius:6px">
+          <div style="font-weight:600;color:var(--red);margin-bottom:4px">${reason} (${items.length}건)</div>`;
+        // 최대 5개만 표시
+        for (const f of items.slice(0, 5)) {
+          html += `<div style="font-size:11px;color:var(--dim);margin:2px 0">
+            입력: "${f.input}"<br>결과: ${f.result || '없음'}
+          </div>`;
+        }
+        if (items.length > 5) html += `<div style="font-size:11px;color:var(--muted)">... 외 ${items.length - 5}건</div>`;
+        html += `</div>`;
+      }
+    }
+
+    result.innerHTML = html;
+    btn.disabled = false;
+    btn.textContent = '▶ 1000개 테스트 실행';
+  }, 100);
+}
