@@ -542,6 +542,7 @@ let _dupOrigHTML = '';
 let _stores = [];      // 전체 매장 목록
 let _currentSessionId = null;
 let _sessionStartedAt = null;
+let _dismissedItemIds = new Set();  // 이번 세션에서 취소/이월한 품목
 
 /*  order_requests 테이블 (Supabase SQL Editor에서 실행):
     CREATE TABLE IF NOT EXISTS order_requests (
@@ -617,6 +618,7 @@ async function _switchStore(storeId) {
   _items = [];
   _vendors = [];
   _orderRequests = [];
+  _dismissedItemIds = new Set();
   await refreshItems();
 
   // 현재 탭 재렌더링
@@ -2678,7 +2680,8 @@ async function renderOrder() {
       (Number(it.current_qty) <= Number(it.min_stock || 0) ||
        Number(it.current_qty) < Number(it.target_qty) ||
        Number(it.current_qty) <= 0) &&
-      !pendingItemIds.has(it.item_id)
+      !pendingItemIds.has(it.item_id) &&
+      !_dismissedItemIds.has(it.item_id)
     );
     const suggestItems = [];
     for (const it of needItems) {
@@ -2794,10 +2797,12 @@ async function renderOrder() {
           </div>
         </div>`;
       }
-    } else {
-      html += `<div class="ord-empty">진행 중인 발주가 없습니다</div>`;
     }
-    html += `</div>`;
+    if (!_orderRequests.length) {
+      html = ''; // 진행 중 없으면 섹션 자체 제거
+    } else {
+      html += `</div>`;
+    }
 
     // ── Section B: 오늘의 발주 추천 ──
     if (suggestItems.length) {
@@ -3022,7 +3027,14 @@ function _copyPendingOrder(vendorName) {
     return vn === vendorName;
   });
   if (!items.length) { showToast('발주 품목이 없습니다'); return; }
-  const lines = items.filter(r => Number(r.qty) > 0).map(r => `${r.item_name} ${r.qty}${r.unit}`);
+  const lines = [];
+  for (const r of items) {
+    // DOM input에서 최신 수량 읽기
+    const inp = document.getElementById('pqty_' + r.id);
+    const qty = inp ? parseInt(inp.value) || 0 : Number(r.qty);
+    if (qty <= 0) continue;
+    lines.push(`${r.item_name} ${qty}${r.unit}`);
+  }
   if (!lines.length) { showToast('발주 품목이 없습니다'); return; }
   const text = `[발주]\n${lines.join('\n')}`;
   navigator.clipboard.writeText(text).then(() => {
@@ -3054,6 +3066,9 @@ function _copyVendorOrder(vendorName, itemIds) {
 
 async function _confirmAllOrders() {
   const inputs = document.querySelectorAll('.ord-stepper-val');
+  const itemCount = [...inputs].filter(inp => (parseInt(inp.value) || 0) > 0).length;
+  if (!itemCount) { showToast('발주할 품목이 없습니다'); return; }
+  if (!confirm(`${itemCount}개 품목을 발주하시겠습니까?`)) return;
   let count = 0;
   const today = new Date().toISOString().slice(0, 10);
 
@@ -3087,7 +3102,7 @@ async function _confirmAllOrders() {
     // 이월 상태 정리
     await db.from('daily_orders')
       .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-      .eq('item_id', itemId).eq('status', 'deferred');
+      .eq('store_id', SID).eq('item_id', itemId).eq('status', 'deferred');
 
     count++;
   }
@@ -3118,7 +3133,7 @@ async function _deferAllOrders() {
     // 기존 이월 횟수 확인
     const { data: existingDefer } = await db.from('daily_orders')
       .select('defer_count')
-      .eq('item_id', itemId).eq('status', 'deferred')
+      .eq('store_id', SID).eq('item_id', itemId).eq('status', 'deferred')
       .order('created_at', { ascending: false })
       .limit(1);
     const currentDefers = existingDefer?.[0]?.defer_count || 0;
@@ -3137,7 +3152,7 @@ async function _deferAllOrders() {
           order_date: today,
           updated_at: new Date().toISOString()
         })
-        .eq('item_id', itemId).eq('status', 'deferred');
+        .eq('store_id', SID).eq('item_id', itemId).eq('status', 'deferred');
     } else {
       await db.from('daily_orders').insert({
         store_id: SID, order_date: today,
@@ -3148,6 +3163,7 @@ async function _deferAllOrders() {
         defer_count: 1
       });
     }
+    _dismissedItemIds.add(itemId);
     count++;
   }
 
@@ -3161,6 +3177,13 @@ async function _deferAllOrders() {
 async function completeOrder(orderId) {
   const row = _orderRequests.find(r => r.id === orderId);
   if (!row) return;
+  // 스테퍼에서 수정된 최신 수량 반영
+  const qtyInp = document.getElementById('pqty_' + orderId);
+  if (qtyInp) {
+    const updatedQty = parseInt(qtyInp.value) || 0;
+    if (updatedQty > 0) row.qty = updatedQty;
+  }
+  if (!confirm(`${row.item_name} ${row.qty}${row.unit} 입고 완료하시겠습니까?`)) return;
   // status 업데이트
   await db.from('order_requests')
     .update({ status: 'done', updated_at: new Date().toISOString() })
@@ -3188,9 +3211,11 @@ async function completeOrder(orderId) {
 async function cancelOrder(orderId) {
   const row = _orderRequests.find(r => r.id === orderId);
   if (!row) return;
+  if (!confirm(`${row.item_name} ${row.qty}${row.unit} 발주를 취소하시겠습니까?`)) return;
   await db.from('order_requests')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })
     .eq('id', orderId);
+  _dismissedItemIds.add(row.item_id);
   showToast(`${row.item_name} 발주 취소됨`);
   renderOrder();
 }

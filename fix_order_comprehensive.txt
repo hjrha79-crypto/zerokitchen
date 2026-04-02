@@ -1,0 +1,248 @@
+ZeroKitchen index.html 종합 수정 10건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+버그 1: 발주 취소 후 추천에 다시 나타남
+버그 2: 이월 후 화면 변화 없음
+━━━━━━━━━━━━━━━━━━━━━
+
+원인 동일: 취소/이월해도 품목이 여전히 재고 부족이라 suggestItems에 다시 포함됨.
+해결: 세션 내 "무시 목록"으로 추적.
+
+[1-A] 전역 변수 추가:
+
+let _dismissedItemIds = new Set();  // 이번 세션에서 취소/이월한 품목
+
+[1-B] renderOrder 함수의 needItems 필터에 조건 추가:
+
+현재:
+    const needItems = _items.filter(it =>
+      (Number(it.current_qty) <= Number(it.min_stock || 0) ||
+       Number(it.current_qty) < Number(it.target_qty) ||
+       Number(it.current_qty) <= 0) &&
+      !pendingItemIds.has(it.item_id)
+    );
+
+변경 후:
+    const needItems = _items.filter(it =>
+      (Number(it.current_qty) <= Number(it.min_stock || 0) ||
+       Number(it.current_qty) < Number(it.target_qty) ||
+       Number(it.current_qty) <= 0) &&
+      !pendingItemIds.has(it.item_id) &&
+      !_dismissedItemIds.has(it.item_id)
+    );
+
+[1-C] cancelOrder 함수에 무시 목록 추가:
+
+현재:
+  showToast(`${row.item_name} 발주 취소됨`);
+  renderOrder();
+
+변경 후:
+  _dismissedItemIds.add(row.item_id);
+  showToast(`${row.item_name} 발주 취소됨`);
+  renderOrder();
+
+[1-D] _deferAllOrders 함수 맨 끝, renderOrder() 호출 전에 추가:
+
+현재:
+  showToast(msg, 3000);
+  renderOrder();
+
+변경 후:
+  // 이월된 품목을 무시 목록에 추가
+  for (const inp of inputs) {
+    const qty = parseInt(inp.value) || 0;
+    if (qty <= 0) continue;
+    _dismissedItemIds.add(parseInt(inp.dataset.itemId));
+  }
+  showToast(msg, 3000);
+  renderOrder();
+
+위 코드에서 for문이 이미 위에 있으므로, 두 번째 for문으로 추가해야 함.
+가장 간단한 방법: _deferAllOrders 함수 안, count++ 바로 뒤에 추가:
+    _dismissedItemIds.add(itemId);
+
+[1-E] 매장 전환 시 무시 목록 초기화:
+
+_switchStore 함수에서 데이터 재로드 전에 추가:
+  _dismissedItemIds = new Set();
+
+━━━━━━━━━━━━━━━━━━━━━
+버그 3: 진행 중 발주 복사 시 수정된 수량 미반영
+━━━━━━━━━━━━━━━━━━━━━
+
+_copyPendingOrder 함수에서 캐시(r.qty) 대신 DOM input 값 사용.
+
+현재 _copyPendingOrder 전체 교체:
+
+function _copyPendingOrder(vendorName) {
+  const items = _orderRequests.filter(r => {
+    const vn = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
+    return vn === vendorName;
+  });
+  if (!items.length) { showToast('발주 품목이 없습니다'); return; }
+  const lines = [];
+  for (const r of items) {
+    // DOM input에서 최신 수량 읽기
+    const inp = document.getElementById('pqty_' + r.id);
+    const qty = inp ? parseInt(inp.value) || 0 : Number(r.qty);
+    if (qty <= 0) continue;
+    lines.push(`${r.item_name} ${qty}${r.unit}`);
+  }
+  if (!lines.length) { showToast('발주 품목이 없습니다'); return; }
+  const text = `[발주]\n${lines.join('\n')}`;
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('📋 발주 내용 복사됨', 2000);
+  }).catch(() => {
+    showToast('복사 실패');
+  });
+}
+
+━━━━━━━━━━━━━━━━━━━━━
+버그 4: daily_orders 쿼리에 store_id 누락 (3곳)
+━━━━━━━━━━━━━━━━━━━━━
+
+다점포 환경에서 다른 매장 데이터를 건드릴 수 있음.
+
+[4-A] _confirmAllOrders 함수 — 이월 정리 부분:
+
+현재:
+    await db.from('daily_orders')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('item_id', itemId).eq('status', 'deferred');
+
+변경 후:
+    await db.from('daily_orders')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('store_id', SID).eq('item_id', itemId).eq('status', 'deferred');
+
+[4-B] _deferAllOrders 함수 — 기존 이월 조회:
+
+현재:
+    const { data: existingDefer } = await db.from('daily_orders')
+      .select('defer_count')
+      .eq('item_id', itemId).eq('status', 'deferred')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+변경 후:
+    const { data: existingDefer } = await db.from('daily_orders')
+      .select('defer_count')
+      .eq('store_id', SID).eq('item_id', itemId).eq('status', 'deferred')
+      .order('created_at', { ascending: false })
+      .limit(1);
+
+[4-C] _deferAllOrders 함수 — 기존 이월 업데이트:
+
+현재:
+      await db.from('daily_orders')
+        .update({...})
+        .eq('item_id', itemId).eq('status', 'deferred');
+
+변경 후:
+      await db.from('daily_orders')
+        .update({...})
+        .eq('store_id', SID).eq('item_id', itemId).eq('status', 'deferred');
+
+━━━━━━━━━━━━━━━━━━━━━
+버그 5: 입고 완료 시 스테퍼 수정 수량 미반영 가능
+━━━━━━━━━━━━━━━━━━━━━
+
+completeOrder에서 DOM input 값을 직접 읽도록 수정:
+
+현재 completeOrder 시작 부분:
+  const row = _orderRequests.find(r => r.id === orderId);
+  if (!row) return;
+
+변경 후:
+  const row = _orderRequests.find(r => r.id === orderId);
+  if (!row) return;
+  // 스테퍼에서 수정된 최신 수량 반영
+  const qtyInp = document.getElementById('pqty_' + orderId);
+  if (qtyInp) {
+    const updatedQty = parseInt(qtyInp.value) || 0;
+    if (updatedQty > 0) row.qty = updatedQty;
+  }
+
+━━━━━━━━━━━━━━━━━━━━━
+UX 6: 진행 중 발주 없을 때 빈 섹션 제거
+━━━━━━━━━━━━━━━━━━━━━
+
+현재 진행 중 발주가 없으면 "진행 중인 발주가 없습니다" 텍스트가 보임.
+불필요한 공간. 진행 중 발주가 없으면 섹션 자체를 숨기기.
+
+현재:
+    } else {
+      html += `<div class="ord-empty">진행 중인 발주가 없습니다</div>`;
+    }
+    html += `</div>`;
+
+변경 후:
+    }
+    if (!_orderRequests.length) {
+      html = ''; // 진행 중 없으면 섹션 자체 제거
+    } else {
+      html += `</div>`;
+    }
+
+━━━━━━━━━━━━━━━━━━━━━
+UX 7: 추천 섹션 — 진행 중 발주 없고 추천도 없을 때 처리
+━━━━━━━━━━━━━━━━━━━━━
+
+이건 이미 처리됨 ("모든 재고가 충분합니다"). OK.
+
+━━━━━━━━━━━━━━━━━━━━━
+UX 8: 발주 취소 시 확인 팝업
+━━━━━━━━━━━━━━━━━━━━━
+
+실수로 취소 방지.
+
+cancelOrder 함수에 확인 추가:
+
+현재:
+async function cancelOrder(orderId) {
+  const row = _orderRequests.find(r => r.id === orderId);
+  if (!row) return;
+
+변경 후:
+async function cancelOrder(orderId) {
+  const row = _orderRequests.find(r => r.id === orderId);
+  if (!row) return;
+  if (!confirm(`${row.item_name} ${row.qty}${row.unit} 발주를 취소하시겠습니까?`)) return;
+
+━━━━━━━━━━━━━━━━━━━━━
+UX 9: 입고 완료 시 확인 팝업
+━━━━━━━━━━━━━━━━━━━━━
+
+completeOrder 함수에도 확인 추가:
+
+row.qty를 읽은 뒤에:
+
+  if (!confirm(`${row.item_name} ${row.qty}${row.unit} 입고 완료하시겠습니까?`)) return;
+
+━━━━━━━━━━━━━━━━━━━━━
+UX 10: 전체 발주 확인 시 확인 팝업
+━━━━━━━━━━━━━━━━━━━━━
+
+_confirmAllOrders 함수 맨 앞에:
+
+  const inputs = document.querySelectorAll('.ord-stepper-val');
+  const itemCount = [...inputs].filter(inp => (parseInt(inp.value) || 0) > 0).length;
+  if (!itemCount) { showToast('발주할 품목이 없습니다'); return; }
+  if (!confirm(`${itemCount}개 품목을 발주하시겠습니까?`)) return;
+
+기존 첫 줄을 위 코드로 교체 (const inputs 선언은 한번만).
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트 체크리스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 발주 취소 → 추천에 다시 안 나타남
+□ 이월 클릭 → 항목 사라지고 토스트 표시
+□ 복사 → 스테퍼로 수정한 수량 반영
+□ 입고 완료 → 확인 팝업 + 수정 수량 반영
+□ 취소 → 확인 팝업
+□ 전체 발주 확인 → 확인 팝업
+□ 진행 중 발주 없으면 해당 섹션 안 보임
+□ 다점포 → 이월/취소가 현재 매장에만 적용
+□ 매장 전환 → 무시 목록 초기화
