@@ -1,0 +1,121 @@
+ZeroKitchen index.html 수정 3건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: 모든 카카오톡 자동 열기 제거
+━━━━━━━━━━━━━━━━━━━━━
+
+3곳 모두 수정:
+
+[1-A] _copyVendorOrder 함수 (약 2869~2871번 줄):
+
+현재:
+    showToast('발주 내용 복사됨 — 카카오톡에 붙여넣기 해주세요', 3000);
+    setTimeout(() => { try { window.open('kakaotalk://'); } catch(e) {} }, 800);
+
+변경 후:
+    showToast('📋 발주 내용 복사됨', 2000);
+
+[1-B] copyAndOpenKakao 함수 (약 3139~3149번 줄) 전체 교체:
+
+현재:
+function copyAndOpenKakao(encoded) {
+  const text = decodeURIComponent(encoded);
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('발주 내용 복사됨 — 카카오톡에 붙여넣기 해주세요', 3000);
+    setTimeout(() => {
+      window.open('kakaotalk://');
+    }, 800);
+  }).catch(() => {
+    showToast('복사 실패 — 직접 붙여넣어 주세요');
+  });
+}
+
+변경 후:
+function copyAndOpenKakao(encoded) {
+  const text = decodeURIComponent(encoded);
+  navigator.clipboard.writeText(text).then(() => {
+    showToast('📋 발주 내용 복사됨', 2000);
+  }).catch(() => {
+    showToast('복사 실패');
+  });
+}
+
+[1-C] _copyPendingOrder 함수도 확인 — 이전 fix에서 이미 수정됐어야 하지만 안 됐을 수 있음. 카카오톡 관련 코드가 있으면 동일하게 제거.
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: 발주 스테퍼 수량 가운데 정렬
+━━━━━━━━━━━━━━━━━━━━━
+
+CSS에서 .ord-stepper-val 수정:
+
+현재:
+.ord-stepper-val{width:44px;height:34px;border:1px solid var(--border);border-left:none;border-right:none;background:var(--surface);font-size:15px;font-weight:700;font-family:'JetBrains Mono',monospace;text-align:center;color:var(--accent);outline:none}
+
+text-align:center가 이미 있지만, input type="number"의 브라우저 기본 스타일이 덮어씌울 수 있음.
+
+변경 후:
+.ord-stepper-val{width:44px;height:34px;border:1px solid var(--border);border-left:none;border-right:none;background:var(--surface);font-size:15px;font-weight:700;font-family:'JetBrains Mono',monospace;text-align:center;color:var(--accent);outline:none;-moz-appearance:textfield;appearance:textfield}
+.ord-stepper-val::-webkit-outer-spin-button,.ord-stepper-val::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+
+이렇게 하면 브라우저 기본 숫자 화살표도 제거되고 가운데 정렬됨.
+
+재고 수정 폼의 .inv-stepper .inv-edit-inp도 동일하게:
+현재:
+.inv-stepper .inv-edit-inp{border-radius:0;border-left:none;border-right:none;text-align:center;width:60px;flex:0 0 60px}
+
+변경 후:
+.inv-stepper .inv-edit-inp{border-radius:0;border-left:none;border-right:none;text-align:center;width:60px;flex:0 0 60px;-moz-appearance:textfield;appearance:textfield}
+.inv-stepper .inv-edit-inp::-webkit-outer-spin-button,.inv-stepper .inv-edit-inp::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 3: 재고 수정 폼 레이아웃 개선 — 더 콤팩트하게
+━━━━━━━━━━━━━━━━━━━━━
+
+_renderInvCard 함수 안의 수정 폼 HTML 교체.
+
+현재 수정 폼 (inv-edit-form 안):
+
+      <div><div class="inv-edit-label">품목명</div><input class="inv-edit-inp" ...></div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><div class="inv-edit-label">수량</div>...</div>
+        <div style="flex:1"><div class="inv-edit-label">단위</div>...</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <div style="flex:1"><div class="inv-edit-label">목표 재고</div>...</div>
+        <div style="flex:1"><div class="inv-edit-label">최소 재고</div>...</div>
+      </div>
+      <div><div class="inv-edit-label">거래처</div>...</div>
+
+변경 후 (수량+단위를 한 줄로, 목표+최소를 한 줄로, 거래처를 더 작게):
+
+    <div class="inv-edit-form" id="ief_${it.item_id}">
+      <div><div class="inv-edit-label">품목명</div><input class="inv-edit-inp" id="ien_${it.item_id}" value="${it.item_name}" placeholder="품목명"></div>
+      <div style="display:flex;gap:6px;align-items:flex-end">
+        <div style="flex:2"><div class="inv-edit-label">수량</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('ieq_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="ieq_${it.item_id}" type="number" value="${qty}" placeholder="0"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('ieq_${it.item_id}',1)">+</button></div></div>
+        <div style="flex:1"><div class="inv-edit-label">단위</div><input class="inv-edit-inp" id="ieu_${it.item_id}" value="${it.unit||''}" placeholder="봉/개" style="width:100%;padding:7px 6px;text-align:center"></div>
+      </div>
+      <div style="display:flex;gap:6px">
+        <div style="flex:1"><div class="inv-edit-label">목표</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iet_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="iet_${it.item_id}" type="number" value="${tgt}" placeholder="0"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iet_${it.item_id}',1)">+</button></div></div>
+        <div style="flex:1"><div class="inv-edit-label">최소</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iem_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="iem_${it.item_id}" type="number" value="${it.min_stock||0}" placeholder="0"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iem_${it.item_id}',1)">+</button></div></div>
+      </div>
+      <div><div class="inv-edit-label">거래처</div><select class="inv-edit-inp" id="iev_${it.item_id}" style="width:100%;padding:7px 6px"><option value="">없음</option>${vOpts}</select></div>
+      <div style="display:flex;gap:6px;margin-top:4px">
+        <button class="inv-save-btn" onclick="event.stopPropagation();saveInvItem(${it.item_id})">저장</button>
+        <button class="inv-cancel-btn" onclick="event.stopPropagation();toggleInvEdit(${it.item_id})">취소</button>
+      </div>
+    </div>
+
+변경 포인트:
+- 수량 flex:2 / 단위 flex:1 (단위 공간 축소)
+- 단위 placeholder "봉/개" 로 짧게
+- 거래처 "거래처 없음" → "없음" 으로 짧게
+- 목표 재고 → "목표", 최소 재고 → "최소"로 라벨 축소
+- 단위 입력 text-align:center
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 복사 버튼 → 카카오톡 안 열림, 복사만 됨
+□ 발주 스테퍼 숫자 가운데 정렬
+□ 재고 수정 폼 — 단위 공간 작아짐, 전체 콤팩트
