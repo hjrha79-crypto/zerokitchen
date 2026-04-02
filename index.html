@@ -1449,6 +1449,7 @@ const _ALIAS = {
   '롤백중':'롤백 중','롤백소':'롤백 소','롤백대':'롤백 대',
   '알리오 올리오 소스':'알리오올리오소스','토마토 비프 소스':'토마토비프소스',
   '냉동 가리비':'냉동가리비',
+  '브로컬리':'브로콜리','블로콜리':'브로콜리','부로콜리':'브로콜리','브로커리':'브로콜리','브르콜리':'브로콜리',
 };
 
 function _ruleNormalize(text) {
@@ -4171,6 +4172,9 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
     hint.className = 'mic-hint';
     hint.id = 'micHint';
     hint.textContent = '말로도 입력할 수 있어요';
+    hint.style.cursor = 'pointer';
+    hint.style.pointerEvents = 'auto';
+    hint.onclick = () => { hint.remove(); localStorage.setItem('zk_mic_used', 'true'); };
     wrapper.appendChild(hint);
   }, 2000);
 })();
