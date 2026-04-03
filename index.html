@@ -2354,8 +2354,8 @@ async function _saveListField(el) {
   const field = el.dataset.field;
   let value = el.value;
 
-  if (field === 'current_qty' || field === 'target_qty' || field === 'min_stock') {
-    value = parseFloat(value) || 0;
+  if (field === 'current_qty' || field === 'target_qty' || field === 'min_stock' || field === 'order_unit_qty') {
+    value = parseFloat(value) || (field === 'order_unit_qty' ? 1 : 0);
   } else if (field === 'vendor_id') {
     value = value ? parseInt(value) : null;
   } else {
@@ -2495,6 +2495,13 @@ function renderInventory() {
           <select class="inv-lc-sel" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="flex:1">
             <option value="">미지정</option>${vSel}
           </select>
+        </div>
+        <div class="inv-lc-row3" style="margin-top:4px">
+          <span class="inv-lc-label">발주단위</span>
+          <input class="inv-lc-num ${(Number(it.order_unit_qty)||1)===1?'dim':''}" type="number" inputmode="numeric" value="${Number(it.order_unit_qty)||1}" data-id="${it.item_id}" data-field="order_unit_qty" onchange="_saveListField(this)" style="width:42px" min="1">
+          <span class="inv-lc-label">${it.unit||'개'} =</span>
+          <input class="inv-lc-num ${!(it.order_unit_name)?'dim':''}" type="number" inputmode="numeric" value="1" style="width:30px" disabled>
+          <input class="inv-lc-sel" value="${it.order_unit_name||''}" data-id="${it.item_id}" data-field="order_unit_name" onchange="_saveListField(this)" placeholder="예:박스" style="width:60px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:5px 4px;font-size:12px;outline:none">
         </div>
       </div>`;
     }).join('');
@@ -2740,25 +2747,29 @@ async function _calcConsumption(itemId) {
 }
 
 // 발주 수량 계산 (소비량 or 목표재고)
-function _calcOrderQty(currentQty, targetQty, consumption) {
+function _calcOrderQty(currentQty, targetQty, consumption, orderUnitQty) {
+  let qty, source, avg;
   if (consumption && consumption.mode === 'consumption_based' && consumption.avg > 0) {
-    // 소비량 모드: 3일치 확보
     const recommended = Math.ceil(consumption.avg * 3);
-    const qty = Math.max(0, recommended - currentQty);
-    // 상한: target * 2
+    qty = Math.max(0, recommended - currentQty);
     const cap = targetQty > 0 ? targetQty * 2 : recommended * 2;
-    return {
-      qty: Math.min(qty, cap),
-      source: 'consumption_based',
-      avg: consumption.avg
-    };
+    qty = Math.min(qty, cap);
+    source = 'consumption_based';
+    avg = consumption.avg;
+  } else {
+    qty = Math.max(0, targetQty - currentQty);
+    source = 'target_based';
+    avg = null;
   }
-  // 목표재고 모드
-  return {
-    qty: Math.max(0, targetQty - currentQty),
-    source: 'target_based',
-    avg: null
-  };
+
+  // 단위 보정: order_unit_qty가 2 이상이면 올림 보정
+  const ouq = parseInt(orderUnitQty) || 1;
+  const rawQty = qty;
+  if (ouq > 1 && qty > 0) {
+    qty = Math.ceil(qty / ouq) * ouq;
+  }
+
+  return { qty, rawQty, source, avg };
 }
 
 async function renderOrder() {
@@ -2798,16 +2809,21 @@ async function renderOrder() {
     const suggestItems = [];
     for (const it of needItems) {
       const consumption = await _calcConsumption(it.item_id);
-      const order = _calcOrderQty(Number(it.current_qty), Number(it.target_qty), consumption);
+      const order = _calcOrderQty(Number(it.current_qty), Number(it.target_qty), consumption, it.order_unit_qty);
       if (order.qty <= 0) continue;
+      const ouq = parseInt(it.order_unit_qty) || 1;
+      const oun = it.order_unit_name || '';
+      const unitLabel = (ouq > 1 && oun) ? `(${Math.ceil(order.qty / ouq)}${oun})` : '';
       suggestItems.push({
         item_id: it.item_id, name: it.item_name,
         current_qty: Number(it.current_qty), target_qty: Number(it.target_qty),
         suggested_qty: order.qty,
+        rawQty: order.rawQty,
         unit: it.unit || '', vendor_id: it.vendor_id || null,
         vendor: _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || null,
         source: order.source,
-        avg: order.avg
+        avg: order.avg,
+        unitLabel: unitLabel
       });
     }
 
@@ -2952,7 +2968,7 @@ async function renderOrder() {
               <button class="ord-stepper-btn" onclick="_ordStep('${recId}',-1)">−</button>
               <input class="ord-stepper-val" id="${recId}" type="number" value="${it.suggested_qty}" data-item-id="${it.item_id}" data-name="${it.name}" data-unit="${it.unit}" data-vendor-id="${it.vendor_id || ''}" data-source="${it.source || 'target_based'}">
               <button class="ord-stepper-btn" onclick="_ordStep('${recId}',1)">+</button>
-              <span class="ord-rec-unit">${it.unit}</span>
+              <span class="ord-rec-unit">${it.unit}${it.unitLabel ? ' <span style="color:var(--muted);font-size:11px">' + it.unitLabel + '</span>' : ''}</span>
             </div>
           </div>`;
         }
@@ -3159,7 +3175,11 @@ function _copyVendorOrder(vendorName, itemIds) {
     if (qty <= 0) continue;
     const name = inp.dataset.name;
     const unit = inp.dataset.unit;
-    lines.push(`${name} ${qty}${unit}`);
+    const item = _items.find(i => i.item_id === parseInt(inp.dataset.itemId));
+    const ouq = parseInt(item?.order_unit_qty) || 1;
+    const oun = item?.order_unit_name || '';
+    const unitNote = (ouq > 1 && oun && qty >= ouq) ? ` (${Math.ceil(qty/ouq)}${oun})` : '';
+    lines.push(`${name} ${qty}${unit}${unitNote}`);
   }
   if (!lines.length) { showToast('발주할 품목이 없습니다'); return; }
   const text = `[발주]\n${lines.join('\n')}`;

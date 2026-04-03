@@ -1,0 +1,165 @@
+ZeroKitchen index.html 수정 — 단위 보정 + 목록뷰 필드 추가
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+━━━━━━━━━━━━━━━━━━━━━
+사전: Supabase SQL Editor에서 실행
+━━━━━━━━━━━━━━━━━━━━━
+
+ALTER TABLE items 
+  ADD COLUMN IF NOT EXISTS order_unit_qty integer DEFAULT 1,
+  ADD COLUMN IF NOT EXISTS order_unit_name text DEFAULT '';
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 1: _calcOrderQty — 단위 보정 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+_calcOrderQty 함수 전체 교체:
+
+function _calcOrderQty(currentQty, targetQty, consumption, orderUnitQty) {
+  let qty, source, avg;
+  if (consumption && consumption.mode === 'consumption_based' && consumption.avg > 0) {
+    const recommended = Math.ceil(consumption.avg * 3);
+    qty = Math.max(0, recommended - currentQty);
+    const cap = targetQty > 0 ? targetQty * 2 : recommended * 2;
+    qty = Math.min(qty, cap);
+    source = 'consumption_based';
+    avg = consumption.avg;
+  } else {
+    qty = Math.max(0, targetQty - currentQty);
+    source = 'target_based';
+    avg = null;
+  }
+
+  // 단위 보정: order_unit_qty가 2 이상이면 올림 보정
+  const ouq = parseInt(orderUnitQty) || 1;
+  const rawQty = qty;
+  if (ouq > 1 && qty > 0) {
+    qty = Math.ceil(qty / ouq) * ouq;
+  }
+
+  return { qty, rawQty, source, avg };
+}
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 2: renderOrder — _calcOrderQty 호출에 orderUnitQty 전달
+━━━━━━━━━━━━━━━━━━━━━
+
+suggestItems를 빌드하는 부분:
+
+현재:
+      const order = _calcOrderQty(Number(it.current_qty), Number(it.target_qty), consumption);
+      if (order.qty <= 0) continue;
+      suggestItems.push({
+        item_id: it.item_id, name: it.item_name,
+        current_qty: Number(it.current_qty), target_qty: Number(it.target_qty),
+        suggested_qty: order.qty,
+        unit: it.unit || '', vendor_id: it.vendor_id || null,
+        vendor: _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || null,
+        source: order.source,
+        avg: order.avg
+      });
+
+변경 후:
+      const order = _calcOrderQty(Number(it.current_qty), Number(it.target_qty), consumption, it.order_unit_qty);
+      if (order.qty <= 0) continue;
+      const ouq = parseInt(it.order_unit_qty) || 1;
+      const oun = it.order_unit_name || '';
+      const unitLabel = (ouq > 1 && oun) ? `(${Math.ceil(order.qty / ouq)}${oun})` : '';
+      suggestItems.push({
+        item_id: it.item_id, name: it.item_name,
+        current_qty: Number(it.current_qty), target_qty: Number(it.target_qty),
+        suggested_qty: order.qty,
+        rawQty: order.rawQty,
+        unit: it.unit || '', vendor_id: it.vendor_id || null,
+        vendor: _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || null,
+        source: order.source,
+        avg: order.avg,
+        unitLabel: unitLabel
+      });
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 3: 추천 카드 UI — 단위 보정 라벨 표시
+━━━━━━━━━━━━━━━━━━━━━
+
+추천 카드 렌더링에서 단위 표시 뒤에 unitLabel 추가:
+
+현재:
+              <span class="ord-rec-unit">${it.unit}</span>
+
+변경 후:
+              <span class="ord-rec-unit">${it.unit}${it.unitLabel ? ' <span style="color:var(--muted);font-size:11px">' + it.unitLabel + '</span>' : ''}</span>
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 4: 목록뷰 — 발주단위 필드 추가
+━━━━━━━━━━━━━━━━━━━━━
+
+목록뷰 카드에 row3 (거래처) 아래에 row4 (발주단위) 추가:
+
+현재:
+        <div class="inv-lc-row3">
+          <span class="inv-lc-label">거래처</span>
+          <select class="inv-lc-sel" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="flex:1">
+            <option value="">미지정</option>${vSel}
+          </select>
+        </div>
+      </div>`;
+
+변경 후:
+        <div class="inv-lc-row3">
+          <span class="inv-lc-label">거래처</span>
+          <select class="inv-lc-sel" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="flex:1">
+            <option value="">미지정</option>${vSel}
+          </select>
+        </div>
+        <div class="inv-lc-row3" style="margin-top:4px">
+          <span class="inv-lc-label">발주단위</span>
+          <input class="inv-lc-num ${(Number(it.order_unit_qty)||1)===1?'dim':''}" type="number" inputmode="numeric" value="${Number(it.order_unit_qty)||1}" data-id="${it.item_id}" data-field="order_unit_qty" onchange="_saveListField(this)" style="width:42px" min="1">
+          <span class="inv-lc-label">${it.unit||'개'} =</span>
+          <input class="inv-lc-num ${!(it.order_unit_name)?'dim':''}" type="number" inputmode="numeric" value="1" style="width:30px" disabled>
+          <input class="inv-lc-sel" value="${it.order_unit_name||''}" data-id="${it.item_id}" data-field="order_unit_name" onchange="_saveListField(this)" placeholder="예:박스" style="width:60px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:5px 4px;font-size:12px;outline:none">
+        </div>
+      </div>`;
+
+설명: "발주단위 [4] 봉지 = 1 [박스]" 형태.
+예: 치즈 → order_unit_qty=4, order_unit_name=박스 → "4봉지 = 1박스"
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 5: _saveListField — 새 필드 처리
+━━━━━━━━━━━━━━━━━━━━━
+
+_saveListField 함수에서 숫자 필드 목록에 order_unit_qty 추가:
+
+현재:
+  if (field === 'current_qty' || field === 'target_qty' || field === 'min_stock') {
+    value = parseFloat(value) || 0;
+
+변경 후:
+  if (field === 'current_qty' || field === 'target_qty' || field === 'min_stock' || field === 'order_unit_qty') {
+    value = parseFloat(value) || (field === 'order_unit_qty' ? 1 : 0);
+
+━━━━━━━━━━━━━━━━━━━━━
+수정 6: 카톡 복사에 단위 보정 반영
+━━━━━━━━━━━━━━━━━━━━━
+
+_copyVendorOrder 함수에서 복사 텍스트에 단위 보정 표시:
+
+현재:
+    lines.push(`${name} ${qty}${unit}`);
+
+변경 후 — suggestItems에서 unitLabel을 가져올 수 없으므로, items에서 직접 계산:
+
+    const item = _items.find(i => i.item_id === parseInt(inp.dataset.itemId));
+    const ouq = parseInt(item?.order_unit_qty) || 1;
+    const oun = item?.order_unit_name || '';
+    const unitNote = (ouq > 1 && oun && qty >= ouq) ? ` (${Math.ceil(qty/ouq)}${oun})` : '';
+    lines.push(`${name} ${qty}${unit}${unitNote}`);
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트
+━━━━━━━━━━━━━━━━━━━━━
+□ Supabase SQL 실행 후 items에 order_unit_qty/order_unit_name 컬럼 존재
+□ 목록뷰에서 "발주단위 [4] 봉지 = 1 [박스]" 설정 가능
+□ 치즈 order_unit_qty=4, order_unit_name=박스 설정
+□ 발주 추천 → 치즈 4봉지 (1박스) 표시
+□ 카톡 복사 → "치즈 4봉지 (1박스)" 포함
+□ order_unit_qty=1인 품목은 보정 없음
