@@ -532,7 +532,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
   </div>
   <div class="nl-input-zone">
     <div style="position:relative;flex-shrink:0">
-      <button class="nl-mic-btn" id="micBtn" onclick="toggleMic()" oncontextmenu="event.preventDefault();toggleMicSettings()">🎤</button>
+      <button class="nl-mic-btn" id="micBtn" onclick="toggleMic()">🎤</button>
       <div class="mic-settings-popup" id="micSettingsPopup">
         <div class="msp-title">🎤 녹음 대기시간</div>
         <div class="msp-opts" id="micTimeoutOpts"></div>
@@ -572,6 +572,7 @@ let _stores = [];      // 전체 매장 목록
 let _currentSessionId = null;
 let _sessionStartedAt = null;
 let _dismissedItemIds = new Set();  // 이번 세션에서 취소/이월한 품목
+let _storeAliases = [];  // 매장별 alias 캐시
 let _invView = localStorage.getItem('zk_inv_view') || 'card';
 
 /*  order_requests 테이블 (Supabase SQL Editor에서 실행):
@@ -610,6 +611,9 @@ async function init() {
 
     _renderStoreTabs();
     await refreshItems();
+    // store_aliases 로드
+    const { data: aliases } = await db.from('store_aliases').select('*').eq('store_id', SID);
+    _storeAliases = aliases || [];
     _lastRawInput = localStorage.getItem('zk_last_input_' + SID) || '';
     _updateLastInputChip();
     // 뷰 토글 초기 상태
@@ -653,6 +657,8 @@ async function _switchStore(storeId) {
   _orderRequests = [];
   _dismissedItemIds = new Set();
   await refreshItems();
+    const { data: aliases } = await db.from('store_aliases').select('*').eq('store_id', SID);
+    _storeAliases = aliases || [];
 
   // 현재 탭 재렌더링
   const activeTab = document.querySelector('.tab.active');
@@ -724,8 +730,15 @@ async function processRequest(json) {
           );
 
           if (item) {
-            // action_type에 따라 수량 계산
             const action = req.action_type || json.action_type || 'stock_check';
+            // 단위 변경 경고
+            if (unit && item.unit && unit !== item.unit) {
+              const msg = `⚠️ ${name}: 단위가 '${item.unit}'에서 '${unit}'(으)로 바뀝니다`;
+              if (!json._unitWarnings) json._unitWarnings = [];
+              json._unitWarnings.push(msg);
+              await db.from('items').update({ unit: unit, updated_at: new Date().toISOString() }).eq('item_id', item.item_id);
+              item.unit = unit;
+            }
 
             // ── 발주(order): 재고 변경 없이 order_requests에 기록 ──
             if (action === 'order') {
@@ -1201,13 +1214,7 @@ let _sessionInputs = []; // 동일 품목 재입력 감지용 세션 이력
 // 자연어 입력 처리
 async function handleNaturalInput() {
   // 마이크 활성 중이면 즉시 종료 (중복 입력 방지)
-  if (_micActive) {
-    _micShouldStop = true;
-    if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
-      try { _mediaRecorder.stop(); } catch(e) {}
-    }
-    _stopMicUI();
-  }
+  // 마이크 관련 코드 제거됨 (Gboard 활용)
   const inp   = document.getElementById('nlInput');
   let   raw   = inp.value.trim();
   const btn   = document.getElementById('nlSendBtn');
@@ -1405,6 +1412,14 @@ async function handleNaturalInput() {
     for (const it of _draftItems) {
       if (it.item_name) it.item_name = it.item_name.replace(/(을|를|은|는|이|가)$/, '').trim();
     }
+    // 기존 품목의 거래처 자동 반영
+    for (const it of _draftItems) {
+      const existing = _items.find(x => x.item_name === it.item_name || x.item_name.replace(/\s/g,'') === it.item_name.replace(/\s/g,''));
+      if (existing && existing.vendor_id) {
+        const v = _vendors.find(v => v.vendor_id === existing.vendor_id);
+        if (v) it.vendor = v.vendor_name;
+      }
+    }
 
     // Fast-path: 확실한 파싱은 확인 카드 생략하고 바로 처리
     const _canSkipReview = _draftItems.length > 0 && _draftItems.every(it => {
@@ -1430,6 +1445,9 @@ async function handleNaturalInput() {
       const req = draftToRequest(_draftItems);
       req._source = 'fast_path';
       const result = await processRequest(req);
+      if (req._unitWarnings?.length) {
+        for (const w of req._unitWarnings) showToast(w, 4000);
+      }
       for (const it of _draftItems) {
         const existing = _sessionInputs.find(s => s.item_name === it.item_name);
         if (existing) { existing.quantity = it.quantity; existing.unit = it.unit; }
@@ -1620,7 +1638,14 @@ function _ruleNormalize(text) {
   // 1c. 수량 표현 → 숫자 변환 (순서 중요: 복합 표현을 먼저 처리)
   s = s.replace(/거의\s*없음/g, '0.2 개');
   s = s.replace(/조금\s*있음/g, '0.3 개');
-  s = s.replace(/(?:반|절반|1\/2)\s*(?:정도|쯤|만큼)?/g, '0.5 개');
+  // "N개 반" = N.5 (예: "두 박스 반" → "2.5 박스")
+  s = s.replace(new RegExp('(\\d+(?:\\.\\d+)?)\\s*(' + up + ')\\s+반(?=\\s|$)', 'g'), function(m, n, u) {
+    return (parseFloat(n) + 0.5) + ' ' + u;
+  });
+  // "반 단위" = 0.5 (예: "반 박스" → "0.5 박스")
+  s = s.replace(new RegExp('(?:^|\\s)반\\s+(' + up + ')', 'g'), ' 0.5 $1');
+  // 나머지 "반" (단독) = 0.5개
+  s = s.replace(/(?:^|\s)(?:반|절반|1\/2)\s*(?:정도|쯤|만큼)?(?=\s|$)/g, ' 0.5 개');
   s = s.replace(/발주\s*필요/g, '0 개');
   s = s.replace(/(?:재고|수량|현재|지금)?\s*(을|를|은|는|이|가)?\s*(?:(?:다\s*)?떨어짐|없음|소진|다\s*(?:썼어|써버렸|나갔|떨어졌|사용))/g, ' 0 개');
 
@@ -1711,10 +1736,47 @@ function _ruleTokenize(s) {
   return segs;
 }
 
+async function _saveAlias(rawExpr, correctedName) {
+  if (!SID || !rawExpr || !correctedName) return;
+  const raw = rawExpr.replace(/\s/g,'').toLowerCase();
+  const corrected = correctedName.trim();
+  if (raw === corrected.replace(/\s/g,'').toLowerCase()) return;
+
+  const existing = _storeAliases.find(a => a.raw_expression === raw);
+  if (existing) {
+    existing.count++;
+    existing.corrected_name = corrected;
+    existing.last_used = new Date().toISOString();
+    await db.from('store_aliases').update({
+      count: existing.count, corrected_name: corrected, last_used: existing.last_used
+    }).eq('id', existing.id);
+  } else {
+    const { data } = await db.from('store_aliases').insert({
+      store_id: SID, raw_expression: raw, corrected_name: corrected
+    }).select().single();
+    if (data) _storeAliases.push(data);
+  }
+}
+
+function _applyAlias(name) {
+  const key = name.replace(/\s/g,'').toLowerCase();
+  const alias = _storeAliases.find(a => a.raw_expression === key);
+  if (!alias) return name;
+  if (alias.count >= 3) return alias.corrected_name;  // 자동 치환
+  return name;  // 3회 미만이면 기존 하네스에서 처리
+}
+
 function _ruleMapItem(raw) {
   const name=raw.trim(); if(!name) return null;
+  // 1. store alias (학습된 매장별 보정) — 완전 일치
+  const aliased = _applyAlias(name);
+  if (aliased !== name) return aliased;
+  // 2. 하드코딩 alias — 완전 일치만
   if (_ALIAS[name]) return _ALIAS[name];
-  for (const [a,s] of Object.entries(_ALIAS)) { if (name.includes(a)) return s; }
+  // 3. 하드코딩 alias — 완전 포함 (2글자 이상 alias만)
+  for (const [a,s] of Object.entries(_ALIAS)) {
+    if (a.length >= 2 && name === a) return s;
+  }
   return name;
 }
 
@@ -1995,6 +2057,7 @@ async function _showSimilarChoices(checks, rawText) {
     });
     if (choice === 'link') {
       _draftItems[chk.idx].item_name = chk.existName;
+      _saveAlias(chk.newName, chk.existName);
     }
     _createDecisionEvent({
       entity: chk.newName,
@@ -2175,6 +2238,9 @@ async function confirmReview() {
     req._source = 'table_review';
 
     const result = await processRequest(req);
+    if (req._unitWarnings?.length) {
+      for (const w of req._unitWarnings) showToast(w, 4000);
+    }
 
     // ── kitchen_logs 기록 ──
     const actions = _draftItems.map(it => it.action || 'stock_check');
@@ -2636,6 +2702,9 @@ async function saveInvItem(id) {
 
   const oldItem = _items.find(x => x.item_id === id);
   const oldName = oldItem?.item_name || name;
+  if (oldName !== name && oldName) {
+    _saveAlias(oldName, name);
+  }
   const oldQty = oldItem?.current_qty;
   await db.from('items').update({
     item_name: name, current_qty: qty, unit, target_qty: tgt,
@@ -2818,7 +2887,12 @@ async function renderOrder() {
     for (const it of needItems) {
       const consumption = await _calcConsumption(it.item_id);
       const order = _calcOrderQty(Number(it.current_qty), Number(it.target_qty), consumption, it.order_unit_qty);
-      if (order.qty <= 0) continue;
+      if (order.qty <= 0 && Number(it.current_qty) > 0) continue;
+      // 재고 0인데 추천 수량도 0이면 (목표재고 미설정) → 수량 1로 강제 추가
+      if (order.qty <= 0 && Number(it.current_qty) <= 0) {
+        order.qty = 1;
+        order.source = 'stockout';
+      }
       const ouq = parseInt(it.order_unit_qty) || 1;
       const oun = it.order_unit_name || '';
       const unitLabel = (ouq > 1 && oun) ? `(${Math.ceil(order.qty / ouq)}${oun})` : '';
@@ -2970,13 +3044,17 @@ async function renderOrder() {
             <div class="ord-rec-left">
               <div class="ord-rec-name">${isUrgent ? '🔴 ' : ''}${it.name}${it.isDeferred ? (it.defer_count >= 2 ? ' <span class="ord-defer-blocked">⚠️ 이월 2회</span>' : ' <span class="ord-defer-tag">↩️ 이월</span>') : ''}</div>
               <div class="ord-rec-info">현재 ${it.current_qty}${it.unit}</div>
-              <div class="ord-rec-source">(${it.source === 'consumption_based' ? '일평균 ' + it.avg + it.unit : '목표재고 기준'})</div>
+              <div class="ord-rec-source">(${it.source === 'consumption_based' ? '일평균 ' + it.avg + it.unit : it.source === 'stockout' ? '재고 없음 — 수량 직접 입력' : '목표재고 기준'})</div>
             </div>
             <div class="ord-rec-right">
               <button class="ord-stepper-btn" onclick="_ordStep('${recId}',-1)">−</button>
               <input class="ord-stepper-val" id="${recId}" type="number" value="${it.suggested_qty}" data-item-id="${it.item_id}" data-name="${it.name}" data-unit="${it.unit}" data-vendor-id="${it.vendor_id || ''}" data-source="${it.source || 'target_based'}">
               <button class="ord-stepper-btn" onclick="_ordStep('${recId}',1)">+</button>
               <span class="ord-rec-unit">${it.unit}${it.unitLabel ? ' <span style="color:var(--muted);font-size:11px">' + it.unitLabel + '</span>' : ''}</span>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+              <button style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);font-size:11px;cursor:pointer;font-family:inherit" onclick="_dismissSuggest(${it.item_id})">제외</button>
+              <button style="flex:1;padding:6px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-lt);color:var(--accent);font-size:11px;cursor:pointer;font-family:inherit" onclick="_receivedSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.suggested_qty},'${it.unit}')">입고됨</button>
             </div>
           </div>`;
         }
@@ -3172,6 +3250,31 @@ function _copyPendingOrder(vendorName) {
   }).catch(() => {
     showToast('복사 실패');
   });
+}
+
+function _dismissSuggest(itemId) {
+  _dismissedItemIds.add(itemId);
+  showToast('추천에서 제외됨');
+  renderOrder();
+}
+
+async function _receivedSuggest(itemId, name, qty, unit) {
+  const item = _items.find(i => i.item_id === itemId);
+  if (!item) return;
+  const inp = document.getElementById('orec_' + itemId);
+  const finalQty = inp ? (parseInt(inp.value) || qty) : qty;
+  const newQty = Number(item.current_qty) + finalQty;
+  await db.from('items').update({ current_qty: newQty, updated_at: new Date().toISOString() }).eq('item_id', itemId);
+  await db.from('kitchen_operations').insert({
+    store_id: SID, item_id: itemId, item_name: name,
+    action_type: 'inbound', quantity: finalQty, unit: unit,
+    qty_before: item.current_qty, qty_after: newQty,
+    input_method: 'order_received', raw_text: '발주 없이 입고'
+  });
+  item.current_qty = newQty;
+  _dismissedItemIds.add(itemId);
+  showToast(`${name} ${finalQty}${unit} 입고 완료`);
+  renderOrder();
 }
 
 function _copyVendorOrder(vendorName, itemIds) {
@@ -3828,8 +3931,18 @@ function addResult(raw, msg, type, undoItems) {
   let undoHtml = '';
   if (undoItems && undoItems.length) {
     const uid = 'undo_' + (++_undoCounter);
+    // 각 품목에 개별 수정 링크 추가
+    let editableMsg = msg;
+    if (undoItems && undoItems.length) {
+      for (const it of undoItems) {
+        if (it.item_id && it.name) {
+          const editLink = ` <span style="font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline" onclick="switchTab('inventory',document.querySelectorAll('.nav')[1]);document.getElementById('invSearch').value='${it.name}';renderInventory()">(수정)</span>`;
+          editableMsg = editableMsg.replace(it.name, it.name + editLink);
+        }
+      }
+    }
     undoHtml = `<button class="res-undo" id="${uid}">되돌리기</button>`;
-    sysBubble.innerHTML = `${msg.replace(/\n/g,'<br>')}${undoHtml}<span class="chat-time">${now}</span>`;
+    sysBubble.innerHTML = `${editableMsg.replace(/\n/g,'<br>')}${undoHtml}<span class="chat-time">${now}</span>`;
     list.appendChild(sysBubble);
     const btn = document.getElementById(uid);
     const timer = setTimeout(() => { btn.disabled = true; }, 30000);
@@ -4235,7 +4348,11 @@ function toggleMic() {
   localStorage.setItem('zk_mic_used', 'true');
   const hint = document.getElementById('micHint');
   if (hint) hint.remove();
+  const inp = document.getElementById('nlInput');
+  inp.focus();
+}
 
+function _toggleMicLegacy() {
   if (_micActive) {
     _micShouldStop = true;
     _stopRecording();

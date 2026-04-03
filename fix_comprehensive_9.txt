@@ -1,0 +1,353 @@
+ZeroKitchen index.html 종합 수정 9건
+파일: C:\Users\hjrha\zerokitchen\index.html
+
+사전 조건: Supabase에서 store_aliases 테이블 생성 완료
+
+━━━━━━━━━━━━━━━━━━━━━
+1. 수정 기억 시스템 (store_aliases)
+━━━━━━━━━━━━━━━━━━━━━
+
+[1-A] 전역 변수 추가 (전역 상태 영역):
+
+let _storeAliases = [];  // 매장별 alias 캐시
+
+[1-B] init 함수 — await refreshItems() 이후에 추가:
+
+    // store_aliases 로드
+    const { data: aliases } = await db.from('store_aliases').select('*').eq('store_id', SID);
+    _storeAliases = aliases || [];
+
+[1-C] alias 저장/조회 함수 — _ruleMapItem 함수 바로 위에 추가:
+
+async function _saveAlias(rawExpr, correctedName) {
+  if (!SID || !rawExpr || !correctedName) return;
+  const raw = rawExpr.replace(/\s/g,'').toLowerCase();
+  const corrected = correctedName.trim();
+  if (raw === corrected.replace(/\s/g,'').toLowerCase()) return;
+
+  const existing = _storeAliases.find(a => a.raw_expression === raw);
+  if (existing) {
+    existing.count++;
+    existing.corrected_name = corrected;
+    existing.last_used = new Date().toISOString();
+    await db.from('store_aliases').update({
+      count: existing.count, corrected_name: corrected, last_used: existing.last_used
+    }).eq('id', existing.id);
+  } else {
+    const { data } = await db.from('store_aliases').insert({
+      store_id: SID, raw_expression: raw, corrected_name: corrected
+    }).select().single();
+    if (data) _storeAliases.push(data);
+  }
+}
+
+function _applyAlias(name) {
+  const key = name.replace(/\s/g,'').toLowerCase();
+  const alias = _storeAliases.find(a => a.raw_expression === key);
+  if (!alias) return name;
+  if (alias.count >= 3) return alias.corrected_name;  // 자동 치환
+  return name;  // 3회 미만이면 기존 하네스에서 처리
+}
+
+[1-D] _ruleMapItem 함수 수정 — store alias 적용:
+
+현재:
+function _ruleMapItem(raw) {
+  const name=raw.trim(); if(!name) return null;
+  if (_ALIAS[name]) return _ALIAS[name];
+  for (const [a,s] of Object.entries(_ALIAS)) { if (name.includes(a)) return s; }
+  return name;
+}
+
+변경 후:
+function _ruleMapItem(raw) {
+  const name=raw.trim(); if(!name) return null;
+  // 1. store alias (학습된 매장별 보정) — 완전 일치
+  const aliased = _applyAlias(name);
+  if (aliased !== name) return aliased;
+  // 2. 하드코딩 alias — 완전 일치만
+  if (_ALIAS[name]) return _ALIAS[name];
+  // 3. 하드코딩 alias — 완전 포함 (2글자 이상 alias만)
+  for (const [a,s] of Object.entries(_ALIAS)) {
+    if (a.length >= 2 && name === a) return s;
+  }
+  return name;
+}
+
+[1-E] 하네스 "연결" 선택 시 alias 저장 — _showSimilarChoices 함수:
+
+현재:
+    if (choice === 'link') {
+      _draftItems[chk.idx].item_name = chk.existName;
+    }
+
+변경 후:
+    if (choice === 'link') {
+      _draftItems[chk.idx].item_name = chk.existName;
+      _saveAlias(chk.newName, chk.existName);
+    }
+
+[1-F] 재고 품목명 수정 시 alias 저장 — saveInvItem 함수:
+
+기존 코드에서 이름 변경 확인 부분 (const oldName 이후):
+
+현재:
+  const oldItem = _items.find(x => x.item_id === id);
+  const oldName = oldItem?.item_name || name;
+
+변경 후:
+  const oldItem = _items.find(x => x.item_id === id);
+  const oldName = oldItem?.item_name || name;
+  if (oldName !== name && oldName) {
+    _saveAlias(oldName, name);
+  }
+
+[1-G] _switchStore에서 alias 리로드:
+
+_switchStore 함수에서 await refreshItems() 이후에 추가:
+    const { data: aliases } = await db.from('store_aliases').select('*').eq('store_id', SID);
+    _storeAliases = aliases || [];
+
+━━━━━━━━━━━━━━━━━━━━━
+2. 마이크 버튼 → 입력창 포커스
+━━━━━━━━━━━━━━━━━━━━━
+
+toggleMic 함수 전체 교체:
+
+function toggleMic() {
+  localStorage.setItem('zk_mic_used', 'true');
+  const hint = document.getElementById('micHint');
+  if (hint) hint.remove();
+  const inp = document.getElementById('nlInput');
+  inp.focus();
+}
+
+마이크 버튼 아이콘 변경 — HTML에서:
+
+현재:
+<button class="nl-mic-btn" id="micBtn" onclick="toggleMic()" oncontextmenu="event.preventDefault();toggleMicSettings()">🎤</button>
+
+변경 후:
+<button class="nl-mic-btn" id="micBtn" onclick="toggleMic()">🎤</button>
+
+handleNaturalInput 함수의 마이크 종료 부분 제거:
+
+현재:
+  if (_micActive) {
+    _micShouldStop = true;
+    if (_mediaRecorder && _mediaRecorder.state !== 'inactive') {
+      try { _mediaRecorder.stop(); } catch(e) {}
+    }
+    _stopMicUI();
+  }
+
+변경 후 (삭제하거나 빈 블록으로):
+  // 마이크 관련 코드 제거됨 (Gboard 활용)
+
+참고: 기존 마이크 관련 함수들 (_startRecording, _stopRecording, _transcribeAudio, _startLevelMonitor 등)은 그대로 두어도 됨. 호출되지 않으므로 영향 없음. 나중에 정리.
+
+━━━━━━━━━━━━━━━━━━━━━
+3. "반" 파싱
+━━━━━━━━━━━━━━━━━━━━━
+
+_ruleNormalize 함수에서 "반" 처리 부분 수정.
+
+현재 (약 1623번 줄):
+  s = s.replace(/(?:반|절반|1\/2)\s*(?:정도|쯤|만큼)?/g, '0.5 개');
+
+변경 후:
+  // "N개 반" = N.5 (예: "두 박스 반" → "2.5 박스")
+  s = s.replace(new RegExp('(\\d+(?:\\.\\d+)?)\\s*(' + up + ')\\s+반(?=\\s|$)', 'g'), function(m, n, u) {
+    return (parseFloat(n) + 0.5) + ' ' + u;
+  });
+  // "반 단위" = 0.5 (예: "반 박스" → "0.5 박스")
+  s = s.replace(new RegExp('(?:^|\\s)반\\s+(' + up + ')', 'g'), ' 0.5 $1');
+  // 나머지 "반" (단독) = 0.5개
+  s = s.replace(/(?:^|\s)(?:반|절반|1\/2)\s*(?:정도|쯤|만큼)?(?=\s|$)/g, ' 0.5 개');
+
+주의: 이 코드는 기존 "반" 라인을 교체하는 것. up 변수는 이미 위에서 선언되어 있음.
+
+━━━━━━━━━━━━━━━━━━━━━
+4. alias 부분매칭 → 완전일치
+━━━━━━━━━━━━━━━━━━━━━
+
+수정 1에서 이미 처리됨 (_ruleMapItem 변경). 
+"고르곤" → "고르곤졸라" 문제 해결.
+
+━━━━━━━━━━━━━━━━━━━━━
+5. 확인 카드 거래처 자동 반영
+━━━━━━━━━━━━━━━━━━━━━
+
+handleNaturalInput 함수에서 파싱 후 draftItems를 만들 때, 기존 품목의 거래처를 반영.
+
+_draftItems에 vendor 정보 추가. 현재 파싱 결과를 _draftItems에 넣은 후:
+
+현재 (약 1405번 줄 근처):
+    for (const it of _draftItems) {
+
+이 for문 바로 위에 추가:
+    // 기존 품목의 거래처 자동 반영
+    for (const it of _draftItems) {
+      const existing = _items.find(x => x.item_name === it.item_name || x.item_name.replace(/\s/g,'') === it.item_name.replace(/\s/g,''));
+      if (existing && existing.vendor_id) {
+        const v = _vendors.find(v => v.vendor_id === existing.vendor_id);
+        if (v) it.vendor = v.vendor_name;
+      }
+    }
+
+이미 for문이 있으면 그 안에 합쳐도 됨.
+
+━━━━━━━━━━━━━━━━━━━━━
+6. 재고 0 품목 무조건 발주 추천
+━━━━━━━━━━━━━━━━━━━━━
+
+renderOrder 함수의 suggestItems 빌드에서 qty <= 0 skip 조건 수정:
+
+현재:
+      if (order.qty <= 0) continue;
+
+변경 후:
+      if (order.qty <= 0 && Number(it.current_qty) > 0) continue;
+      // 재고 0인데 추천 수량도 0이면 (목표재고 미설정) → 수량 1로 강제 추가
+      if (order.qty <= 0 && Number(it.current_qty) <= 0) {
+        order.qty = 1;
+        order.source = 'stockout';
+      }
+
+그리고 추천 카드의 source 표시 부분에 stockout 추가:
+
+현재:
+              <div class="ord-rec-source">(${it.source === 'consumption_based' ? '일평균 ' + it.avg + it.unit : '목표재고 기준'})</div>
+
+변경 후:
+              <div class="ord-rec-source">(${it.source === 'consumption_based' ? '일평균 ' + it.avg + it.unit : it.source === 'stockout' ? '재고 없음 — 수량 직접 입력' : '목표재고 기준'})</div>
+
+━━━━━━━━━━━━━━━━━━━━━
+7. 추천 카드 개별 제외/입고됨 버튼
+━━━━━━━━━━━━━━━━━━━━━
+
+추천 카드 HTML에서 스테퍼 아래에 버튼 추가:
+
+현재 추천 카드 닫는 </div> 전 (ord-rec-right 닫힌 후):
+          </div>`;
+
+변경 후:
+            <div style="display:flex;gap:6px;margin-top:6px">
+              <button style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);font-size:11px;cursor:pointer;font-family:inherit" onclick="_dismissSuggest(${it.item_id})">제외</button>
+              <button style="flex:1;padding:6px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-lt);color:var(--accent);font-size:11px;cursor:pointer;font-family:inherit" onclick="_receivedSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.suggested_qty},'${it.unit}')">입고됨</button>
+            </div>
+          </div>`;
+
+JavaScript 함수 추가:
+
+function _dismissSuggest(itemId) {
+  _dismissedItemIds.add(itemId);
+  showToast('추천에서 제외됨');
+  renderOrder();
+}
+
+async function _receivedSuggest(itemId, name, qty, unit) {
+  const item = _items.find(i => i.item_id === itemId);
+  if (!item) return;
+  // 입고 처리
+  const inp = document.getElementById('orec_' + itemId);
+  const finalQty = inp ? (parseInt(inp.value) || qty) : qty;
+  const newQty = Number(item.current_qty) + finalQty;
+  await db.from('items').update({ current_qty: newQty, updated_at: new Date().toISOString() }).eq('item_id', itemId);
+  await db.from('kitchen_operations').insert({
+    store_id: SID, item_id: itemId, item_name: name,
+    action_type: 'inbound', quantity: finalQty, unit: unit,
+    qty_before: item.current_qty, qty_after: newQty,
+    input_method: 'order_received', raw_text: '발주 없이 입고'
+  });
+  item.current_qty = newQty;
+  _dismissedItemIds.add(itemId);
+  showToast(`${name} ${finalQty}${unit} 입고 완료`);
+  renderOrder();
+}
+
+━━━━━━━━━━━━━━━━━━━━━
+8. 결과 카드 개별 품목 수정 버튼
+━━━━━━━━━━━━━━━━━━━━━
+
+addResult 함수의 결과 메시지에서 각 품목별로 수정 링크 추가.
+
+이건 결과가 이미 DB에 반영된 후이므로, 수정은 재고 탭에서 하도록 안내하는 것이 더 안전.
+
+addResult에서 undoItems가 있을 때, 각 품목 옆에 "(수정)" 링크 추가:
+
+현재 sysBubble.innerHTML 설정 부분:
+    undoHtml = `<button class="res-undo" id="${uid}">되돌리기</button>`;
+    sysBubble.innerHTML = `${msg.replace(/\n/g,'<br>')}${undoHtml}<span class="chat-time">${now}</span>`;
+
+변경 후:
+    // 각 품목에 개별 수정 링크 추가
+    let editableMsg = msg;
+    if (undoItems && undoItems.length) {
+      for (const it of undoItems) {
+        if (it.item_id && it.name) {
+          const editLink = ` <span style="font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline" onclick="switchTab('inventory',document.querySelectorAll('.nav')[1]);document.getElementById('invSearch').value='${it.name}';renderInventory()">(수정)</span>`;
+          editableMsg = editableMsg.replace(it.name, it.name + editLink);
+        }
+      }
+    }
+    undoHtml = `<button class="res-undo" id="${uid}">되돌리기</button>`;
+    sysBubble.innerHTML = `${editableMsg.replace(/\n/g,'<br>')}${undoHtml}<span class="chat-time">${now}</span>`;
+
+이렇게 하면 "(수정)" 누르면 재고 탭으로 이동 + 해당 품목 검색됨.
+
+━━━━━━━━━━━━━━━━━━━━━
+9. 단위 변경 경고 표시
+━━━━━━━━━━━━━━━━━━━━━
+
+processRequest의 재고 업데이트 부분에서 단위 변경 감지.
+
+processRequest 안, 기존 품목 업데이트 시 (약 726번 줄 근처):
+
+현재 item을 찾은 후, 수량 업데이트 전에 단위 체크 추가:
+
+현재:
+          if (item) {
+            const action = req.action_type || json.action_type || 'stock_check';
+
+변경 후:
+          if (item) {
+            const action = req.action_type || json.action_type || 'stock_check';
+            // 단위 변경 경고
+            if (unit && item.unit && unit !== item.unit) {
+              const msg = `⚠️ ${name}: 단위가 '${item.unit}'에서 '${unit}'(으)로 바뀝니다`;
+              // 결과에 경고 표시 (차단하지 않음)
+              if (!json._unitWarnings) json._unitWarnings = [];
+              json._unitWarnings.push(msg);
+              // 단위 업데이트
+              await db.from('items').update({ unit: unit, updated_at: new Date().toISOString() }).eq('item_id', item.item_id);
+              item.unit = unit;
+            }
+
+그리고 processRequest 결과 반환 시 unitWarnings를 포함:
+
+결과 메시지에 경고 추가. addResult 호출하는 곳에서 json._unitWarnings가 있으면 토스트로 표시.
+
+confirmReview 함수에서 processRequest 호출 후:
+
+현재:
+    const result = await processRequest(req);
+
+변경 후:
+    const result = await processRequest(req);
+    if (req._unitWarnings?.length) {
+      for (const w of req._unitWarnings) showToast(w, 4000);
+    }
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트 체크리스트
+━━━━━━━━━━━━━━━━━━━━━
+□ 1. "브로컬리" 연결 → 다음 입력에서 자동 "브로콜리"
+□ 2. 마이크 탭 → 키보드 올라옴 (녹음 안 함)
+□ 3. "두 박스 반" → 2.5박스
+□ 4. "고르곤 돌체" → 고르곤졸라로 안 바뀜
+□ 5. 기존 품목 입력 → 확인 카드에 거래처 표시
+□ 6. 재고 0 품목 → 발주 추천에 나타남
+□ 7. 추천 카드 "제외" / "입고됨" 버튼 작동
+□ 8. 결과 카드 "(수정)" → 재고 탭 해당 품목으로 이동
+□ 9. 단위 변경 → "⚠️ 단위 바뀝니다" 토스트
