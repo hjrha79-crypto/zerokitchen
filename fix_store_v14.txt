@@ -1,0 +1,203 @@
+ZeroKitchen 매장 테스트 후 수정 — 8건 일괄 적용
+파일: index.html (단일 파일)
+적용 후: git add -A && git commit -m "fix: 매장테스트 8건 일괄수정 v1.4" && git push
+
+━━━━━━━━━━━━━━━━━━━━━
+Fix 1: alias 자동 치환 조건 count>=3 → count>=1
+━━━━━━━━━━━━━━━━━━━━━
+위치: _applyAlias 함수 내 (약 1765줄)
+
+변경 전:
+  if (alias.count >= 3) return alias.corrected_name;  // 자동 치환
+
+변경 후:
+  if (alias.count >= 1) return alias.corrected_name;  // 1회 연결 시 즉시 자동 치환
+
+이유: 사용자가 명시적으로 "연결"을 선택한 건 의도가 확실하므로 1회부터 자동 적용
+
+
+━━━━━━━━━━━━━━━━━━━━━
+Fix 2: "입고됨" → "발주완료" (추천 카드에서 pending 이동)
+━━━━━━━━━━━━━━━━━━━━━
+위치 A: 추천 카드 버튼 텍스트 (약 3057줄)
+
+변경 전:
+  ...onclick=\"_receivedSuggest(${it.item_id},'${it.name.replace(/'/g,\"&#39;\")}',${it.suggested_qty},'${it.unit}')\">입고됨</button>
+
+변경 후:
+  ...onclick=\"_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,\"&#39;\")}',${it.suggested_qty},'${it.unit}')\">발주완료</button>
+
+위치 B: _receivedSuggest 함수 (약 3261줄) → 함수명 변경 + 로직 변경
+
+변경 전 함수 전체:
+async function _receivedSuggest(itemId, name, qty, unit) {
+  const item = _items.find(i => i.item_id === itemId);
+  if (!item) return;
+  const inp = document.getElementById('orec_' + itemId);
+  const finalQty = inp ? (parseInt(inp.value) || qty) : qty;
+  const newQty = Number(item.current_qty) + finalQty;
+  await db.from('items').update({ current_qty: newQty, updated_at: new Date().toISOString() }).eq('item_id', itemId);
+  await db.from('kitchen_operations').insert({
+    store_id: SID, item_id: itemId, item_name: name,
+    action_type: 'inbound', quantity: finalQty, unit: unit,
+    qty_before: item.current_qty, qty_after: newQty,
+    input_method: 'order_received', raw_text: '발주 없이 입고'
+  });
+  item.current_qty = newQty;
+  _dismissedItemIds.add(itemId);
+  showToast(`${name} ${finalQty}${unit} 입고 완료`);
+  renderOrder();
+}
+
+변경 후 함수 전체:
+async function _orderConfirmSuggest(itemId, name, qty, unit) {
+  const item = _items.find(i => i.item_id === itemId);
+  if (!item) return;
+  const inp = document.getElementById('orec_' + itemId);
+  const finalQty = inp ? (parseInt(inp.value) || qty) : qty;
+  const vendorId = item.vendor_id || null;
+  await db.from('order_requests').insert({
+    store_id: SID, item_id: itemId, item_name: name,
+    qty: finalQty, unit: unit, vendor_id: vendorId, status: 'pending'
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  await db.from('daily_orders').insert({
+    store_id: SID, order_date: today,
+    item_id: itemId, item_name: name,
+    recommended_qty: qty, final_qty: finalQty,
+    unit: unit, vendor_id: vendorId,
+    status: 'confirmed', source: 'manual_confirm'
+  });
+  _dismissedItemIds.add(itemId);
+  showToast(`${name} ${finalQty}${unit} 발주 등록됨`);
+  renderOrder();
+}
+
+이유: "입고됨"은 바로 재고 추가였으나, 실제로는 "이미 발주했다"는 뜻이므로 pending 발주로 등록 → 나중에 입고 완료 처리
+
+
+━━━━━━━━━━━━━━━━━━━━━
+Fix 3: "반박스" 붙여쓰기 파싱
+━━━━━━━━━━━━━━━━━━━━━
+위치: _ruleNormalize 함수 내, "반 단위" 처리 부분 (약 1646줄)
+
+현재 코드:
+  // "반 단위" = 0.5 (예: "반 박스" → "0.5 박스")
+  s = s.replace(new RegExp('(?:^|\\s)반\\s+(' + up + ')', 'g'), ' 0.5 $1');
+
+이 줄 바로 아래에 추가:
+  // "반박스" 붙여쓰기 = 0.5 (예: "반박스" → "0.5 박스")
+  s = s.replace(new RegExp('(?:^|\\s)반(' + up + ')', 'g'), ' 0.5 $1');
+
+이유: 매장에서 "반박스", "반봉지" 등 붙여쓰기 빈번 → 현재 띄어쓰기만 처리됨
+
+
+━━━━━━━━━━━━━━━━━━━━━
+Fix 4: "피자도우 반박스" 파싱 오류
+━━━━━━━━━━━━━━━━━━━━━
+Fix 3이 적용되면 "반박스" → "0.5 박스"로 변환되어 자동 해결됨.
+추가 조치 불필요 (Fix 3 적용 후 테스트로 확인)
+
+
+━━━━━━━━━━━━━━━━━━━━━
+Fix 5: _ALIAS에서 '고르곤' 단독 항목 제거
+━━━━━━━━━━━━━━━━━━━━━
+위치: _ALIAS 객체 (약 1582줄)
+
+변경 전:
+  '파마산 치즈':'파마산치즈','고르곤 졸라':'고르곤졸라','고르곤':'고르곤졸라',
+
+변경 후:
+  '파마산 치즈':'파마산치즈','고르곤 졸라':'고르곤졸라',
+
+이유: "고르곤 돌체"가 별도 품목인데 "고르곤"이 "고르곤졸라"로 매칭되어 오류 발생
+
+
+━━━━━━━━━━━━━━━━━━━━━
+Fix 6: 소비량 이상값 방어 (일평균 cap)
+━━━━━━━━━━━━━━━━━━━━━
+위치: _calcConsumption 함수 내 (약 2804줄 부근)
+
+현재 코드:
+      if (consumption < 0) continue;
+
+      consumptions.push(consumption);
+
+변경 후:
+      if (consumption < 0) continue;
+
+      // 이상값 방어: 일평균 50 초과 시 제외 (파마산치즈 188/일 같은 오류 방지)
+      if (consumption > 50) continue;
+
+      consumptions.push(consumption);
+
+이유: 파마산치즈 일평균 188.2개 등 비정상 데이터 제거. 50은 대부분 식자재 일소비 상한으로 충분.
+참고: 향후 품목별 상한 동적 설정 가능하나 현재는 고정값으로 방어.
+
+
+━━━━━━━━━━━━━━━━━━━━━
+Fix 7: 입력 버튼 로딩 복구 안 되는 버그
+━━━━━━━━━━━━━━━━━━━━━
+위치: handleNaturalInput 함수 (약 1227~1240줄)
+
+문제: DOM 조작(parseLoading 추가 등)이 try 블록 바깥에 있어서
+      resList가 null일 때 에러가 try/catch에 잡히지 않고 버튼이 계속 돌아감
+
+변경 전 (1227~1240줄 구간):
+  btn.disabled = true;
+  btnTxt.innerHTML = '<span class="spin"></span>';
+
+  // 로딩 표시
+  const resList = document.getElementById('resList');
+  const loadCard = document.createElement('div');
+  loadCard.className = 'parsing-indicator';
+  loadCard.id = 'parseLoading';
+  loadCard.innerHTML = '<span class="spin" style="border-color:var(--accent-dim);border-top-color:var(--accent)"></span> 파싱 중...';
+  resList.appendChild(loadCard);
+  const chatArea = document.getElementById('chatArea');
+  if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+
+  try {
+
+변경 후:
+  btn.disabled = true;
+  btnTxt.innerHTML = '<span class="spin"></span>';
+
+  try {
+    // 로딩 표시 (try 내부로 이동 — DOM 에러 시에도 finally에서 버튼 복구)
+    const resList = document.getElementById('resList');
+    if (resList) {
+      const loadCard = document.createElement('div');
+      loadCard.className = 'parsing-indicator';
+      loadCard.id = 'parseLoading';
+      loadCard.innerHTML = '<span class="spin" style="border-color:var(--accent-dim);border-top-color:var(--accent)"></span> 파싱 중...';
+      resList.appendChild(loadCard);
+      const chatArea = document.getElementById('chatArea');
+      if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+    }
+
+(기존 try 블록 내용 그대로 이어짐)
+
+
+━━━━━━━━━━━━━━━━━━━━━
+Fix 8: 중복 합치기 시 _saveAlias 호출
+━━━━━━━━━━━━━━━━━━━━━
+위치: _mergeDup 함수 내 (약 3166~3169줄)
+
+현재 코드:
+  for (let i = 1; i < items.length; i++) {
+    await db.from('items').delete().eq('item_id', items[i].item_id);
+    _items = _items.filter(x => x.item_id !== items[i].item_id);
+  }
+
+변경 후:
+  for (let i = 1; i < items.length; i++) {
+    // 삭제되는 품목명이 primary와 다르면 alias 저장
+    if (items[i].item_name !== primary.item_name) {
+      _saveAlias(items[i].item_name, primary.item_name);
+    }
+    await db.from('items').delete().eq('item_id', items[i].item_id);
+    _items = _items.filter(x => x.item_id !== items[i].item_id);
+  }
+
+이유: 중복 합치기에서 삭제되는 품목명을 alias로 등록해야 다음 입력 시 자동 매칭됨

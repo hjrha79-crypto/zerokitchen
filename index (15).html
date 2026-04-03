@@ -1228,7 +1228,7 @@ async function handleNaturalInput() {
   btnTxt.innerHTML = '<span class="spin"></span>';
 
   try {
-    // 로딩 표시 (try 내부로 이동 — DOM 에러 시에도 finally에서 버튼 복구)
+    // 로딩 표시 (try 내부 — DOM 에러 시에도 finally에서 버튼 복구)
     const resList = document.getElementById('resList');
     if (resList) {
       const loadCard = document.createElement('div');
@@ -1239,6 +1239,7 @@ async function handleNaturalInput() {
       const chatArea = document.getElementById('chatArea');
       if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
     }
+
     // 0차: 명령 감지 (발주 조회, 재고 조회 등 — 품목 파싱 불필요)
     if (!_items.length) await refreshItems();
     const cmd = detectCommand(raw);
@@ -1645,7 +1646,7 @@ function _ruleNormalize(text) {
   });
   // "반 단위" = 0.5 (예: "반 박스" → "0.5 박스")
   s = s.replace(new RegExp('(?:^|\\s)반\\s+(' + up + ')', 'g'), ' 0.5 $1');
-  // "반박스" 붙여쓰기 = 0.5 (예: "반박스" → "0.5 박스")
+  // "반박스" 붙여쓰기 = 0.5 (예: "반박스" → "0.5 박스", "반봉지" → "0.5 봉지")
   s = s.replace(new RegExp('(?:^|\\s)반(' + up + ')', 'g'), ' 0.5 $1');
   // 나머지 "반" (단독) = 0.5개
   s = s.replace(/(?:^|\s)(?:반|절반|1\/2)\s*(?:정도|쯤|만큼)?(?=\s|$)/g, ' 0.5 개');
@@ -2806,7 +2807,7 @@ async function _calcConsumption(itemId) {
       // 음수 skip (입고 누락 등)
       if (consumption < 0) continue;
 
-      // 이상값 방어: 일평균 50 초과 시 제외 (파마산치즈 188/일 같은 오류 방지)
+      // 이상값 방어: 일평균 50 초과 시 제외 (비정상 데이터 방지)
       if (consumption > 50) continue;
 
       consumptions.push(consumption);
@@ -3203,6 +3204,9 @@ async function _mergeAllDups() {
     }).eq('item_id', primary.item_id);
     primary.current_qty = totalQty;
     for (let i = 1; i < items.length; i++) {
+      if (items[i].item_name !== primary.item_name) {
+        _saveAlias(items[i].item_name, primary.item_name);
+      }
       await db.from('items').delete().eq('item_id', items[i].item_id);
       _items = _items.filter(x => x.item_id !== items[i].item_id);
     }
@@ -3274,6 +3278,7 @@ async function _orderConfirmSuggest(itemId, name, qty, unit) {
   const inp = document.getElementById('orec_' + itemId);
   const finalQty = inp ? (parseInt(inp.value) || qty) : qty;
   const vendorId = item.vendor_id || null;
+  // pending 발주로 등록 (재고 직접 추가 X)
   await db.from('order_requests').insert({
     store_id: SID, item_id: itemId, item_name: name,
     qty: finalQty, unit: unit, vendor_id: vendorId, status: 'pending'
