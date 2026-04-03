@@ -84,24 +84,28 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .inv-view-toggle{display:flex;gap:4px}
 .inv-view-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;font-family:inherit}
 .inv-view-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
-.inv-list-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:6px}
+.inv-list-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:4px}
 .inv-list-card.low{border-left:3px solid var(--warn)}
 .inv-list-card.zero{border-left:3px solid var(--red)}
-.inv-lc-row1{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
-.inv-lc-name{font-size:14px;font-weight:700;color:var(--text);flex:1;border:none;background:transparent;outline:none;padding:0;font-family:inherit}
+.inv-lc-r{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.inv-lc-r+.inv-lc-r{margin-top:4px}
+.inv-lc-name{font-size:13px;font-weight:700;color:var(--text);border:none;background:transparent;outline:none;padding:0;font-family:inherit;width:100px;flex:0 0 100px;overflow:hidden;text-overflow:ellipsis}
 .inv-lc-name:focus{border-bottom:2px solid var(--accent)}
-.inv-lc-del{border:none;background:none;cursor:pointer;font-size:14px;padding:4px;color:var(--muted)}
-.inv-lc-row2{display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap;justify-content:space-between}
-.inv-lc-field{display:flex;align-items:center;gap:2px}
-.inv-lc-num{width:48px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 4px;font-size:14px;font-weight:700;font-family:'JetBrains Mono',monospace;text-align:center;color:var(--accent);outline:none;box-sizing:border-box;-moz-appearance:textfield;appearance:textfield}
-.inv-lc-num::-webkit-outer-spin-button,.inv-lc-num::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-.inv-lc-num:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(30,110,60,.12)}
-.inv-lc-num.dim{color:var(--muted);font-weight:400}
-.inv-lc-sel{border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:6px 2px;font-size:12px;font-family:inherit;color:var(--text);outline:none;box-sizing:border-box}
-.inv-lc-sel:focus{border-color:var(--accent)}
-.inv-lc-label{font-size:10px;color:var(--muted);margin-right:1px}
-.inv-lc-arrow{font-size:10px;color:var(--muted);margin:0 2px}
-.inv-lc-row3{display:flex;gap:6px;align-items:center;width:100%}
+.inv-lc-n{width:40px;border:1px solid var(--border);background:var(--bg);border-radius:5px;padding:5px 3px;font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;text-align:center;color:var(--accent);outline:none;box-sizing:border-box;-moz-appearance:textfield;appearance:textfield}
+.inv-lc-n::-webkit-outer-spin-button,.inv-lc-n::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.inv-lc-n:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(30,110,60,.1)}
+.inv-lc-n.dim{color:var(--muted);font-weight:400}
+.inv-lc-n.warn{color:var(--warn)}
+.inv-lc-n.red{color:var(--red)}
+.inv-lc-s{border:1px solid var(--border);background:var(--bg);border-radius:5px;padding:5px 2px;font-size:11px;font-family:inherit;color:var(--text);outline:none;box-sizing:border-box}
+.inv-lc-s:focus{border-color:var(--accent)}
+.inv-lc-lb{font-size:10px;color:var(--muted);white-space:nowrap}
+.inv-lc-del{border:none;background:none;cursor:pointer;font-size:12px;padding:2px;color:var(--muted);margin-left:auto}
+.inv-lc-step{display:inline-flex;align-items:center;gap:0}
+.inv-lc-step button{width:24px;height:26px;border:1px solid var(--border);background:var(--surface2);font-size:14px;font-weight:700;cursor:pointer;color:var(--text);font-family:inherit;padding:0;line-height:1}
+.inv-lc-step button:first-child{border-radius:5px 0 0 5px;border-right:none}
+.inv-lc-step button:last-child{border-radius:0 5px 5px 0;border-left:none}
+.inv-lc-step .inv-lc-n{border-radius:0;width:36px}
 .inv-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 12px;display:flex;flex-direction:column;gap:2px;cursor:pointer;transition:all .15s;-webkit-user-select:none;user-select:none}
 .inv-card:active{transform:scale(0.98)}
 .inv-card.low{border-left:3px solid var(--warn);background:rgba(192,84,10,.04)}
@@ -2349,6 +2353,15 @@ function _setInvView(view) {
   renderInventory();
 }
 
+function _lStep(itemId, field, delta) {
+  const inp = document.querySelector(`input[data-id="${itemId}"][data-field="${field}"]`);
+  if (!inp) return;
+  let val = parseFloat(inp.value) || 0;
+  val = Math.max(0, val + delta);
+  inp.value = val;
+  _saveListField(inp);
+}
+
 async function _saveListField(el) {
   const id = parseInt(el.dataset.id);
   const field = el.dataset.field;
@@ -2468,40 +2481,35 @@ function renderInventory() {
     const vOpts = _vendors.map(v => `<option value="${v.vendor_id}">${v.vendor_name}</option>`).join('');
     grid.innerHTML = items.map(it => {
       const qty = Number(it.current_qty), tgt = Number(it.target_qty), min = Number(it.min_stock || 0);
+      const ouq = Number(it.order_unit_qty) || 1, oun = it.order_unit_name || '';
       const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+      const qCls = qty <= 0 ? 'red' : qty < tgt ? 'warn' : '';
       const uSel = unitOpts.map(u => `<option value="${u}"${(it.unit||'개')===u?' selected':''}>${u}</option>`).join('');
       const vSel = vOpts.replace(new RegExp(`value="${it.vendor_id}"`), `value="${it.vendor_id}" selected`);
       return `<div class="inv-list-card ${cls}">
-        <div class="inv-lc-row1">
+        <div class="inv-lc-r">
           <input class="inv-lc-name" value="${it.item_name}" data-id="${it.item_id}" data-field="item_name" onchange="_saveListField(this)">
+          <div class="inv-lc-step">
+            <button onclick="_lStep(${it.item_id},'current_qty',-1)">−</button>
+            <input class="inv-lc-n ${qCls}" type="number" inputmode="numeric" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)">
+            <button onclick="_lStep(${it.item_id},'current_qty',1)">+</button>
+          </div>
+          <select class="inv-lc-s" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:52px">${uSel}</select>
+          <span class="inv-lc-lb">목표</span>
+          <input class="inv-lc-n ${tgt===0?'dim':''}" type="number" inputmode="numeric" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)">
+          <span class="inv-lc-lb">최소</span>
+          <input class="inv-lc-n ${min===0?'dim':''}" type="number" inputmode="numeric" value="${min}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)">
           <button class="inv-lc-del" onclick="_deleteListItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">🗑</button>
         </div>
-        <div class="inv-lc-row2">
-          <div class="inv-lc-field">
-            <input class="inv-lc-num" type="number" inputmode="numeric" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)" style="width:52px;font-size:16px;color:${cls==='zero'?'var(--red)':cls==='low'?'var(--warn)':'var(--accent)'}">
-            <select class="inv-lc-sel" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:60px">${uSel}</select>
-          </div>
-          <div class="inv-lc-field">
-            <span class="inv-lc-label">목표</span>
-            <input class="inv-lc-num ${tgt===0?'dim':''}" type="number" inputmode="numeric" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)" style="width:46px">
-          </div>
-          <div class="inv-lc-field">
-            <span class="inv-lc-label">최소</span>
-            <input class="inv-lc-num ${min===0?'dim':''}" type="number" inputmode="numeric" value="${min}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)" style="width:46px">
-          </div>
-        </div>
-        <div class="inv-lc-row3">
-          <span class="inv-lc-label">거래처</span>
-          <select class="inv-lc-sel" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="flex:1">
-            <option value="">미지정</option>${vSel}
+        <div class="inv-lc-r">
+          <span class="inv-lc-lb">거래처</span>
+          <select class="inv-lc-s" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="width:90px">
+            <option value="">-</option>${vSel}
           </select>
-        </div>
-        <div class="inv-lc-row3" style="margin-top:4px">
-          <span class="inv-lc-label">발주단위</span>
-          <input class="inv-lc-num ${(Number(it.order_unit_qty)||1)===1?'dim':''}" type="number" inputmode="numeric" value="${Number(it.order_unit_qty)||1}" data-id="${it.item_id}" data-field="order_unit_qty" onchange="_saveListField(this)" style="width:42px" min="1">
-          <span class="inv-lc-label">${it.unit||'개'} =</span>
-          <input class="inv-lc-num ${!(it.order_unit_name)?'dim':''}" type="number" inputmode="numeric" value="1" style="width:30px" disabled>
-          <input class="inv-lc-sel" value="${it.order_unit_name||''}" data-id="${it.item_id}" data-field="order_unit_name" onchange="_saveListField(this)" placeholder="예:박스" style="width:60px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:5px 4px;font-size:12px;outline:none">
+          <span class="inv-lc-lb">발주</span>
+          <input class="inv-lc-n ${ouq<=1?'dim':''}" type="number" inputmode="numeric" value="${ouq}" data-id="${it.item_id}" data-field="order_unit_qty" onchange="_saveListField(this)" style="width:32px" min="1">
+          <span class="inv-lc-lb">${it.unit||'개'}=1</span>
+          <input class="inv-lc-s" value="${oun}" data-id="${it.item_id}" data-field="order_unit_name" onchange="_saveListField(this)" placeholder="박스" style="width:48px;font-size:11px;padding:5px 3px">
         </div>
       </div>`;
     }).join('');
