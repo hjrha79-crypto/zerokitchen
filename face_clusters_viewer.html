@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Face Clusters Viewer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', sans-serif; background: #0f0f0f; color: #ececec; font-size: 15px; line-height: 1.6; padding: 32px; }
+
+  .top-bar { display: flex; align-items: center; gap: 16px; margin-bottom: 20px; }
+  .back-btn {
+    background: #1e1e1e; border: 1px solid #444; color: #bbb; border-radius: 8px;
+    padding: 10px 18px; cursor: pointer; font-size: 14px; font-weight: 500; text-decoration: none;
+    transition: all 0.15s;
+  }
+  .back-btn:hover { border-color: #666; color: #fff; }
+  h1 { font-size: 26px; }
+
+  .progress-bar { margin-bottom: 20px; }
+  .progress-label { display: flex; justify-content: space-between; font-size: 13px; color: #aaa; margin-bottom: 4px; }
+  .progress-track { height: 5px; background: #1e1e1e; border-radius: 3px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, #4a9eff, #6db3ff); border-radius: 3px; transition: width 0.4s; }
+
+  .stats { display: flex; gap: 16px; margin-bottom: 20px; font-size: 14px; color: #bbb; flex-wrap: wrap; }
+  .stats span { background: #1e1e1e; border: 1px solid #444; padding: 8px 16px; border-radius: 6px; }
+
+  .filter-bar { display: flex; gap: 12px; margin-bottom: 24px; align-items: center; flex-wrap: wrap; }
+  .filter-btn {
+    background: #2a2a2a; border: 1px solid #444; color: #ccc; border-radius: 6px;
+    padding: 8px 16px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;
+  }
+  .filter-btn:hover { border-color: #666; }
+  .filter-btn.active { background: #4a9eff; border-color: #4a9eff; color: #fff; }
+
+  .cluster { background: #1e1e1e; border: 1px solid #333; border-radius: 12px; padding: 24px; margin-bottom: 24px; transition: opacity 0.3s; }
+  .cluster.excluded { opacity: 0.35; }
+  .cluster-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .cluster-num { font-size: 18px; font-weight: 700; color: #4a9eff; min-width: 44px; }
+  .name-input {
+    background: #2a2a2a; border: 1px solid #444; border-radius: 6px; color: #ffffff;
+    padding: 8px 14px; font-size: 15px; width: 220px; outline: none; transition: border-color 0.2s;
+  }
+  .name-input:focus { border-color: #4a9eff; }
+  .name-input::placeholder { color: #888; }
+  .save-btn {
+    background: #4a9eff; color: #fff; border: none; border-radius: 6px;
+    padding: 8px 18px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background 0.2s;
+  }
+  .save-btn:hover { background: #3a8eef; }
+  .save-btn:disabled { background: #2a5a9a; cursor: not-allowed; }
+  .exclude-btn {
+    background: #2a1a1a; border: 1px solid #553333; color: #ff6b6b; border-radius: 6px;
+    padding: 8px 18px; cursor: pointer; font-size: 14px; font-weight: 500; transition: all 0.2s;
+  }
+  .exclude-btn:hover { background: #3a2020; border-color: #ff6b6b; }
+  .exclude-btn.excluded { background: #553333; color: #fff; }
+  .saved-msg { color: #4a9eff; font-size: 13px; opacity: 0; transition: opacity 0.3s; }
+  .saved-msg.show { opacity: 1; }
+  .face-count { color: #aaa; font-size: 14px; margin-left: auto; }
+
+  .photos { display: flex; gap: 12px; flex-wrap: wrap; }
+  .photo-card { position: relative; width: 110px; height: 110px; overflow: hidden; border-radius: 8px; background: #222; }
+  .photo-card img { width: 110px; height: 110px; object-fit: cover; border-radius: 8px; display: block; }
+  .photo-card .face-x-btn {
+    position: absolute; top: 4px; right: 4px;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: rgba(0,0,0,0.7); border: 1px solid rgba(255,100,100,0.4);
+    color: #ff6b6b; font-size: 12px; line-height: 22px; text-align: center;
+    cursor: pointer; opacity: 0; transition: opacity 0.15s;
+  }
+  .photo-card:hover .face-x-btn { opacity: 1; }
+  .photo-card.face-excluded img { opacity: 0.2; }
+  .photo-card.face-excluded .face-x-btn { opacity: 1; background: #553333; color: #fff; border-color: #ff6b6b; }
+  .img-error { display: flex; align-items: center; justify-content: center; width: 110px; height: 110px; color: #555; font-size: 11px; text-align: center; }
+
+  .loading { text-align: center; padding: 60px; color: #666; font-size: 16px; }
+  #clusters-container { display: flex; flex-direction: column; }
+
+  .load-more-btn {
+    width: 100%; padding: 16px; background: #1e1e1e; border: 1px dashed #444;
+    border-radius: 12px; color: #aaa; font-size: 15px; cursor: pointer;
+    margin-top: 8px; transition: all 0.2s;
+  }
+  .load-more-btn:hover { border-color: #4a9eff; color: #4a9eff; }
+
+  /* 저장 인디케이터 */
+  .saving-badge {
+    position: fixed; top: 16px; right: 16px;
+    background: #1e1e1e; border: 1px solid #444; border-radius: 8px;
+    padding: 8px 16px; font-size: 13px; color: #aaa;
+    opacity: 0; transition: opacity 0.3s; z-index: 100;
+  }
+  .saving-badge.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+  <a class="back-btn" href="main.html">&larr; 홈으로</a>
+  <h1>Face Clusters</h1>
+</div>
+
+<div class="progress-bar">
+  <div class="progress-label">
+    <span id="progress-text">이름 지정 0/0</span>
+    <span id="progress-pct">0%</span>
+  </div>
+  <div class="progress-track">
+    <div class="progress-fill" id="progress-fill" style="width:0%"></div>
+  </div>
+</div>
+
+<div class="stats" id="stats"></div>
+<div class="filter-bar">
+  <button class="filter-btn active" data-filter="all">전체</button>
+  <button class="filter-btn" data-filter="named">이름 있는 것만</button>
+  <button class="filter-btn" data-filter="unnamed">이름 없는 것만</button>
+  <button class="filter-btn" data-filter="excluded">얼굴 아님만</button>
+</div>
+
+<div id="app"><div class="loading">Loading...</div></div>
+<div class="saving-badge" id="saving-badge">저장 중...</div>
+
+<script>
+const CLUSTERS_PATH = '.album_reset/face_clusters.json';
+const PAGE_SIZE = 25; // 한 번에 보여줄 클러스터 수
+
+let clustersData = null;
+let filteredClusters = []; // 현재 필터 기준 클러스터 배열
+let renderedCount = 0;
+let currentFilter = 'all';
+let allClusterDivs = [];
+
+// ── 저장 (단일 클러스터) ──
+let saveQueue = {};
+let saveTimer = null;
+
+function savingBadge(show) {
+  document.getElementById('saving-badge').classList.toggle('show', show);
+}
+
+function saveCluster(cluster_id, name, excluded) {
+  saveQueue[cluster_id] = { name, excluded };
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flushSave, 400);
+}
+
+async function flushSave() {
+  const entries = Object.entries(saveQueue);
+  saveQueue = {};
+  if (entries.length === 0) return;
+  savingBadge(true);
+  for (const [cluster_id, { name, excluded }] of entries) {
+    try {
+      await fetch('/save-cluster', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cluster_id, name, excluded })
+      });
+    } catch(e) { console.error('[저장 오류]', e); }
+  }
+  savingBadge(false);
+}
+
+// ── 데이터 로드 ──
+async function loadData() {
+  const resp = await fetch(CLUSTERS_PATH);
+  clustersData = await resp.json();
+}
+
+function getCluster(id) {
+  return clustersData.clusters.find(c => c.cluster_id === id);
+}
+
+// ── 통계 업데이트 ──
+function updateStats() {
+  const total = clustersData.clusters.length;
+  let excluded = 0, named = 0;
+  for (const c of clustersData.clusters) {
+    if (c.excluded) excluded++;
+    else if ((c.name || '').trim()) named++;
+  }
+  const remaining = total - excluded - named;
+  document.getElementById('stats').innerHTML =
+    `<span>전체 ${total}개</span>` +
+    `<span>이름 지정 ${named}개</span>` +
+    `<span>얼굴 아님 ${excluded}개</span>` +
+    `<span>남은 인물 ${remaining}개</span>`;
+  const done = named + excluded;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  document.getElementById('progress-text').textContent = `이름 지정 ${named}/${total}`;
+  document.getElementById('progress-pct').textContent = `${pct}%`;
+  document.getElementById('progress-fill').style.width = `${pct}%`;
+}
+
+// ── 필터링 ──
+function buildFilteredList() {
+  filteredClusters = clustersData.clusters.filter(c => {
+    const excl = !!c.excluded;
+    const named = !!(c.name || '').trim();
+    if (currentFilter === 'excluded') return excl;
+    if (excl) return false;
+    if (currentFilter === 'unnamed') return !named;
+    if (currentFilter === 'named') return named;
+    return true;
+  });
+}
+
+// ── 이미지 URL ──
+function thumbUrl(sourcePath) {
+  return '/thumb?path=' + encodeURIComponent(sourcePath) + '&w=220';
+}
+
+// ── 클러스터 렌더링 ──
+function pickRepresentatives(faces, count) {
+  const seen = new Set();
+  const picked = [];
+  for (const face of faces) {
+    if (!seen.has(face.filename)) {
+      seen.add(face.filename);
+      picked.push(face);
+      if (picked.length >= count) break;
+    }
+  }
+  return picked;
+}
+
+function renderCluster(cluster, displayIndex) {
+  const div = document.createElement('div');
+  div.className = 'cluster';
+  div.dataset.clusterId = cluster.cluster_id;
+
+  const excluded = !!cluster.excluded;
+  const savedName = cluster.name || '';
+  div.dataset.excluded = excluded ? '1' : '0';
+  div.dataset.named = savedName ? '1' : '0';
+  if (excluded) div.classList.add('excluded');
+
+  const reps = pickRepresentatives(cluster.faces, 3);
+  const uniquePhotos = new Set(cluster.faces.map(f => f.filename)).size;
+
+  div.innerHTML = `
+    <div class="cluster-header">
+      <span class="cluster-num">#${displayIndex}</span>
+      <input class="name-input" type="text" placeholder="이름 입력..." value="${savedName.replace(/"/g, '&quot;')}" data-cluster="${cluster.cluster_id}">
+      <button class="save-btn">저장</button>
+      <button class="exclude-btn ${excluded ? 'excluded' : ''}">${excluded ? '제외됨 (복원)' : '얼굴 아님'}</button>
+      <span class="saved-msg">저장됨 ✓</span>
+      <span class="face-count">얼굴 ${cluster.face_count}개 · 사진 ${uniquePhotos}장</span>
+    </div>
+    <div class="photos"></div>
+  `;
+
+  const photosDiv = div.querySelector('.photos');
+  for (const face of reps) {
+    const card = document.createElement('div');
+    card.className = 'photo-card' + (face.excluded ? ' face-excluded' : '');
+
+    const img = document.createElement('img');
+    img.loading = 'lazy';
+    img.src = thumbUrl(face.source_path);
+    img.onerror = () => { img.style.display = 'none'; card.innerHTML += '<div class="img-error">로드 실패</div>'; };
+    card.appendChild(img);
+
+    const xBtn = document.createElement('div');
+    xBtn.className = 'face-x-btn';
+    xBtn.textContent = face.excluded ? '↩' : '✕';
+    xBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      face.excluded = !face.excluded;
+      card.classList.toggle('face-excluded', face.excluded);
+      xBtn.textContent = face.excluded ? '↩' : '✕';
+      saveCluster(cluster.cluster_id, cluster.name, cluster.excluded);
+    });
+    card.appendChild(xBtn);
+    photosDiv.appendChild(card);
+  }
+
+  const input = div.querySelector('.name-input');
+  const saveBtn = div.querySelector('.save-btn');
+  const msg = div.querySelector('.saved-msg');
+  const excludeBtn = div.querySelector('.exclude-btn');
+
+  const doSave = () => {
+    const c = getCluster(cluster.cluster_id);
+    c.name = input.value.trim();
+    div.dataset.named = c.name ? '1' : '0';
+    msg.classList.add('show');
+    setTimeout(() => msg.classList.remove('show'), 2000);
+    saveCluster(cluster.cluster_id, c.name, c.excluded);
+    updateStats();
+  };
+
+  saveBtn.addEventListener('click', doSave);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); doSave(); }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const visibleInputs = document.querySelectorAll('.cluster:not([style*="display: none"]) .name-input');
+      const arr = Array.from(visibleInputs);
+      const idx = arr.indexOf(input);
+      const next = arr[e.shiftKey ? idx - 1 : idx + 1];
+      if (next) next.focus();
+    }
+  });
+
+  excludeBtn.addEventListener('click', () => {
+    const c = getCluster(cluster.cluster_id);
+    c.excluded = !c.excluded;
+    div.dataset.excluded = c.excluded ? '1' : '0';
+    div.classList.toggle('excluded', c.excluded);
+    excludeBtn.classList.toggle('excluded', c.excluded);
+    excludeBtn.textContent = c.excluded ? '제외됨 (복원)' : '얼굴 아님';
+    saveCluster(cluster.cluster_id, c.name, c.excluded);
+    updateStats();
+    // 필터가 active라면 숨김
+    if (currentFilter !== 'all' && currentFilter !== 'excluded') {
+      if (c.excluded) div.style.display = 'none';
+    }
+  });
+
+  allClusterDivs.push(div);
+  return div;
+}
+
+// ── 페이지 로드 ──
+function loadMore() {
+  const container = document.getElementById('clusters-container');
+  const oldBtn = document.getElementById('load-more-btn');
+  if (oldBtn) oldBtn.remove();
+
+  const end = Math.min(renderedCount + PAGE_SIZE, filteredClusters.length);
+  for (let i = renderedCount; i < end; i++) {
+    const div = renderCluster(filteredClusters[i], i + 1);
+    container.appendChild(div);
+  }
+  renderedCount = end;
+
+  if (renderedCount < filteredClusters.length) {
+    const btn = document.createElement('button');
+    btn.className = 'load-more-btn';
+    btn.id = 'load-more-btn';
+    btn.textContent = `더 보기 (${renderedCount}/${filteredClusters.length}개 표시 중)`;
+    btn.onclick = loadMore;
+    container.appendChild(btn);
+
+    // 스크롤 자동 감지
+    if (window._loadMoreObserver) window._loadMoreObserver.disconnect();
+    const obs = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) loadMore();
+    }, { rootMargin: '200px' });
+    obs.observe(btn);
+    window._loadMoreObserver = obs;
+  }
+}
+
+function resetAndRender() {
+  allClusterDivs = [];
+  renderedCount = 0;
+  const container = document.getElementById('clusters-container');
+  container.innerHTML = '';
+  buildFilteredList();
+  loadMore();
+}
+
+document.querySelector('.filter-bar').addEventListener('click', (e) => {
+  const btn = e.target.closest('.filter-btn');
+  if (!btn) return;
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentFilter = btn.dataset.filter;
+  resetAndRender();
+});
+
+async function init() {
+  const app = document.getElementById('app');
+  try {
+    await loadData();
+    app.innerHTML = '<div id="clusters-container"></div>';
+    updateStats();
+    resetAndRender();
+  } catch(err) {
+    app.innerHTML = `<div class="loading">Error: ${err.message}</div>`;
+  }
+}
+
+init();
+</script>
+</body>
+</html>

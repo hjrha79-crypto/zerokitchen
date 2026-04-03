@@ -2048,12 +2048,14 @@ async function _showSimilarChoices(checks, rawText) {
       const origHTML = wrap.innerHTML;
       wrap.innerHTML = `
         <div class="similar-card">
+          <button class="card-close-x" id="simBtnClose">✕</button>
           <div class="similar-card-title">${chk.newName}을(를) 어떻게 처리할까요?</div>
           <div class="similar-card-btns">
             <button class="similar-btn-link" id="simBtnLink">${chk.existName}(으)로 연결</button>
             <button class="similar-btn-new"  id="simBtnNew">새 품목으로 추가</button>
           </div>
         </div>`;
+      document.getElementById('simBtnClose').onclick = () => { wrap.innerHTML = origHTML; resolve('new'); };
       document.getElementById('simBtnLink').onclick = () => { wrap.innerHTML = origHTML; resolve('link'); };
       document.getElementById('simBtnNew').onclick  = () => { wrap.innerHTML = origHTML; resolve('new'); };
       panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
