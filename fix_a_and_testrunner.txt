@@ -1,0 +1,100 @@
+ZeroKitchen — A 버그 3건 + 기대값 테스트 러너 추가
+파일: index.html, zk_test_1000.json (신규)
+
+작업 순서:
+1. index.html에 A 버그 3건 수정 (아래 내용)
+2. index.html에 테스트 러너 함수 추가 (아래 내용)
+3. zk_test_1000.json을 프로젝트 루트에 복사
+4. git add -A && git commit -m "fix: A버그3건+기대값테스트러너" && git push
+
+━━━━━━━━━━━━━━━━━━━━━
+A1: 이월 품목 제외/발주완료 안 사라지는 버그
+━━━━━━━━━━━━━━━━━━━━━
+위치: renderOrder 내 이월 품목 합치기 루프
+
+변경 전:
+    // 이월 품목 합치기 (중복 제거)
+    for (const def of _deferredItems) {
+      const existing = suggestItems.find(s => s.item_id === def.item_id);
+
+변경 후:
+    // 이월 품목 합치기 (중복 제거 + dismissed 체크)
+    for (const def of _deferredItems) {
+      if (_dismissedItemIds.has(def.item_id)) continue; // 제외/발주완료한 이월 품목 skip
+      const existing = suggestItems.find(s => s.item_id === def.item_id);
+
+
+━━━━━━━━━━━━━━━━━━━━━
+A2: 세션 중복 감지 — 동작 다르면 skip
+━━━━━━━━━━━━━━━━━━━━━
+위치: handleNaturalInput 내 Step 4
+
+변경 전:
+      // Step 4: 세션 이력 동일 품목 재입력 감지 ("추가"=inbound 동작은 합산 건너뜀)
+      const dupChecks = _draftItems.map((it, idx) => {
+        if (it.action === 'inbound') return null; // "추가" 키워드 시 세션 합산 스킵
+
+변경 후:
+      // Step 4: 세션 이력 동일 품목 재입력 감지 (명시적 동작은 합산 건너뜀)
+      const dupChecks = _draftItems.map((it, idx) => {
+        if (it.action === 'inbound' || it.action === 'consume') return null; // 명시적 동작 시 세션 합산 스킵
+
+
+━━━━━━━━━━━━━━━━━━━━━
+A3: 모든 팝업 X 버튼 추가 (2곳)
+━━━━━━━━━━━━━━━━━━━━━
+
+A3-1) _showOutlierConfirm 함수 내 dup-card HTML:
+<div class="dup-card"> 바로 다음 줄에 추가:
+          <button class="card-close-x" id="outlierClose">✕</button>
+그리고 outlierOk onclick 위에 추가:
+      document.getElementById('outlierClose').onclick = () => {
+        wrap.innerHTML = origHTML; resolve('confirm');
+      };
+
+A3-2) _showDupChoices 함수 내 dup-card HTML:
+<div class="dup-card"> 바로 다음 줄에 추가:
+          <button class="card-close-x" id="dupClose">✕</button>
+그리고 mergeBtn 선언 위에 추가:
+      const closeBtn = document.getElementById('dupClose');
+그리고 mergeBtn onclick 위에 추가:
+      if (closeBtn) closeBtn.onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); restore(); resolve('cancel'); } };
+
+
+━━━━━━━━━━━━━━━━━━━━━
+테스트 러너 추가 (2곳)
+━━━━━━━━━━━━━━━━━━━━━
+
+1) 테스트 탭 HTML (tab-test 내 parseTestBtn 옆):
+기존 버튼 옆에 추가:
+    <button class="btn-run" style="margin-left:8px;background:var(--accent)" onclick="_runExpectTest()" id="expectTestBtn">▶ 기대값 검증 (1000개)</button>
+그 아래에 카테고리 필터 UI 추가:
+    <div style="margin-top:6px;font-size:11px;color:var(--dim)">
+      <label><input type="checkbox" id="expectShowPass"> PASS도 표시</label>
+      <label style="margin-left:10px"><input type="checkbox" id="expectFilterCat"> 카테고리 필터:</label>
+      <select id="expectCatSelect" style="font-size:11px;padding:2px">
+        <option value="">전체</option>
+        <option value="basic">basic</option>
+        <option value="half">half</option>
+        <option value="multi_item">multi_item</option>
+        <option value="correction">correction</option>
+        <option value="zero">zero</option>
+        <option value="action">action</option>
+        <option value="conjunction">conjunction</option>
+        <option value="no_space">no_space</option>
+        <option value="alias">alias</option>
+        <option value="edge">edge</option>
+      </select>
+    </div>
+
+2) JS: setTimeout(()=>init(), 500); 바로 위에 _runExpectTest(), _loadExpectJson(), _executeExpectTest() 함수 추가
+   (이 함수들은 index.html에 이미 적용된 수정본 참조)
+
+JSON 파일 URL: GitHub raw에서 로드 시도 → 실패 시 textarea 붙여넣기 fallback
+
+
+━━━━━━━━━━━━━━━━━━━━━
+zk_test_1000.json 배치
+━━━━━━━━━━━━━━━━━━━━━
+프로젝트 루트(C:\Users\hjrha\zerokitchen)에 zk_test_1000.json 파일을 복사해야 함
+이 파일은 outputs에서 다운로드 가능

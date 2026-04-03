@@ -482,6 +482,30 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
   <div class="card">
     <div class="card-title">파싱 자동 테스트</div>
     <button class="btn-run" onclick="_runParseTest()" id="parseTestBtn">▶ 1000개 테스트 실행</button>
+    <button class="btn-run" style="margin-left:8px;background:var(--accent)" onclick="_runExpectTest()" id="expectTestBtn">▶ 기대값 검증 (1000개)</button>
+    <div style="margin-top:6px;font-size:11px;color:var(--dim)">
+      <label><input type="checkbox" id="expectShowPass"> PASS도 표시</label>
+      <label style="margin-left:10px"><input type="checkbox" id="expectFilterCat"> 카테고리 필터:</label>
+      <select id="expectCatSelect" style="font-size:11px;padding:2px">
+        <option value="">전체</option>
+        <option value="basic">basic</option>
+        <option value="half">half</option>
+        <option value="half_multi">half_multi</option>
+        <option value="multi_item">multi_item</option>
+        <option value="correction">correction</option>
+        <option value="zero">zero</option>
+        <option value="zero_multi">zero_multi</option>
+        <option value="action">action</option>
+        <option value="action_multi">action_multi</option>
+        <option value="conjunction">conjunction</option>
+        <option value="no_space">no_space</option>
+        <option value="alias">alias</option>
+        <option value="edge">edge</option>
+        <option value="particle">particle</option>
+        <option value="compound_name">compound_name</option>
+        <option value="unit_convert">unit_convert</option>
+      </select>
+    </div>
     <div id="parseTestResult" style="margin-top:10px;font-size:12px;max-height:400px;overflow-y:auto"></div>
   </div>
   <div class="card">
@@ -1228,7 +1252,7 @@ async function handleNaturalInput() {
   btnTxt.innerHTML = '<span class="spin"></span>';
 
   try {
-    // 로딩 표시 (try 내부로 이동 — DOM 에러 시에도 finally에서 버튼 복구)
+    // 로딩 표시 (try 내부 — DOM 에러 시에도 finally에서 버튼 복구)
     const resList = document.getElementById('resList');
     if (resList) {
       const loadCard = document.createElement('div');
@@ -1239,6 +1263,7 @@ async function handleNaturalInput() {
       const chatArea = document.getElementById('chatArea');
       if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
     }
+
     // 0차: 명령 감지 (발주 조회, 재고 조회 등 — 품목 파싱 불필요)
     if (!_items.length) await refreshItems();
     const cmd = detectCommand(raw);
@@ -1516,9 +1541,9 @@ async function handleNaturalInput() {
     if (similarChecks.length) {
       await _showSimilarChoices(similarChecks, raw);
     } else {
-      // Step 4: 세션 이력 동일 품목 재입력 감지 ("추가"=inbound 동작은 합산 건너뜀)
+      // Step 4: 세션 이력 동일 품목 재입력 감지 (명시적 동작은 합산 건너뜀)
       const dupChecks = _draftItems.map((it, idx) => {
-        if (it.action === 'inbound') return null; // "추가" 키워드 시 세션 합산 스킵
+        if (it.action === 'inbound' || it.action === 'consume') return null; // 명시적 동작 시 세션 합산 스킵
         const prev = _sessionInputs.find(s => s.item_name === it.item_name);
         return prev ? { idx, item_name: it.item_name, prevQty: prev.quantity, prevUnit: prev.unit, newQty: it.quantity, newUnit: it.unit || prev.unit, action: it.action } : null;
       }).filter(Boolean);
@@ -1645,7 +1670,7 @@ function _ruleNormalize(text) {
   });
   // "반 단위" = 0.5 (예: "반 박스" → "0.5 박스")
   s = s.replace(new RegExp('(?:^|\\s)반\\s+(' + up + ')', 'g'), ' 0.5 $1');
-  // "반박스" 붙여쓰기 = 0.5 (예: "반박스" → "0.5 박스")
+  // "반박스" 붙여쓰기 = 0.5 (예: "반박스" → "0.5 박스", "반봉지" → "0.5 봉지")
   s = s.replace(new RegExp('(?:^|\\s)반(' + up + ')', 'g'), ' 0.5 $1');
   // 나머지 "반" (단독) = 0.5개
   s = s.replace(/(?:^|\s)(?:반|절반|1\/2)\s*(?:정도|쯤|만큼)?(?=\s|$)/g, ' 0.5 개');
@@ -2808,7 +2833,7 @@ async function _calcConsumption(itemId) {
       // 음수 skip (입고 누락 등)
       if (consumption < 0) continue;
 
-      // 이상값 방어: 일평균 50 초과 시 제외 (파마산치즈 188/일 같은 오류 방지)
+      // 이상값 방어: 일평균 50 초과 시 제외 (비정상 데이터 방지)
       if (consumption > 50) continue;
 
       consumptions.push(consumption);
@@ -2917,8 +2942,9 @@ async function renderOrder() {
       });
     }
 
-    // 이월 품목 합치기 (중복 제거)
+    // 이월 품목 합치기 (중복 제거 + dismissed 체크)
     for (const def of _deferredItems) {
+      if (_dismissedItemIds.has(def.item_id)) continue; // 제외/발주완료한 이월 품목 skip
       const existing = suggestItems.find(s => s.item_id === def.item_id);
       if (existing) {
         // 재고 변동 반영하여 수량 재계산
@@ -3205,6 +3231,9 @@ async function _mergeAllDups() {
     }).eq('item_id', primary.item_id);
     primary.current_qty = totalQty;
     for (let i = 1; i < items.length; i++) {
+      if (items[i].item_name !== primary.item_name) {
+        _saveAlias(items[i].item_name, primary.item_name);
+      }
       await db.from('items').delete().eq('item_id', items[i].item_id);
       _items = _items.filter(x => x.item_id !== items[i].item_id);
     }
@@ -3276,6 +3305,7 @@ async function _orderConfirmSuggest(itemId, name, qty, unit) {
   const inp = document.getElementById('orec_' + itemId);
   const finalQty = inp ? (parseInt(inp.value) || qty) : qty;
   const vendorId = item.vendor_id || null;
+  // pending 발주로 등록 (재고 직접 추가 X)
   await db.from('order_requests').insert({
     store_id: SID, item_id: itemId, item_name: name,
     qty: finalQty, unit: unit, vendor_id: vendorId, status: 'pending'
@@ -4082,6 +4112,7 @@ async function _showOutlierConfirm(outliers, rawText) {
       const origHTML = wrap.innerHTML;
       wrap.innerHTML = `
         <div class="dup-card">
+          <button class="card-close-x" id="outlierClose">✕</button>
           <div class="dup-card-title">${ol.item_name} ${ol.quantity}${ol.unit} 입력됨. 확인해주세요.</div>
           <div class="dup-card-detail">
             ${ol.targetStock > 0 ? '목표 재고: ' + ol.targetStock + ol.unit + '<br>' : ''}
@@ -4092,6 +4123,9 @@ async function _showOutlierConfirm(outliers, rawText) {
             <button class="dup-btn-replace" id="outlierEdit">수정</button>
           </div>
         </div>`;
+      document.getElementById('outlierClose').onclick = () => {
+        wrap.innerHTML = origHTML; resolve('confirm');
+      };
       document.getElementById('outlierOk').onclick = () => {
         _createDecisionEvent({ entity: ol.item_name, ai_suggestion: ol.quantity, final_value: ol.quantity, user_decision: 'CONFIRM', decision_action: null, edit_delta: 0, harness_trigger: 'quantity_high' });
         wrap.innerHTML = origHTML; resolve('confirm');
@@ -4128,6 +4162,7 @@ async function _showDupChoices(dupChecks, rawText) {
       const origHTML = wrap.innerHTML;
       wrap.innerHTML = `
         <div class="dup-card">
+          <button class="card-close-x" id="dupClose">✕</button>
           <div class="dup-card-title">"${dup.item_name}" — 이미 입력한 품목입니다</div>
           <div class="dup-card-detail">
             이전 입력: ${dup.prevQty}${dup.prevUnit}<br>
@@ -4143,9 +4178,11 @@ async function _showDupChoices(dupChecks, rawText) {
       let resolved = false;
       const restore = () => { if (wrap.parentNode) wrap.innerHTML = origHTML; };
       const _timeout = setTimeout(() => { if (!resolved) { resolved = true; restore(); resolve('timeout'); } }, 30000);
+      const closeBtn = document.getElementById('dupClose');
       const mergeBtn = document.getElementById('dupMerge');
       const replaceBtn = document.getElementById('dupReplace');
       const cancelBtn = document.getElementById('dupCancel');
+      if (closeBtn) closeBtn.onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); restore(); resolve('cancel'); } };
       if (mergeBtn) mergeBtn.onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); restore(); resolve('merge'); } };
       if (replaceBtn) replaceBtn.onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); restore(); resolve('replace'); } };
       if (cancelBtn) cancelBtn.onclick = () => { if (!resolved) { resolved = true; clearTimeout(_timeout); restore(); resolve('cancel'); } };
@@ -4922,6 +4959,201 @@ function _runParseTest() {
     btn.disabled = false;
     btn.textContent = '▶ 1000개 테스트 실행';
   }, 100);
+}
+
+// ════════════════════════════════════════════════════════
+//  기대값 검증 테스트 러너 (1000개 JSON 기반)
+// ════════════════════════════════════════════════════════
+const _EXPECT_TEST_URL = 'https://raw.githubusercontent.com/hjrha79-crypto/zerokitchen/main/zk_test_1000.json';
+let _expectTestCache = null;
+
+async function _runExpectTest() {
+  const btn = document.getElementById('expectTestBtn');
+  const result = document.getElementById('parseTestResult');
+  btn.disabled = true;
+  btn.textContent = '테스트 중...';
+  result.innerHTML = '<span class="spin"></span> 로딩 중...';
+
+  try {
+    // JSON 로드 (캐시)
+    if (!_expectTestCache) {
+      try {
+        const resp = await fetch(_EXPECT_TEST_URL);
+        _expectTestCache = await resp.json();
+      } catch(e) {
+        // GitHub 실패 시 로컬 프롬프트
+        result.innerHTML = '<div style="color:var(--red)">JSON 로드 실패. 아래에 zk_test_1000.json 내용을 붙여넣으세요:</div>' +
+          '<textarea id="expectJsonInput" style="width:100%;height:120px;font-size:11px;margin:8px 0" placeholder="JSON 붙여넣기"></textarea>' +
+          '<button class="btn-run" onclick="_loadExpectJson()">로드 후 실행</button>';
+        btn.disabled = false;
+        btn.textContent = '▶ 기대값 검증 (1000개)';
+        return;
+      }
+    }
+
+    _executeExpectTest(_expectTestCache);
+  } catch(e) {
+    result.innerHTML = `<div style="color:var(--red)">오류: ${e.message}</div>`;
+  }
+  btn.disabled = false;
+  btn.textContent = '▶ 기대값 검증 (1000개)';
+}
+
+function _loadExpectJson() {
+  const raw = document.getElementById('expectJsonInput')?.value;
+  if (!raw) return;
+  try {
+    _expectTestCache = JSON.parse(raw);
+    _executeExpectTest(_expectTestCache);
+  } catch(e) {
+    document.getElementById('parseTestResult').innerHTML = `<div style="color:var(--red)">JSON 파싱 오류: ${e.message}</div>`;
+  }
+}
+
+function _executeExpectTest(data) {
+  const result = document.getElementById('parseTestResult');
+  const showPass = document.getElementById('expectShowPass')?.checked;
+  const filterCat = document.getElementById('expectFilterCat')?.checked;
+  const catSelect = document.getElementById('expectCatSelect')?.value;
+
+  let cases = data.cases || [];
+  if (filterCat && catSelect) {
+    cases = cases.filter(c => c.cat === catSelect);
+  }
+
+  let pass = 0, fail = 0, error = 0;
+  const failures = [];
+  const passes = [];
+  const catStats = {};
+
+  for (const tc of cases) {
+    if (!catStats[tc.cat]) catStats[tc.cat] = { pass: 0, fail: 0 };
+
+    try {
+      const r = ruleEngine(tc.input);
+      const actual = r.results.map(item => ({
+        name: item.item_name,
+        qty: item.quantity,
+        unit: _UNIT_MAP[item.unit] || item.unit || '개',
+        action: item.action || 'stock_check'
+      }));
+
+      const expected = tc.expect.map(e => ({
+        name: e.name,
+        qty: e.qty,
+        unit: _UNIT_MAP[e.unit] || e.unit || '개',
+        action: e.action || 'stock_check'
+      }));
+
+      // 비교: 품목 수 → 각 품목 name/qty/unit 매칭
+      let matched = true;
+      const diffs = [];
+
+      if (actual.length !== expected.length) {
+        matched = false;
+        diffs.push(`품목 수: 기대 ${expected.length} / 실제 ${actual.length}`);
+      } else {
+        for (let i = 0; i < expected.length; i++) {
+          const exp = expected[i];
+          const act = actual[i];
+          const itemDiffs = [];
+
+          // 이름 비교 (공백 제거 후 비교)
+          if (exp.name && act.name.replace(/\s/g,'').toLowerCase() !== exp.name.replace(/\s/g,'').toLowerCase()) {
+            itemDiffs.push(`이름: "${exp.name}" → "${act.name}"`);
+          }
+          // 수량 비교 (null은 skip)
+          if (exp.qty !== null && exp.qty !== undefined && Math.abs(act.qty - exp.qty) > 0.01) {
+            itemDiffs.push(`수량: ${exp.qty} → ${act.qty}`);
+          }
+          // 단위 비교
+          if (exp.unit && act.unit !== exp.unit) {
+            itemDiffs.push(`단위: ${exp.unit} → ${act.unit}`);
+          }
+          // 동작 비교 (기대값에 action이 있을 때만)
+          if (tc.expect[i].action && act.action !== exp.action) {
+            itemDiffs.push(`동작: ${exp.action} → ${act.action}`);
+          }
+
+          if (itemDiffs.length) {
+            matched = false;
+            diffs.push(`[${i+1}] ${itemDiffs.join(', ')}`);
+          }
+        }
+      }
+
+      if (matched) {
+        pass++;
+        catStats[tc.cat].pass++;
+        if (showPass) passes.push({ id: tc.id, cat: tc.cat, input: tc.input });
+      } else {
+        fail++;
+        catStats[tc.cat].fail++;
+        failures.push({
+          id: tc.id,
+          cat: tc.cat,
+          input: tc.input,
+          diffs: diffs,
+          expected: expected.map(e => `${e.name} ${e.qty}${e.unit}`).join(' / '),
+          actual: actual.map(a => `${a.name} ${a.qty}${a.unit} (${a.action})`).join(' / ')
+        });
+      }
+
+    } catch(e) {
+      error++;
+      catStats[tc.cat].fail++;
+      failures.push({
+        id: tc.id,
+        cat: tc.cat,
+        input: tc.input,
+        diffs: ['예외: ' + e.message],
+        expected: tc.expect.map(e => `${e.name} ${e.qty}${e.unit}`).join(' / '),
+        actual: '예외 발생'
+      });
+    }
+  }
+
+  // 결과 표시
+  const total = pass + fail + error;
+  const passRate = total > 0 ? ((pass / total) * 100).toFixed(1) : 0;
+  let html = `<div style="padding:10px;background:${fail === 0 && error === 0 ? 'var(--accent-lt)' : 'rgba(217,48,37,.08)'};border-radius:8px;margin-bottom:10px">
+    <strong>총 ${total}개 | ✅ ${pass} (${passRate}%) | ❌ ${fail} | 💥 ${error}</strong>
+  </div>`;
+
+  // 카테고리별 통계
+  html += '<div style="margin-bottom:10px;display:flex;flex-wrap:wrap;gap:4px">';
+  for (const [cat, stat] of Object.entries(catStats).sort((a,b) => b[1].fail - a[1].fail)) {
+    const catTotal = stat.pass + stat.fail;
+    const catRate = ((stat.pass / catTotal) * 100).toFixed(0);
+    const color = stat.fail === 0 ? 'var(--accent)' : 'var(--red)';
+    html += `<span style="font-size:10px;padding:2px 6px;border-radius:4px;background:var(--surface2);border:1px solid ${color};color:${color}">${cat} ${catRate}% (${stat.fail}F)</span>`;
+  }
+  html += '</div>';
+
+  // FAIL 목록
+  if (failures.length) {
+    html += `<div style="font-weight:700;margin-bottom:8px;color:var(--red)">FAIL ${failures.length}건</div>`;
+    for (const f of failures.slice(0, 100)) {
+      html += `<div style="margin-bottom:8px;padding:8px;background:var(--surface);border:1px solid var(--red);border-radius:6px;font-size:11px">
+        <div><strong>#${f.id}</strong> [${f.cat}] "${f.input}"</div>
+        <div style="color:var(--dim)">기대: ${f.expected}</div>
+        <div style="color:var(--red)">실제: ${f.actual}</div>
+        <div style="color:var(--warn)">${f.diffs.join(' | ')}</div>
+      </div>`;
+    }
+    if (failures.length > 100) html += `<div style="color:var(--dim)">... 외 ${failures.length - 100}건</div>`;
+  }
+
+  // PASS 목록 (옵션)
+  if (showPass && passes.length) {
+    html += `<div style="font-weight:700;margin:10px 0 8px;color:var(--accent)">PASS ${passes.length}건</div>`;
+    for (const p of passes.slice(0, 50)) {
+      html += `<div style="font-size:10px;color:var(--dim)">#${p.id} [${p.cat}] "${p.input}" ✅</div>`;
+    }
+    if (passes.length > 50) html += `<div style="font-size:10px;color:var(--dim)">... 외 ${passes.length - 50}건</div>`;
+  }
+
+  result.innerHTML = html;
 }
 
 setTimeout(()=>init(), 500);
