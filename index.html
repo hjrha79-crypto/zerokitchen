@@ -5116,8 +5116,10 @@ function _executeExpectTest(data) {
   // 결과 표시
   const total = pass + fail + error;
   const passRate = total > 0 ? ((pass / total) * 100).toFixed(1) : 0;
+  window._lastFailures = failures; // 다운로드용 저장
   let html = `<div style="padding:10px;background:${fail === 0 && error === 0 ? 'var(--accent-lt)' : 'rgba(217,48,37,.08)'};border-radius:8px;margin-bottom:10px">
     <strong>총 ${total}개 | ✅ ${pass} (${passRate}%) | ❌ ${fail} | 💥 ${error}</strong>
+    ${failures.length ? `<button onclick="_downloadFails()" style="margin-left:10px;padding:4px 10px;border:1px solid var(--red);border-radius:6px;background:none;color:var(--red);font-size:11px;cursor:pointer">📥 FAIL 다운로드</button>` : ''}
   </div>`;
 
   // 카테고리별 통계
@@ -5154,6 +5156,33 @@ function _executeExpectTest(data) {
   }
 
   result.innerHTML = html;
+}
+
+function _downloadFails() {
+  const failures = window._lastFailures;
+  if (!failures?.length) return;
+  let text = `ZeroKitchen 파싱 테스트 FAIL 리포트\n날짜: ${new Date().toLocaleString('ko-KR')}\n총 FAIL: ${failures.length}건\n${'━'.repeat(50)}\n\n`;
+  for (const f of failures) {
+    text += `#${f.id} [${f.cat}] "${f.input}"\n`;
+    text += `  기대: ${f.expected}\n`;
+    text += `  실제: ${f.actual}\n`;
+    text += `  차이: ${f.diffs.join(' | ')}\n\n`;
+  }
+  // 카테고리별 요약
+  const catMap = {};
+  for (const f of failures) {
+    if (!catMap[f.cat]) catMap[f.cat] = [];
+    catMap[f.cat].push(f.id);
+  }
+  text += `${'━'.repeat(50)}\n카테고리별 요약:\n`;
+  for (const [cat, ids] of Object.entries(catMap).sort((a,b) => b[1].length - a[1].length)) {
+    text += `  ${cat}: ${ids.length}건 (#${ids.join(', #')})\n`;
+  }
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `zk_fail_${new Date().toISOString().slice(0,10)}.txt`;
+  a.click(); URL.revokeObjectURL(url);
 }
 
 setTimeout(()=>init(), 500);
