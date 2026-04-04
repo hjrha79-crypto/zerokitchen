@@ -789,7 +789,7 @@ async function processRequest(json) {
               });
               console.log('[undo-debug] order insert:', { data: _insOrd, error: _insOrdErr });
               const { data: _opOrd, error: _opOrdErr } = await db.from('kitchen_operations')
-                .select('*').eq('store_id', SID).eq('item_id', item.item_id)
+                .select('operation_id').eq('store_id', SID).eq('item_id', item.item_id)
                 .order('created_at', { ascending: false }).limit(1);
               console.log('[undo-debug] order query:', { data: _opOrd, error: _opOrdErr });
               if (_opOrd?.length) operationIds.push(_opOrd[0].operation_id);
@@ -824,7 +824,7 @@ async function processRequest(json) {
             });
             console.log('[undo-debug] update insert:', { data: _insUpd, error: _insUpdErr });
             const { data: _opUpd, error: _opUpdErr } = await db.from('kitchen_operations')
-              .select('*').eq('store_id', SID).eq('item_id', item.item_id)
+              .select('operation_id').eq('store_id', SID).eq('item_id', item.item_id)
               .order('created_at', { ascending: false }).limit(1);
             console.log('[undo-debug] update query:', { data: _opUpd, error: _opUpdErr });
             if (_opUpd?.length) console.log('[undo-debug] row keys:', Object.keys(_opUpd[0]), 'row:', JSON.stringify(_opUpd[0]));
@@ -863,7 +863,7 @@ async function processRequest(json) {
             });
             console.log('[undo-debug] new insert:', { data: _insNew, error: _insNewErr });
             const { data: _opNew, error: _opNewErr } = await db.from('kitchen_operations')
-              .select('*').eq('store_id', SID).eq('item_id', newItem.item_id)
+              .select('operation_id').eq('store_id', SID).eq('item_id', newItem.item_id)
               .order('created_at', { ascending: false }).limit(1);
             console.log('[undo-debug] new query:', { data: _opNew, error: _opNewErr });
             if (_opNew?.length) operationIds.push(_opNew[0].operation_id);
