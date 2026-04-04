@@ -1,0 +1,138 @@
+ZeroKitchen — 되돌리기 범위 확장
+====================================
+
+목표: 마지막 1건만 → 모든 결과 카드에서 되돌리기 가능
+원칙: "종이보다 쉬운가" — 종이는 아무 줄이나 지울 수 있다
+
+====================================
+1. confirmReview() 수정
+====================================
+
+confirmReview()에서 kitchen_operations INSERT 후 반환된 row의 id 목록을 수집한다.
+이 id 목록을 addResult() 호출 시 전달한다.
+
+예: addResult(summaryText, 'success', operationIds)
+operationIds = [kitchen_operations에 INSERT된 row들의 id 배열]
+
+※ 현재 confirmReview 안에서 kitchen_operations INSERT하는 부분을 찾아서,
+   .insert() 응답에서 data.map(r => r.id)로 수집
+
+====================================
+2. addResult() 수정
+====================================
+
+addResult(msg, type, operationIds) — 세 번째 파라미터 추가 (optional)
+
+operationIds가 있고 type이 'success'이면:
+- 결과 카드(말풍선) 하단에 "되돌리기" 버튼 추가
+- 버튼 스타일: 작은 텍스트 버튼, 색상 #e74c3c (빨간), 우측 정렬
+- 버튼에 data-op-ids 속성으로 JSON.stringify(operationIds) 저장
+- onclick → undoOperations(operationIds, cardElement)
+
+기존에 "마지막 1건 되돌리기" 관련 코드가 있으면 제거한다.
+(전역변수로 lastOperation 같은 것이 있을 수 있음)
+
+====================================
+3. undoOperations() 신규 함수
+====================================
+
+async function undoOperations(opIds, cardEl) {
+  // 1. 확인
+  if (!confirm('이 입력을 되돌리시겠습니까?')) return;
+
+  // 2. kitchen_operations에서 해당 rows 조회
+  const { data: ops } = await supabase
+    .from('kitchen_operations')
+    .select('id, item_id, qty_before, qty_after')
+    .in('id', opIds);
+
+  if (!ops || ops.length === 0) {
+    addResult('이미 되돌린 항목입니다.', 'error');
+    return;
+  }
+
+  // 3. 각 operation의 역방향 delta 적용
+  for (const op of ops) {
+    const delta = op.qty_after - op.qty_before;
+    // items 테이블의 current_qty에서 delta를 뺀다
+    const { data: item } = await supabase
+      .from('items')
+      .select('current_qty')
+      .eq('id', op.item_id)
+      .single();
+
+    if (item) {
+      const newQty = item.current_qty - delta;
+      await supabase
+        .from('items')
+        .update({ current_qty: newQty })
+        .eq('id', op.item_id);
+    }
+  }
+
+  // 4. kitchen_operations에서 해당 rows 삭제
+  await supabase
+    .from('kitchen_operations')
+    .delete()
+    .in('id', opIds);
+
+  // 5. UI 업데이트
+  // 카드에 취소선 + 버튼 비활성화
+  cardEl.style.opacity = '0.4';
+  cardEl.style.textDecoration = 'line-through';
+  const btn = cardEl.querySelector('.undo-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '되돌림 완료';
+  }
+
+  // 6. 재고 탭 새로고침
+  await refreshItems();
+  if (document.querySelector('.tab-btn.active')?.textContent?.includes('재고')) {
+    renderInventory();
+  }
+
+  addResult('되돌리기 완료', 'success');
+}
+
+====================================
+4. 되돌리기 버튼 스타일
+====================================
+
+.undo-btn {
+  background: none;
+  border: 1px solid #e74c3c;
+  color: #e74c3c;
+  padding: 4px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  float: right;
+  margin-top: 6px;
+}
+.undo-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+  border-color: #999;
+  color: #999;
+}
+
+====================================
+5. 주의사항
+====================================
+
+- 되돌리기 결과 카드 자체에는 되돌리기 버튼 넣지 않음 (operationIds 없으므로 자동 제외)
+- 세션 종료(페이지 새로고침) 시 결과 카드는 사라지므로 되돌리기 불가 — 정상 동작
+  (종이도 다음날 지우러 오지 않는다)
+- kitchen_operations DELETE이므로 KPI view에도 자동 반영
+- 기존 "마지막 1건 되돌리기" 관련 코드/변수/UI 모두 제거
+
+====================================
+6. 테스트 시나리오
+====================================
+
+1) "양파 3개" 입력 → 확인 → 결과 카드에 되돌리기 버튼 표시
+2) 되돌리기 클릭 → 양파 재고 원복 확인
+3) 여러 건 입력 후 중간 카드 되돌리기 → 해당 건만 원복
+4) 되돌린 카드 다시 되돌리기 시도 → 비활성화 확인
+5) 페이지 새로고침 → 되돌리기 버튼 없음 (정상)

@@ -41,7 +41,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .chat-bubble .chat-time{font-size:10px;opacity:.5;margin-top:4px;display:block}
 .chat-bubble.system .chat-time{text-align:left}
 .chat-bubble.user .chat-time{text-align:right}
-.chat-bubble .res-undo{margin-top:6px}
+.chat-bubble .undo-btn{margin-top:6px}
 .chat-guide{align-self:flex-start;max-width:90%}
 /* 공통 카드 */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px}
@@ -76,9 +76,9 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .res-msg{font-size:14px;font-weight:600;line-height:1.4}
 .res-time{font-size:11px;color:var(--muted);margin-top:3px;text-align:right}
 .res-foot{display:flex;justify-content:space-between;align-items:center;margin-top:4px}
-.res-undo{font-size:11px;padding:3px 10px;border:1px solid var(--border);border-radius:8px;background:var(--surface);cursor:pointer;color:var(--text);font-family:inherit;transition:opacity .2s}
-.res-undo:hover{background:var(--bg)}
-.res-undo:disabled{opacity:.4;cursor:default}
+.undo-btn{background:none;border:1px solid #e74c3c;color:#e74c3c;padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;float:right;margin-top:6px;font-family:inherit;transition:opacity .2s}
+.undo-btn:hover{background:rgba(231,76,60,0.08)}
+.undo-btn:disabled{opacity:.3;cursor:default;border-color:#999;color:#999}
 /* 재고 그리드 */
 .inv-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .inv-view-toggle{display:flex;gap:4px}
@@ -736,6 +736,7 @@ async function processRequest(json) {
         }
         const updated = [];
         const errors  = [];
+        const operationIds = [];
 
         for (const req of json.items) {
           const name = req.name?.trim();
@@ -780,12 +781,13 @@ async function processRequest(json) {
               });
               if (error) { errors.push({ name, reason: error.message }); continue; }
 
-              await db.from('kitchen_operations').insert({
+              const { data: _opOrd } = await db.from('kitchen_operations').insert({
                 store_id: SID, item_id: item.item_id, item_name: item.item_name,
                 action_type: 'order', quantity: qty, unit: unit || item.unit,
                 qty_before: item.current_qty, qty_after: item.current_qty,
                 input_method: json._source || 'api', raw_text: JSON.stringify(req)
-              });
+              }).select('id');
+              if (_opOrd?.length) operationIds.push(..._opOrd.map(r => r.id));
 
               updated.push({ name: item.item_name, quantity: item.current_qty, inputQty: qty, unit: item.unit, action: 'order' });
               continue;
@@ -809,12 +811,13 @@ async function processRequest(json) {
             if (error) { errors.push({ name, reason: error.message }); continue; }
 
             // kitchen_operations 이력 기록
-            await db.from('kitchen_operations').insert({
+            const { data: _opUpd } = await db.from('kitchen_operations').insert({
               store_id: SID, item_id: item.item_id, item_name: item.item_name,
               action_type: action, quantity: qty, unit: unit || item.unit,
               qty_before: qtyBefore, qty_after: newQty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
-            });
+            }).select('id');
+            if (_opUpd?.length) operationIds.push(..._opUpd.map(r => r.id));
 
             // 캐시 업데이트
             item.current_qty = newQty;
@@ -841,12 +844,13 @@ async function processRequest(json) {
               });
             }
 
-            await db.from('kitchen_operations').insert({
+            const { data: _opNew } = await db.from('kitchen_operations').insert({
               store_id: SID, item_id: newItem.item_id, item_name: name,
               action_type: newAction, quantity: qty, unit: unit || '개',
               qty_before: null, qty_after: initQty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
-            });
+            }).select('id');
+            if (_opNew?.length) operationIds.push(..._opNew.map(r => r.id));
 
             _items.push(newItem);
             updated.push({ name, quantity: initQty, inputQty: qty, unit: unit || '개', is_new: true, action: newAction });
@@ -857,6 +861,7 @@ async function processRequest(json) {
           status: errors.length === 0 ? 'success' : 'partial',
           response_type: 'inventory_update_result',
           updated_items: updated,
+          operation_ids: operationIds,
           errors: errors.length ? errors : undefined,
           message: `${updated.length}개 항목 업데이트${errors.length ? `, ${errors.length}개 실패` : ''}`,
           timestamp: new Date().toISOString()
@@ -1479,8 +1484,8 @@ async function handleNaturalInput() {
         if (existing) { existing.quantity = it.quantity; existing.unit = it.unit; }
         else _sessionInputs.push({ item_name: it.item_name, quantity: it.quantity, unit: it.unit });
       }
-      const undoItems = (result.updated_items || []).filter(it => it.item_id && it.qty_before != null).map(it => ({ item_id: it.item_id, name: it.name, qty_before: it.qty_before, qty_after: it.quantity, unit: it.unit }));
-      addResult(raw, formatResult(result), result.status === 'success' ? 'ok' : 'warn', undoItems);
+      const opIds = result.operation_ids || [];
+      addResult(raw, formatResult(result), result.status === 'success' ? 'ok' : 'warn', opIds);
       renderInventory();
       if (document.getElementById('tab-order')?.classList.contains('active')) renderOrder();
       _draftItems = [];
@@ -2354,8 +2359,8 @@ async function confirmReview() {
     cancelReview();
     // 확정 후 입력창 클리어
     document.getElementById('nlInput').value = '';
-    const undoItems = (result.updated_items || []).filter(it => it.item_id && it.qty_before != null).map(it => ({ item_id: it.item_id, name: it.name, qty_before: it.qty_before, qty_after: it.quantity, unit: it.unit }));
-    addResult(rawText, formatResult(result), result.status === 'success' ? 'ok' : 'warn', undoItems);
+    const opIds = result.operation_ids || [];
+    addResult(rawText, formatResult(result), result.status === 'success' ? 'ok' : 'warn', opIds);
     renderInventory();
     if (document.getElementById('tab-order')?.classList.contains('active')) renderOrder();
   } catch(e) {
@@ -4008,7 +4013,7 @@ function resetToHome() {
 }
 
 let _undoCounter = 0;
-function addResult(raw, msg, type, undoItems) {
+function addResult(raw, msg, type, operationIds) {
   const list = document.getElementById('resList');
   const now  = new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
 
@@ -4024,33 +4029,13 @@ function addResult(raw, msg, type, undoItems) {
   sysBubble.className = 'chat-bubble system';
   sysBubble.style.borderLeftColor = borderColor;
   sysBubble.style.borderLeftWidth = '3px';
-  let undoHtml = '';
-  if (undoItems && undoItems.length) {
+
+  if (operationIds && operationIds.length) {
     const uid = 'undo_' + (++_undoCounter);
-    // 각 품목에 개별 수정 링크 추가
-    let editableMsg = msg;
-    if (undoItems && undoItems.length) {
-      for (const it of undoItems) {
-        if (it.item_id && it.name) {
-          const editLink = ` <span style="font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline" onclick="switchTab('inventory',document.querySelectorAll('.nav')[1]);document.getElementById('invSearch').value='${it.name}';renderInventory()">(수정)</span>`;
-          editableMsg = editableMsg.replace(it.name, it.name + editLink);
-        }
-      }
-    }
-    undoHtml = `<button class="res-undo" id="${uid}">되돌리기</button>`;
-    sysBubble.innerHTML = `${editableMsg.replace(/\n/g,'<br>')}${undoHtml}<span class="chat-time">${now}</span>`;
+    const undoHtml = `<button class="undo-btn" id="${uid}" data-op-ids='${JSON.stringify(operationIds)}'>되돌리기</button>`;
+    sysBubble.innerHTML = `${msg.replace(/\n/g,'<br>')}${undoHtml}<span class="chat-time">${now}</span>`;
     list.appendChild(sysBubble);
-    const btn = document.getElementById(uid);
-    const timer = setTimeout(() => { btn.disabled = true; }, 30000);
-    btn.onclick = async () => {
-      btn.disabled = true;
-      clearTimeout(timer);
-      await _undoResult(undoItems);
-      const reverseUndo = undoItems.map(it => ({ item_id: it.item_id, name: it.name, qty_before: it.qty_after, qty_after: it.qty_before, unit: it.unit }));
-      const reMsg = undoItems.map(it => `↩️ ${it.name} → ${it.qty_before}${it.unit}`).join('\n');
-      addResult('되돌리기', reMsg, 'ok', reverseUndo);
-      renderInventory();
-    };
+    document.getElementById(uid).onclick = () => undoOperations(operationIds, sysBubble);
   } else {
     sysBubble.innerHTML = `${msg.replace(/\n/g,'<br>')}<span class="chat-time">${now}</span>`;
     list.appendChild(sysBubble);
@@ -4062,22 +4047,52 @@ function addResult(raw, msg, type, undoItems) {
   updateJustTalk();
 }
 
-async function _undoResult(undoItems) {
-  for (const it of undoItems) {
-    if (!it.item_id) continue;
-    await db.from('items')
-      .update({ current_qty: it.qty_before, updated_at: new Date().toISOString() })
-      .eq('item_id', it.item_id);
-    await db.from('kitchen_operations').insert({
-      store_id: SID, item_id: it.item_id, item_name: it.name,
-      action_type: 'undo', quantity: Math.abs(it.qty_after - it.qty_before),
-      unit: it.unit, qty_before: it.qty_after, qty_after: it.qty_before,
-      input_method: 'undo', raw_text: '되돌리기'
-    });
-    // 캐시 업데이트
-    const cached = _items.find(i => i.item_id === it.item_id);
-    if (cached) cached.current_qty = it.qty_before;
+async function undoOperations(opIds, cardEl) {
+  if (!confirm('이 입력을 되돌리시겠습니까?')) return;
+
+  const { data: ops } = await db.from('kitchen_operations')
+    .select('id, item_id, qty_before, qty_after')
+    .in('id', opIds);
+
+  if (!ops || ops.length === 0) {
+    addResult('되돌리기', '이미 되돌린 항목입니다.', 'err');
+    return;
   }
+
+  // 각 operation의 역방향 delta 적용
+  for (const op of ops) {
+    const delta = op.qty_after - op.qty_before;
+    const { data: item } = await db.from('items')
+      .select('current_qty')
+      .eq('item_id', op.item_id)
+      .single();
+
+    if (item) {
+      const newQty = item.current_qty - delta;
+      await db.from('items')
+        .update({ current_qty: newQty, updated_at: new Date().toISOString() })
+        .eq('item_id', op.item_id);
+      // 캐시 업데이트
+      const cached = _items.find(i => i.item_id === op.item_id);
+      if (cached) cached.current_qty = newQty;
+    }
+  }
+
+  // kitchen_operations에서 해당 rows 삭제
+  await db.from('kitchen_operations').delete().in('id', opIds);
+
+  // UI 업데이트 — 카드 비활성화
+  cardEl.style.opacity = '0.4';
+  cardEl.style.textDecoration = 'line-through';
+  const btn = cardEl.querySelector('.undo-btn');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '되돌림 완료';
+  }
+
+  // 재고 탭 새로고침
+  await refreshItems();
+  renderInventory();
   showToast('되돌렸습니다');
 }
 
