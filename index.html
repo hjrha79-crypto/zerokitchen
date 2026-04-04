@@ -781,13 +781,16 @@ async function processRequest(json) {
               });
               if (error) { errors.push({ name, reason: error.message }); continue; }
 
-              const { data: _opOrd } = await db.from('kitchen_operations').insert({
+              await db.from('kitchen_operations').insert({
                 store_id: SID, item_id: item.item_id, item_name: item.item_name,
                 action_type: 'order', quantity: qty, unit: unit || item.unit,
                 qty_before: item.current_qty, qty_after: item.current_qty,
                 input_method: json._source || 'api', raw_text: JSON.stringify(req)
-              }).select('id');
-              if (_opOrd?.length) operationIds.push(..._opOrd.map(r => r.id));
+              });
+              const { data: _opOrd } = await db.from('kitchen_operations')
+                .select('id').eq('store_id', SID).eq('item_id', item.item_id)
+                .order('created_at', { ascending: false }).limit(1);
+              if (_opOrd?.length) operationIds.push(_opOrd[0].id);
 
               updated.push({ name: item.item_name, quantity: item.current_qty, inputQty: qty, unit: item.unit, action: 'order' });
               continue;
@@ -811,13 +814,16 @@ async function processRequest(json) {
             if (error) { errors.push({ name, reason: error.message }); continue; }
 
             // kitchen_operations 이력 기록
-            const { data: _opUpd } = await db.from('kitchen_operations').insert({
+            await db.from('kitchen_operations').insert({
               store_id: SID, item_id: item.item_id, item_name: item.item_name,
               action_type: action, quantity: qty, unit: unit || item.unit,
               qty_before: qtyBefore, qty_after: newQty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
-            }).select('id');
-            if (_opUpd?.length) operationIds.push(..._opUpd.map(r => r.id));
+            });
+            const { data: _opUpd } = await db.from('kitchen_operations')
+              .select('id').eq('store_id', SID).eq('item_id', item.item_id)
+              .order('created_at', { ascending: false }).limit(1);
+            if (_opUpd?.length) operationIds.push(_opUpd[0].id);
 
             // 캐시 업데이트
             item.current_qty = newQty;
@@ -844,13 +850,16 @@ async function processRequest(json) {
               });
             }
 
-            const { data: _opNew } = await db.from('kitchen_operations').insert({
+            await db.from('kitchen_operations').insert({
               store_id: SID, item_id: newItem.item_id, item_name: name,
               action_type: newAction, quantity: qty, unit: unit || '개',
               qty_before: null, qty_after: initQty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
-            }).select('id');
-            if (_opNew?.length) operationIds.push(..._opNew.map(r => r.id));
+            });
+            const { data: _opNew } = await db.from('kitchen_operations')
+              .select('id').eq('store_id', SID).eq('item_id', newItem.item_id)
+              .order('created_at', { ascending: false }).limit(1);
+            if (_opNew?.length) operationIds.push(_opNew[0].id);
 
             _items.push(newItem);
             updated.push({ name, quantity: initQty, inputQty: qty, unit: unit || '개', is_new: true, action: newAction });
