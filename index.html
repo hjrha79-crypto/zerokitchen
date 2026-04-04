@@ -827,6 +827,7 @@ async function processRequest(json) {
               .select('*').eq('store_id', SID).eq('item_id', item.item_id)
               .order('created_at', { ascending: false }).limit(1);
             console.log('[undo-debug] update query:', { data: _opUpd, error: _opUpdErr });
+            if (_opUpd?.length) console.log('[undo-debug] row keys:', Object.keys(_opUpd[0]), 'row:', JSON.stringify(_opUpd[0]));
             if (_opUpd?.length) operationIds.push(_opUpd[0].id);
 
             // 캐시 업데이트
