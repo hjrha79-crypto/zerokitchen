@@ -792,7 +792,7 @@ async function processRequest(json) {
                 .select('*').eq('store_id', SID).eq('item_id', item.item_id)
                 .order('created_at', { ascending: false }).limit(1);
               console.log('[undo-debug] order query:', { data: _opOrd, error: _opOrdErr });
-              if (_opOrd?.length) operationIds.push(_opOrd[0].id);
+              if (_opOrd?.length) operationIds.push(_opOrd[0].operation_id);
 
               updated.push({ name: item.item_name, quantity: item.current_qty, inputQty: qty, unit: item.unit, action: 'order' });
               continue;
@@ -828,7 +828,7 @@ async function processRequest(json) {
               .order('created_at', { ascending: false }).limit(1);
             console.log('[undo-debug] update query:', { data: _opUpd, error: _opUpdErr });
             if (_opUpd?.length) console.log('[undo-debug] row keys:', Object.keys(_opUpd[0]), 'row:', JSON.stringify(_opUpd[0]));
-            if (_opUpd?.length) operationIds.push(_opUpd[0].id);
+            if (_opUpd?.length) operationIds.push(_opUpd[0].operation_id);
 
             // 캐시 업데이트
             item.current_qty = newQty;
@@ -866,7 +866,7 @@ async function processRequest(json) {
               .select('*').eq('store_id', SID).eq('item_id', newItem.item_id)
               .order('created_at', { ascending: false }).limit(1);
             console.log('[undo-debug] new query:', { data: _opNew, error: _opNewErr });
-            if (_opNew?.length) operationIds.push(_opNew[0].id);
+            if (_opNew?.length) operationIds.push(_opNew[0].operation_id);
 
             _items.push(newItem);
             updated.push({ name, quantity: initQty, inputQty: qty, unit: unit || '개', is_new: true, action: newAction });
@@ -4068,8 +4068,8 @@ async function undoOperations(opIds, cardEl) {
   if (!confirm('이 입력을 되돌리시겠습니까?')) return;
 
   const { data: ops } = await db.from('kitchen_operations')
-    .select('id, item_id, qty_before, qty_after')
-    .in('id', opIds);
+    .select('operation_id, item_id, qty_before, qty_after')
+    .in('operation_id', opIds);
 
   if (!ops || ops.length === 0) {
     addResult('되돌리기', '이미 되돌린 항목입니다.', 'err');
@@ -4096,7 +4096,7 @@ async function undoOperations(opIds, cardEl) {
   }
 
   // kitchen_operations에서 해당 rows 삭제
-  await db.from('kitchen_operations').delete().in('id', opIds);
+  await db.from('kitchen_operations').delete().in('operation_id', opIds);
 
   // UI 업데이트 — 카드 비활성화
   cardEl.style.opacity = '0.4';
