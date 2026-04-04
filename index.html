@@ -787,11 +787,9 @@ async function processRequest(json) {
                 qty_before: item.current_qty, qty_after: item.current_qty,
                 input_method: json._source || 'api', raw_text: JSON.stringify(req)
               });
-              console.log('[undo-debug] order insert:', { data: _insOrd, error: _insOrdErr });
               const { data: _opOrd, error: _opOrdErr } = await db.from('kitchen_operations')
                 .select('operation_id').eq('store_id', SID).eq('item_id', item.item_id)
                 .order('created_at', { ascending: false }).limit(1);
-              console.log('[undo-debug] order query:', { data: _opOrd, error: _opOrdErr });
               if (_opOrd?.length) operationIds.push(_opOrd[0].operation_id);
 
               updated.push({ name: item.item_name, quantity: item.current_qty, inputQty: qty, unit: item.unit, action: 'order' });
@@ -822,12 +820,9 @@ async function processRequest(json) {
               qty_before: qtyBefore, qty_after: newQty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
             });
-            console.log('[undo-debug] update insert:', { data: _insUpd, error: _insUpdErr });
             const { data: _opUpd, error: _opUpdErr } = await db.from('kitchen_operations')
               .select('operation_id').eq('store_id', SID).eq('item_id', item.item_id)
               .order('created_at', { ascending: false }).limit(1);
-            console.log('[undo-debug] update query:', { data: _opUpd, error: _opUpdErr });
-            if (_opUpd?.length) console.log('[undo-debug] row keys:', Object.keys(_opUpd[0]), 'row:', JSON.stringify(_opUpd[0]));
             if (_opUpd?.length) operationIds.push(_opUpd[0].operation_id);
 
             // 캐시 업데이트
@@ -861,11 +856,9 @@ async function processRequest(json) {
               qty_before: null, qty_after: initQty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
             });
-            console.log('[undo-debug] new insert:', { data: _insNew, error: _insNewErr });
             const { data: _opNew, error: _opNewErr } = await db.from('kitchen_operations')
               .select('operation_id').eq('store_id', SID).eq('item_id', newItem.item_id)
               .order('created_at', { ascending: false }).limit(1);
-            console.log('[undo-debug] new query:', { data: _opNew, error: _opNewErr });
             if (_opNew?.length) operationIds.push(_opNew[0].operation_id);
 
             _items.push(newItem);
@@ -873,7 +866,6 @@ async function processRequest(json) {
           }
         }
 
-        console.log('[undo-debug] final operationIds:', operationIds);
         return {
           status: errors.length === 0 ? 'success' : 'partial',
           response_type: 'inventory_update_result',
@@ -2448,14 +2440,18 @@ function formatResult(result) {
   switch(result.response_type) {
     case 'inventory_update_result':
       return (result.updated_items||[]).map(it => {
-        const a = _ACTION_LABEL[it.action] || _ACTION_LABEL['stock_check'];
         const u = it.unit || '';
-        const before = it.qty_before != null ? it.qty_before : '?';
         const after = it.quantity;
-        const diff = it.qty_before != null ? after - it.qty_before : null;
-        const diffStr = diff != null ? (diff > 0 ? ` <span style="color:var(--accent)">(+${diff})</span>` : diff < 0 ? ` <span style="color:var(--warn)">(${diff})</span>` : '') : '';
-        if (it.is_new) return `🆕 ${it.name} ${after}${u} 등록`;
-        return `✅ ${it.name} ${a.label}\n${before}${u} → ${after}${u}${diffStr}`;
+        const editLink = ` <span style="font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline" onclick="switchTab('inventory',document.querySelectorAll('.nav')[1]);document.getElementById('invSearch').value='${it.name}';renderInventory()">(수정)</span>`;
+        if (it.is_new) return `🆕 ${it.name} ${after}${u} 등록${editLink}`;
+        let sign, color;
+        if (it.action === 'inbound') { sign = '+'; color = '#22c55e'; }
+        else if (it.action === 'consume') { sign = '-'; color = '#ef4444'; }
+        else { sign = '='; color = '#999'; }
+        const qty = it.inputQty != null ? it.inputQty : after;
+        const bigNum = `<span style="font-size:1.3em;font-weight:700;color:${color}">${sign}${qty}${u}</span>`;
+        const detail = it.qty_before != null ? ` <span style="color:#888;font-size:0.85em">${it.qty_before}→${after}${u}</span>` : '';
+        return `${it.name} ${bigNum}${detail}${editLink}`;
       }).join('\n') + (result.errors?.length ? '\n' + result.errors.map(e=>`❌ ${e.name}: ${e.reason}`).join('\n') : '');
     case 'inventory_state':
       return (result.items||[]).map(it => `📦 ${it.name}: ${it.quantity}${it.unit||''}`).join('\n') || '품목 없음';
