@@ -1,0 +1,18 @@
+Fix: kitchen_operations insert 400 에러 수정
+
+원인: .insert(rows).select('id') 체이닝이 현재 Supabase 클라이언트 버전에서 400 반환
+
+수정 방법:
+- 3곳의 kitchen_operations .insert() 에서 .select('id') 제거
+- 대신 .insert(rows) 만 사용
+- 반환된 data에서 id 추출: data.map(r => r.id)
+
+Supabase JS v1에서는 insert 결과에 기본으로 row 전체가 반환됨.
+.select('id') 체이닝은 v2 전용이라 v1에서 400 에러 발생.
+
+3곳 모두 동일하게:
+변경 전: .insert(rows).select('id')
+변경 후: .insert(rows)
+
+나머지 로직(operationIds 수집, addResult 전달, undoOperations)은 그대로 유지.
+data.map(r => r.id)로 ID 추출하는 부분도 그대로 — data에 id가 기본 포함되므로.

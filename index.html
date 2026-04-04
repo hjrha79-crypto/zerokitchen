@@ -786,7 +786,7 @@ async function processRequest(json) {
                 action_type: 'order', quantity: qty, unit: unit || item.unit,
                 qty_before: item.current_qty, qty_after: item.current_qty,
                 input_method: json._source || 'api', raw_text: JSON.stringify(req)
-              }).select('id');
+              });
               if (_opOrd?.length) operationIds.push(..._opOrd.map(r => r.id));
 
               updated.push({ name: item.item_name, quantity: item.current_qty, inputQty: qty, unit: item.unit, action: 'order' });
@@ -816,7 +816,7 @@ async function processRequest(json) {
               action_type: action, quantity: qty, unit: unit || item.unit,
               qty_before: qtyBefore, qty_after: newQty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
-            }).select('id');
+            });
             if (_opUpd?.length) operationIds.push(..._opUpd.map(r => r.id));
 
             // 캐시 업데이트
@@ -849,7 +849,7 @@ async function processRequest(json) {
               action_type: newAction, quantity: qty, unit: unit || '개',
               qty_before: null, qty_after: initQty,
               input_method: json._source || 'api', raw_text: JSON.stringify(req)
-            }).select('id');
+            });
             if (_opNew?.length) operationIds.push(..._opNew.map(r => r.id));
 
             _items.push(newItem);
