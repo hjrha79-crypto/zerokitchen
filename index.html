@@ -186,6 +186,25 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ord-action-btn.call{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
 .ord-suggest-group{opacity:.65}
 .ord-suggest-group .ord-vendor-hdr{background:transparent;border-bottom:1px solid var(--surface2)}
+.ord-urgent-section{margin-bottom:16px}
+.ord-urgent-title{font-size:16px;font-weight:800;padding:14px 2px 10px;display:flex;align-items:center;gap:8px}
+.ord-urgent-card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:16px;margin-bottom:10px;display:flex;flex-direction:column;gap:10px}
+.ord-urgent-card.status-red{border-left:4px solid var(--red);background:rgba(217,48,37,.05)}
+.ord-urgent-card.status-orange{border-left:4px solid var(--warn,#c0540a);background:rgba(192,84,10,.05)}
+.ord-urgent-name{font-size:18px;font-weight:700;color:var(--text)}
+.ord-urgent-status{font-size:12px;font-weight:600;padding:2px 8px;border-radius:6px;display:inline-block}
+.ord-urgent-status.red{background:rgba(217,48,37,.12);color:var(--red)}
+.ord-urgent-status.orange{background:rgba(192,84,10,.12);color:var(--warn,#c0540a)}
+.ord-urgent-controls{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ord-urgent-stepper{display:flex;align-items:center;gap:0}
+.ord-urgent-done{padding:10px 20px;border-radius:10px;border:none;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit}
+.ord-urgent-done:active{opacity:.7}
+.ord-toggle-row{display:flex;align-items:center;justify-content:space-between;padding:12px 4px;cursor:pointer;user-select:none}
+.ord-toggle-label{font-size:14px;font-weight:700;color:var(--dim)}
+.ord-toggle-arrow{font-size:12px;color:var(--muted);transition:transform .2s}
+.ord-toggle-arrow.open{transform:rotate(180deg)}
+.ord-suggest-collapse{display:none}
+.ord-suggest-collapse.open{display:block}
 .ord-empty{text-align:center;padding:24px;color:var(--muted);font-size:13px}
 .ord-item-name[data-editable]{cursor:pointer;border-bottom:1px dashed var(--border)}
 .ord-item-name[data-editable]:hover{color:var(--accent)}
@@ -3149,61 +3168,100 @@ async function renderOrder() {
         return a.name < b.name ? -1 : 1;
       });
 
-      const suggestGrp = new Map();
-      for (const it of suggestItems) {
-        const key = it.vendor || '거래처 미지정';
-        if (!suggestGrp.has(key)) suggestGrp.set(key, []);
-        suggestGrp.get(key).push(it);
-      }
+      const top5 = suggestItems.slice(0, 5);
+      const restItems = suggestItems.slice(5);
 
-      const today = new Date().toLocaleDateString('ko-KR', {month:'long', day:'numeric', weekday:'short'});
-      html += `<div class="ord-section">`;
-      html += `<div class="ord-today-header">
-        <span class="ord-today-title">📦 오늘의 발주 추천</span>
-        <span class="ord-today-date">${today}</span>
-      </div>`;
-
-      for (const [vName, items] of suggestGrp) {
-        html += `<div class="ord-vendor-group ord-suggest-group">
-          <div class="ord-vendor-hdr">
-            <span class="ord-vendor-name">${vName}</span>
-            <span style="font-size:12px;color:var(--muted)">${items.length}개</span>
-          </div>`;
-        for (const it of items) {
-          const isUrgent = it.current_qty <= 0;
-          const recId = 'orec_' + it.item_id;
-          html += `<div class="ord-recommend-card${isUrgent ? ' urgent' : ''}">
-            <div class="ord-rec-left">
-              <div class="ord-rec-name">${isUrgent ? '🔴 ' : ''}${it.name}${it.isDeferred ? (it.defer_count >= 2 ? ' <span class="ord-defer-blocked">⚠️ 이월 2회</span>' : ' <span class="ord-defer-tag">↩️ 이월</span>') : ''}</div>
-              <div class="ord-rec-info">현재 ${it.current_qty}${it.unit}</div>
-              <div class="ord-rec-source">(${it.source === 'consumption_based' ? '일평균 ' + it.avg + it.unit : it.source === 'stockout' ? '재고 없음 — 수량 직접 입력' : '목표재고 기준'})</div>
-            </div>
-            <div class="ord-rec-right">
+      // ── Section B1: TOP 5 긴급 발주 ──
+      html += `<div class="ord-urgent-section">`;
+      html += `<div class="ord-urgent-title">🚨 TOP ${top5.length} 긴급 발주</div>`;
+      for (const it of top5) {
+        const isZero = it.current_qty <= 0;
+        const statusClass = isZero ? 'red' : 'orange';
+        const statusText = isZero ? '부족' : '임계';
+        const cardClass = isZero ? 'status-red' : 'status-orange';
+        const recId = 'orec_' + it.item_id;
+        html += `<div class="ord-urgent-card ${cardClass}">
+          <div>
+            <div class="ord-urgent-name">${it.name}${it.isDeferred ? (it.defer_count >= 2 ? ' <span class="ord-defer-blocked">⚠️ 이월 2회</span>' : ' <span class="ord-defer-tag">↩️ 이월</span>') : ''}</div>
+            <span class="ord-urgent-status ${statusClass}">${statusText} — 현재 ${it.current_qty}${it.unit}</span>
+          </div>
+          <div class="ord-urgent-controls">
+            <div class="ord-urgent-stepper">
               <button class="ord-stepper-btn" onclick="_ordStep('${recId}',-1)">−</button>
-              <input class="ord-stepper-val" id="${recId}" type="number" value="${it.suggested_qty}" data-item-id="${it.item_id}" data-name="${it.name}" data-unit="${it.unit}" data-vendor-id="${it.vendor_id || ''}" data-source="${it.source || 'target_based'}">
+              <input class="ord-stepper-val" id="${recId}" type="number" value="${it.suggested_qty}" data-item-id="${it.item_id}" data-name="${it.name}" data-unit="${it.unit}" data-vendor-id="${it.vendor_id || ''}" data-source="${it.source || 'target_based'}" style="width:52px;height:40px;font-size:18px">
               <button class="ord-stepper-btn" onclick="_ordStep('${recId}',1)">+</button>
-              <span class="ord-rec-unit">${it.unit}${it.unitLabel ? ' <span style="color:var(--muted);font-size:11px">' + it.unitLabel + '</span>' : ''}</span>
+              <span class="ord-rec-unit" style="font-size:14px">${it.unit}</span>
             </div>
-            <div style="display:flex;gap:6px;margin-top:6px">
-              <button style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);font-size:11px;cursor:pointer;font-family:inherit" onclick="_dismissSuggest(${it.item_id})">제외</button>
-              <button style="flex:1;padding:6px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-lt);color:var(--accent);font-size:11px;cursor:pointer;font-family:inherit" onclick="_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.suggested_qty},'${it.unit}')">발주완료</button>
-            </div>
-          </div>`;
-        }
-        // 거래처별 카카오톡 복사 버튼
-        const vendorItemIds = items.map(it => it.item_id);
-        html += `<div style="padding:8px 12px">
-          <button class="ord-btn-kakao" style="width:100%;padding:10px;border-radius:8px;font-size:13px" onclick="_copyVendorOrder('${vName.replace(/'/g,"\\'")}', [${vendorItemIds.join(',')}])">📋 ${vName} 발주 복사</button>
+            <button class="ord-urgent-done" onclick="_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.suggested_qty},'${it.unit}')">발주완료</button>
+          </div>
         </div>`;
-        html += `</div>`;
+      }
+      html += `</div>`;
+
+      // ── Section B2: 전체 보기 (접힘 토글) ──
+      if (restItems.length) {
+        html += `<div class="ord-section">`;
+        html += `<div class="ord-toggle-row" onclick="_toggleSuggestAll()">
+          <span class="ord-toggle-label">📦 전체 보기 (${restItems.length}개 더)</span>
+          <span class="ord-toggle-arrow" id="suggestAllArrow">▼</span>
+        </div>`;
+        html += `<div class="ord-suggest-collapse" id="suggestAllBody">`;
+
+        const suggestGrp = new Map();
+        for (const it of restItems) {
+          const key = it.vendor || '거래처 미지정';
+          if (!suggestGrp.has(key)) suggestGrp.set(key, []);
+          suggestGrp.get(key).push(it);
+        }
+
+        for (const [vName, items] of suggestGrp) {
+          html += `<div class="ord-vendor-group ord-suggest-group">
+            <div class="ord-vendor-hdr">
+              <span class="ord-vendor-name">${vName}</span>
+              <span style="font-size:12px;color:var(--muted)">${items.length}개</span>
+            </div>`;
+          for (const it of items) {
+            const isUrgent = it.current_qty <= 0;
+            const recId = 'orec_' + it.item_id;
+            html += `<div class="ord-recommend-card${isUrgent ? ' urgent' : ''}">
+              <div class="ord-rec-left">
+                <div class="ord-rec-name">${isUrgent ? '🔴 ' : ''}${it.name}${it.isDeferred ? (it.defer_count >= 2 ? ' <span class="ord-defer-blocked">⚠️ 이월 2회</span>' : ' <span class="ord-defer-tag">↩️ 이월</span>') : ''}</div>
+                <div class="ord-rec-info">현재 ${it.current_qty}${it.unit}</div>
+                <div class="ord-rec-source">(${it.source === 'consumption_based' ? '일평균 ' + it.avg + it.unit : it.source === 'stockout' ? '재고 없음 — 수량 직접 입력' : '목표재고 기준'})</div>
+              </div>
+              <div class="ord-rec-right">
+                <button class="ord-stepper-btn" onclick="_ordStep('${recId}',-1)">−</button>
+                <input class="ord-stepper-val" id="${recId}" type="number" value="${it.suggested_qty}" data-item-id="${it.item_id}" data-name="${it.name}" data-unit="${it.unit}" data-vendor-id="${it.vendor_id || ''}" data-source="${it.source || 'target_based'}">
+                <button class="ord-stepper-btn" onclick="_ordStep('${recId}',1)">+</button>
+                <span class="ord-rec-unit">${it.unit}${it.unitLabel ? ' <span style="color:var(--muted);font-size:11px">' + it.unitLabel + '</span>' : ''}</span>
+              </div>
+              <div style="display:flex;gap:6px;margin-top:6px">
+                <button style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);font-size:11px;cursor:pointer;font-family:inherit" onclick="_dismissSuggest(${it.item_id})">제외</button>
+                <button style="flex:1;padding:6px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-lt);color:var(--accent);font-size:11px;cursor:pointer;font-family:inherit" onclick="_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.suggested_qty},'${it.unit}')">발주완료</button>
+              </div>
+            </div>`;
+          }
+          const vendorItemIds = items.map(it => it.item_id);
+          html += `<div style="padding:8px 12px">
+            <button class="ord-btn-kakao" style="width:100%;padding:10px;border-radius:8px;font-size:13px" onclick="_copyVendorOrder('${vName.replace(/'/g,"\\'")}', [${vendorItemIds.join(',')}])">📋 ${vName} 발주 복사</button>
+          </div>`;
+          html += `</div>`;
+        }
+
+        html += `<div class="ord-today-actions">
+          <button class="ord-btn-confirm-all" onclick="_confirmAllOrders()">전체 발주 확인</button>
+          <button style="background:var(--surface2);border:1px solid var(--border);color:var(--dim)" onclick="_deferAllOrders()">내일로 이월</button>
+        </div>`;
+        html += `</div></div>`;
       }
 
-      // 전체 발주 확인 버튼
-      html += `<div class="ord-today-actions">
-        <button class="ord-btn-confirm-all" onclick="_confirmAllOrders()">전체 발주 확인</button>
-        <button style="background:var(--surface2);border:1px solid var(--border);color:var(--dim)" onclick="_deferAllOrders()">내일로 이월</button>
-      </div>`;
-      html += `</div>`;
+      // 전체 발주 확인 (TOP 5만 있을 때도 표시)
+      if (!restItems.length) {
+        html += `<div class="ord-today-actions">
+          <button class="ord-btn-confirm-all" onclick="_confirmAllOrders()">전체 발주 확인</button>
+          <button style="background:var(--surface2);border:1px solid var(--border);color:var(--dim)" onclick="_deferAllOrders()">내일로 이월</button>
+        </div>`;
+      }
     }
 
     list.innerHTML = html;
@@ -3340,6 +3398,14 @@ async function _mergeAllDups() {
   document.getElementById('reviewPanel').style.display = 'none';
   showToast(`${count}종 중복 품목 정리 완료`);
   renderInventory();
+}
+
+function _toggleSuggestAll() {
+  const body = document.getElementById('suggestAllBody');
+  const arrow = document.getElementById('suggestAllArrow');
+  if (!body) return;
+  body.classList.toggle('open');
+  if (arrow) arrow.classList.toggle('open');
 }
 
 function _ordStep(inputId, delta) {
