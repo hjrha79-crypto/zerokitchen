@@ -3198,70 +3198,62 @@ async function renderOrder() {
       }
       html += `</div>`;
 
-      // ── Section B2: 전체 보기 (접힘 토글) ──
-      if (restItems.length) {
-        html += `<div class="ord-section">`;
-        html += `<div class="ord-toggle-row" onclick="_toggleSuggestAll()">
-          <span class="ord-toggle-label">📦 전체 보기 (${restItems.length}개 더)</span>
-          <span class="ord-toggle-arrow" id="suggestAllArrow">▼</span>
-        </div>`;
-        html += `<div class="ord-suggest-collapse" id="suggestAllBody">`;
+      // ── Section B2: 전체 보기 (항상 표시, 접힘 토글) ──
+      const top5Ids = new Set(top5.map(t => t.item_id));
+      html += `<div class="ord-section">`;
+      html += `<div class="ord-toggle-row" onclick="_toggleSuggestAll()">
+        <span class="ord-toggle-label">📋 전체 보기 (${suggestItems.length}개)</span>
+        <span class="ord-toggle-arrow" id="suggestAllArrow">▼</span>
+      </div>`;
+      html += `<div class="ord-suggest-collapse" id="suggestAllBody">`;
 
-        const suggestGrp = new Map();
-        for (const it of restItems) {
-          const key = it.vendor || '거래처 미지정';
-          if (!suggestGrp.has(key)) suggestGrp.set(key, []);
-          suggestGrp.get(key).push(it);
-        }
+      const suggestGrp = new Map();
+      for (const it of suggestItems) {
+        const key = it.vendor || '거래처 미지정';
+        if (!suggestGrp.has(key)) suggestGrp.set(key, []);
+        suggestGrp.get(key).push(it);
+      }
 
-        for (const [vName, items] of suggestGrp) {
-          html += `<div class="ord-vendor-group ord-suggest-group">
-            <div class="ord-vendor-hdr">
-              <span class="ord-vendor-name">${vName}</span>
-              <span style="font-size:12px;color:var(--muted)">${items.length}개</span>
-            </div>`;
-          for (const it of items) {
-            const isUrgent = it.current_qty <= 0;
-            const recId = 'orec_' + it.item_id;
-            html += `<div class="ord-recommend-card${isUrgent ? ' urgent' : ''}">
-              <div class="ord-rec-left">
-                <div class="ord-rec-name">${isUrgent ? '🔴 ' : ''}${it.name}${it.isDeferred ? (it.defer_count >= 2 ? ' <span class="ord-defer-blocked">⚠️ 이월 2회</span>' : ' <span class="ord-defer-tag">↩️ 이월</span>') : ''}</div>
-                <div class="ord-rec-info">현재 ${it.current_qty}${it.unit}</div>
-                <div class="ord-rec-source">(${it.source === 'consumption_based' ? '일평균 ' + it.avg + it.unit : it.source === 'stockout' ? '재고 없음 — 수량 직접 입력' : '목표재고 기준'})</div>
-              </div>
-              <div class="ord-rec-right">
-                <button class="ord-stepper-btn" onclick="_ordStep('${recId}',-1)">−</button>
-                <input class="ord-stepper-val" id="${recId}" type="number" value="${it.suggested_qty}" data-item-id="${it.item_id}" data-name="${it.name}" data-unit="${it.unit}" data-vendor-id="${it.vendor_id || ''}" data-source="${it.source || 'target_based'}">
-                <button class="ord-stepper-btn" onclick="_ordStep('${recId}',1)">+</button>
-                <span class="ord-rec-unit">${it.unit}${it.unitLabel ? ' <span style="color:var(--muted);font-size:11px">' + it.unitLabel + '</span>' : ''}</span>
-              </div>
-              <div style="display:flex;gap:6px;margin-top:6px">
-                <button style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);font-size:11px;cursor:pointer;font-family:inherit" onclick="_dismissSuggest(${it.item_id})">제외</button>
-                <button style="flex:1;padding:6px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-lt);color:var(--accent);font-size:11px;cursor:pointer;font-family:inherit" onclick="_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.suggested_qty},'${it.unit}')">발주완료</button>
-              </div>
-            </div>`;
-          }
-          const vendorItemIds = items.map(it => it.item_id);
-          html += `<div style="padding:8px 12px">
-            <button class="ord-btn-kakao" style="width:100%;padding:10px;border-radius:8px;font-size:13px" onclick="_copyVendorOrder('${vName.replace(/'/g,"\\'")}', [${vendorItemIds.join(',')}])">📋 ${vName} 발주 복사</button>
+      for (const [vName, items] of suggestGrp) {
+        html += `<div class="ord-vendor-group ord-suggest-group">
+          <div class="ord-vendor-hdr">
+            <span class="ord-vendor-name">${vName}</span>
+            <span style="font-size:12px;color:var(--muted)">${items.length}개</span>
           </div>`;
-          html += `</div>`;
+        for (const it of items) {
+          const isUrgent = it.current_qty <= 0;
+          const inTop5 = top5Ids.has(it.item_id);
+          const recId = inTop5 ? ('oall_' + it.item_id) : ('orec_' + it.item_id);
+          html += `<div class="ord-recommend-card${isUrgent ? ' urgent' : ''}">
+            <div class="ord-rec-left">
+              <div class="ord-rec-name">${isUrgent ? '🔴 ' : ''}${it.name}${it.isDeferred ? (it.defer_count >= 2 ? ' <span class="ord-defer-blocked">⚠️ 이월 2회</span>' : ' <span class="ord-defer-tag">↩️ 이월</span>') : ''}</div>
+              <div class="ord-rec-info">현재 ${it.current_qty}${it.unit}</div>
+              <div class="ord-rec-source">(${it.source === 'consumption_based' ? '일평균 ' + it.avg + it.unit : it.source === 'stockout' ? '재고 없음 — 수량 직접 입력' : '목표재고 기준'})</div>
+            </div>
+            <div class="ord-rec-right">
+              <button class="ord-stepper-btn" onclick="_ordStep('${recId}',-1)">−</button>
+              <input class="ord-stepper-val${inTop5 ? ' ord-dup' : ''}" id="${recId}" type="number" value="${it.suggested_qty}" data-item-id="${it.item_id}" data-name="${it.name}" data-unit="${it.unit}" data-vendor-id="${it.vendor_id || ''}" data-source="${it.source || 'target_based'}">
+              <button class="ord-stepper-btn" onclick="_ordStep('${recId}',1)">+</button>
+              <span class="ord-rec-unit">${it.unit}${it.unitLabel ? ' <span style="color:var(--muted);font-size:11px">' + it.unitLabel + '</span>' : ''}</span>
+            </div>
+            <div style="display:flex;gap:6px;margin-top:6px">
+              <button style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);font-size:11px;cursor:pointer;font-family:inherit" onclick="_dismissSuggest(${it.item_id})">제외</button>
+              <button style="flex:1;padding:6px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-lt);color:var(--accent);font-size:11px;cursor:pointer;font-family:inherit" onclick="_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.suggested_qty},'${it.unit}')">발주완료</button>
+            </div>
+          </div>`;
         }
-
-        html += `<div class="ord-today-actions">
-          <button class="ord-btn-confirm-all" onclick="_confirmAllOrders()">전체 발주 확인</button>
-          <button style="background:var(--surface2);border:1px solid var(--border);color:var(--dim)" onclick="_deferAllOrders()">내일로 이월</button>
+        const vendorItemIds = items.map(it => it.item_id);
+        html += `<div style="padding:8px 12px">
+          <button class="ord-btn-kakao" style="width:100%;padding:10px;border-radius:8px;font-size:13px" onclick="_copyVendorOrder('${vName.replace(/'/g,"\\'")}', [${vendorItemIds.join(',')}])">📋 ${vName} 발주 복사</button>
         </div>`;
-        html += `</div></div>`;
+        html += `</div>`;
       }
 
-      // 전체 발주 확인 (TOP 5만 있을 때도 표시)
-      if (!restItems.length) {
-        html += `<div class="ord-today-actions">
-          <button class="ord-btn-confirm-all" onclick="_confirmAllOrders()">전체 발주 확인</button>
-          <button style="background:var(--surface2);border:1px solid var(--border);color:var(--dim)" onclick="_deferAllOrders()">내일로 이월</button>
-        </div>`;
-      }
+      html += `<div class="ord-today-actions">
+        <button class="ord-btn-confirm-all" onclick="_confirmAllOrders()">전체 발주 확인</button>
+        <button style="background:var(--surface2);border:1px solid var(--border);color:var(--dim)" onclick="_deferAllOrders()">내일로 이월</button>
+      </div>`;
+      html += `</div></div>`;
     }
 
     list.innerHTML = html;
@@ -3512,7 +3504,7 @@ function _copyVendorOrder(vendorName, itemIds) {
 }
 
 async function _confirmAllOrders() {
-  const inputs = document.querySelectorAll('.ord-stepper-val');
+  const inputs = document.querySelectorAll('.ord-stepper-val:not(.ord-dup)');
   const itemCount = [...inputs].filter(inp => (parseInt(inp.value) || 0) > 0).length;
   if (!itemCount) { showToast('발주할 품목이 없습니다'); return; }
   if (!confirm(`${itemCount}개 품목을 발주하시겠습니까?`)) return;
@@ -3564,7 +3556,7 @@ async function _confirmAllOrders() {
 }
 
 async function _deferAllOrders() {
-  const inputs = document.querySelectorAll('.ord-stepper-val');
+  const inputs = document.querySelectorAll('.ord-stepper-val:not(.ord-dup)');
   let count = 0;
   let blocked = 0;
   const today = new Date().toISOString().slice(0, 10);
