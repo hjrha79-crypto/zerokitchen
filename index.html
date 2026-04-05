@@ -1598,10 +1598,10 @@ const _NUM_WORDS = {
 };
 const _UNITS = ['봉지','봉','박스','케이스','팩','캔','통','병','킬로그램','킬로','키로그램','키로','kg','g','그램','인분','장','묶음','롤','판','다발','단','망','모','마리','송이','개'];
 const _UNIT_MAP = {'봉':'봉지','봉지':'봉지','박스':'박스','케이스':'박스','팩':'팩','캔':'캔','통':'통','병':'병','kg':'kg','킬로':'kg','킬로그램':'kg','키로':'kg','키로그램':'kg','g':'g','그램':'g','인분':'인분','장':'장','묶음':'묶음','롤':'롤','판':'판','다발':'다발','단':'단','망':'망','모':'모','마리':'개','송이':'개','개':'개'};
-const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','넣','빼기','빼','차감','사용','소비','소진','빠짐','발주','주문','받았어','받았','들어왔어','가져왔','썼어','써서','뺐어','버렸','꺼냈'];
+const _ACTION_WORDS = ['추가','입고','넣어','넣기','넣었어','넣','빼기','빼','차감','사용','소비','소진','빠짐','발주','주문','받았어','받았','들어왔어','가져왔','썼어','써서','썼','뺐어','뺐','버렸','꺼냈'];
 const _ACTION_MAP = {
   '추가':'inbound','입고':'inbound','넣어':'inbound','넣기':'inbound','넣었어':'inbound','넣':'inbound','받았어':'inbound','받았':'inbound','들어왔어':'inbound','가져왔':'inbound',
-  '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','소비':'consume','소진':'consume','빠짐':'consume','썼어':'consume','써서':'consume','뺐어':'consume','버렸':'consume','꺼냈':'consume',
+  '빼기':'consume','빼':'consume','차감':'consume','사용':'consume','소비':'consume','소진':'consume','빠짐':'consume','썼어':'consume','써서':'consume','썼':'consume','뺐어':'consume','뺐':'consume','버렸':'consume','꺼냈':'consume',
   '발주':'order','주문':'order',
 };
 // 복합 동작어구: [regex_pattern, action_type]
@@ -1628,8 +1628,10 @@ const _ALIAS = {
   '알리오 올리오 소스':'알리오올리오소스','토마토 비프 소스':'토마토비프소스',
   '냉동 가리비':'냉동가리비',
   '브로컬리':'브로콜리','블로콜리':'브로콜리','부로콜리':'브로콜리','브로커리':'브로콜리','브르콜리':'브로콜리',
+  '브로콜리':'브로콜리','오이피클':'오이피클',
   '스파게띠':'스파게티','스파게띠니':'스파게티니','마요네스':'마요네즈','케쳡':'케첩','케챱':'케첩',
   '피자 삼발':'피자 삼발이','삼발':'삼발이',
+  '모짜렐라':'모짜렐라치즈',
 };
 
 function _ruleNormalize(text) {
@@ -1641,6 +1643,12 @@ function _ruleNormalize(text) {
   s = s.replace(/[가-힣]+에서\s/g, '');
   s = s.replace(/^(오늘|어제|내일|아까|방금|지금)\s/, '');
   const up = _UNITS.join('|');
+
+  // 0b. 단위 뒤 접속사(이랑/랑/하고) 분리 — "봉지랑" → "봉지 ", "키로하고" → "키로 ", "롤이랑" → "롤 "
+  s = s.replace(new RegExp('(' + up + ')(이랑|랑|하고)(?=[가-힣\\s]|$)', 'g'), '$1 ');
+
+  // 0c. "각" / "각각" 키워드 → 마커 치환 (토큰화에서 수량 복제에 사용)
+  s = s.replace(/(?:^|\s)(각각|각)(?=\s|$)/g, ' \x02EACH\x02');
 
   // 1. 품목명+한글숫자+단위 붙여쓰기 분리 (단위가 바로 붙은 경우만 — 마스카포네 같은 오분리 방지)
   const nk = Object.keys(_NUM_WORDS).sort((a,b)=>b.length-a.length);
@@ -1728,11 +1736,11 @@ function _ruleNormalize(text) {
 
   // ── P2: 정정 표현 제거 (한글숫자가 이미 아라비아로 변환된 후 실행) ──
   s = s.replace(/\d+(?:\.\d+)?\s*(?:[가-힣a-zA-Z]+\s*)?\s*(?:아\s*아니야|아니야|아니다|아\s*아니|아니|아(?=\s)|잠깐)\s*/g, '');
-  // 정정 후 잔여 어미 제거
-  s = s.replace(/(?:이야|으로|로\s*해줘)(?=\s|$)/g, '');
+  // 정정 후 잔여 어미 제거 ("2봉지로" 정정 뒤 남는 "로", "봉지야" 뒤 남는 "야" 등)
+  s = s.replace(/(?:이야|으로|로\s*해줘|로|야)(?=\s|$)/g, '');
 
-  // ── 동작어 잔여 제거 (존칭/연결형) ──
-  s = s.replace(/(?:가져왔어요|썼습니다|뺐습니다|받았습니다|들어왔습니다|넣었습니다|했습니다)(?=\s|$)/g, '');
+  // ── 동작어 잔여 제거 (존칭/연결형) — 액션 매핑 가능한 동작어는 5a/5b에서 처리하므로 여기서 제거하지 않음 ──
+  s = s.replace(/(?:넣었습니다|했습니다)(?=\s|$)/g, '');
   s = s.replace(/(?:쓰고|넣고|빼고)\s/g, ' ');
 
   // 1c. 수량 표현 → 숫자 변환 (한글숫자는 이미 아라비아로 변환됨, 거의없음/조금있음은 P4 전에 처리됨)
@@ -1752,8 +1760,8 @@ function _ruleNormalize(text) {
   // 3. 숫자+단위 붙여쓰기 분리
   s = s.replace(new RegExp('(\\d+)(' + up + ')', 'g'), '$1 $2');
 
-  // 3b. 단위+조사/연결어 제거 (예: "5개은" → "5개", "3개이랑" → "3개")
-  s = s.replace(new RegExp('(' + up + ')(을|를|은|는|이|가|이랑|랑|하고)(\\s|,|$)', 'g'), '$1 $3');
+  // 3b. 단위+조사/연결어/잔여어미 제거 (예: "5개은" → "5개", "3개이랑" → "3개", "봉지로" → "봉지", "봉지야" → "봉지")
+  s = s.replace(new RegExp('(' + up + ')(을|를|은|는|이|가|이랑|랑|하고|으로|로|야|이야|요|에요|예요)(\\s|,|$)', 'g'), '$1 $3');
 
   // 3c. 연결 접속사 제거 (예: "그리고", "또")
   s = s.replace(/(^|\s)(그리고|또한|또)(\s|,|$)/g, '$1$3');
@@ -1825,7 +1833,19 @@ function _ruleTokenize(s) {
       }
     }
   }
-  return segs;
+  // "각/각각" 마커(\x02EACH\x02)가 rawName에 있으면 품목 분리 + 수량 복제
+  const expanded = [];
+  for (const seg of segs) {
+    if (seg.rawName.includes('\x02EACH\x02')) {
+      const names = seg.rawName.replace(/\x02EACH\x02/g, '').trim().split(/\s+/).filter(Boolean);
+      for (const n of names) {
+        expanded.push({...seg, rawName: n});
+      }
+    } else {
+      expanded.push(seg);
+    }
+  }
+  return expanded;
 }
 
 async function _saveAlias(rawExpr, correctedName) {
@@ -1860,15 +1880,11 @@ function _applyAlias(name) {
 
 function _ruleMapItem(raw) {
   const name=raw.trim(); if(!name) return null;
-  // 1. store alias (학습된 매장별 보정) — 완전 일치
+  // 1. 하드코딩 alias — 완전 일치 (store alias보다 우선, 보호 항목 포함)
+  if (_ALIAS[name]) return _ALIAS[name];
+  // 2. store alias (학습된 매장별 보정) — 완전 일치
   const aliased = _applyAlias(name);
   if (aliased !== name) return aliased;
-  // 2. 하드코딩 alias — 완전 일치만
-  if (_ALIAS[name]) return _ALIAS[name];
-  // 3. 하드코딩 alias — 완전 포함 (2글자 이상 alias만)
-  for (const [a,s] of Object.entries(_ALIAS)) {
-    if (a.length >= 2 && name === a) return s;
-  }
   return name;
 }
 
