@@ -1658,7 +1658,8 @@ function _ruleNormalize(text) {
   }
 
   // 1a-2. 단위 뒤에 바로 붙은 다음 품목 분리 ("봉양파" → "봉 양파")
-  s = s.replace(new RegExp('(' + up + ')([가-힣]{2,})', 'g'), '$1 $2');
+  // ※ 숫자(또는 한글숫자→아라비아 변환 후) 뒤의 단위만 분리 — "모짜렐라", "마리네이드" 등 품목명 보호
+  s = s.replace(new RegExp('(?<=\\d)(' + up + ')([가-힣]{2,})', 'g'), '$1 $2');
 
   // 1b. 한글숫자+단위 붙여쓰기 분리 (띄어쓰기 후: "두병" → "두 병")
   for (const nw of nk) {
@@ -1690,6 +1691,8 @@ function _ruleNormalize(text) {
 
   // ── 보호 단어 (끝이 "도"인 실제 품목) ──
   const _DO_PROTECTED = new Set(['아보카도','건포도','포도','메르카도']);
+  // ── 보호 단어 (끝이 "이"인 실제 품목 — "이랑" 접속사 분리 시 "이" 보존) ──
+  const _I_PROTECTED = new Set(['차돌박이','매생이','프렌치프라이','새송이','팽이','고추냉이']);
 
   // ── P4: "없어/없고/없음" → 0 개 (2단계) ──
   // 1단계: 없어/없고/없음 → 0 개
@@ -1711,7 +1714,12 @@ function _ruleNormalize(text) {
   // 단위 뒤 접속사: "3봉지이랑" "3캔하고"
   s = s.replace(new RegExp('(' + up + ')\\s*(이랑|랑|하고)\\s', 'g'), '$1 ');
   // 품목명 뒤 접속사 (수량 없이): "양파이랑", "소금하고"
-  s = s.replace(/([가-힣]{2,})(이랑|랑|하고)\s/g, '$1 ');
+  // ※ "이랑"을 먼저 처리하여 greedy 매칭("케첩이"+"랑") 방지 — "이"로 끝나는 품목은 보호
+  s = s.replace(/([가-힣]{2,})이랑(?=\s|$)/g, function(m, word) {
+    if (_I_PROTECTED.has(word + '이')) return word + '이 ';
+    return word + ' ';
+  });
+  s = s.replace(/([가-힣]{2,})(랑|하고)(?=\s|$)/g, '$1 ');
   // "도" 조사 제거 (품목명+도+숫자): "양파도 3개" → "양파 3개" (보호 목록 제외)
   s = s.replace(/([가-힣]+)도\s+(\d)/g, function(m, word, num) {
     if (_DO_PROTECTED.has(word + '도')) return m;
@@ -1721,6 +1729,11 @@ function _ruleNormalize(text) {
   s = s.replace(/([가-힣]+)도\s+(?=\x01)/g, function(m, word) {
     if (_DO_PROTECTED.has(word + '도')) return m;
     return word + ' ';
+  });
+  // "도" 조사 제거 (품목명+도+공백/끝): "바질도" → "바질", "계란도 우유도" → "계란 우유"
+  s = s.replace(/([가-힣]{2,})도(?=\s|,|$)/g, function(m, word) {
+    if (_DO_PROTECTED.has(word + '도')) return m;
+    return word;
   });
 
   // ── 문장 잔여어 제거 (남았어, 있어, 필요해요 등) ──
@@ -1736,9 +1749,9 @@ function _ruleNormalize(text) {
 
   // ── P2: 정정 표현 제거 (한글숫자가 이미 아라비아로 변환된 후 실행) ──
   s = s.replace(/\d+(?:\.\d+)?\s*(?:[가-힣a-zA-Z]+\s*)?\s*(?:아\s*아니야|아니야|아니다|아\s*아니|아니|아(?=\s)|잠깐)\s*/g, '');
-  // 정정 후 잔여 어미 제거 ("2봉지로" 정정 뒤 남는 "로", "봉지야" 뒤 남는 "야" 등)
-  // ※ "로" 제거 시 키로/킬로 단위 보호 (negative lookbehind)
-  s = s.replace(/(?:이야|으로|로\s*해줘|(?<!키|킬)로|야)(?=\s|$)/g, '');
+  // 정정 후 잔여 어미 제거 — standalone "로"/"야"는 품목명 파괴 위험(토르티야,타로)으로 제거하지 않음
+  // 단위+로/야는 step 3b에서 별도 처리됨
+  s = s.replace(/(?:이야|으로|로\s*해줘)(?=\s|$)/g, '');
 
   // ── 동작어 잔여 제거 (존칭/연결형) — 액션 매핑 가능한 동작어는 5a/5b에서 처리하므로 여기서 제거하지 않음 ──
   s = s.replace(/(?:넣었습니다|했습니다)(?=\s|$)/g, '');
