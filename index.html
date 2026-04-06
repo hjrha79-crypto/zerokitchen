@@ -4923,8 +4923,12 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
       if (!_devMode && (document.getElementById('tab-test')?.classList.contains('active') || document.getElementById('tab-observe')?.classList.contains('active'))) {
         switchTab('input', document.querySelector('.nav'));
       }
+      return;
     }
-    _devTapTimer = setTimeout(() => { _devTapCount = 0; }, 1500);
+    _devTapTimer = setTimeout(() => {
+      if (_devTapCount < 5) switchTab('input', document.querySelector('.nav'));
+      _devTapCount = 0;
+    }, 400);
   };
 })();
 
