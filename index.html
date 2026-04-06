@@ -4909,6 +4909,9 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
   if (!logo) return;
   logo.onclick = (e) => {
     e.preventDefault();
+    // 즉시 홈 전환 (딜레이 없음)
+    switchTab('input', document.querySelector('.nav'));
+    // 개발자 모드: 1.5초 내 5탭
     _devTapCount++;
     clearTimeout(_devTapTimer);
     if (_devTapCount >= 5) {
@@ -4920,15 +4923,8 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
       const ob = document.getElementById('obsTabBtn');
       if (ob) ob.style.display = _devMode ? '' : 'none';
       showToast(_devMode ? '🔧 개발자 모드 ON' : '개발자 모드 OFF');
-      if (!_devMode && (document.getElementById('tab-test')?.classList.contains('active') || document.getElementById('tab-observe')?.classList.contains('active'))) {
-        switchTab('input', document.querySelector('.nav'));
-      }
-      return;
     }
-    _devTapTimer = setTimeout(() => {
-      if (_devTapCount < 5) switchTab('input', document.querySelector('.nav'));
-      _devTapCount = 0;
-    }, 200);
+    _devTapTimer = setTimeout(() => { _devTapCount = 0; }, 1500);
   };
 })();
 
