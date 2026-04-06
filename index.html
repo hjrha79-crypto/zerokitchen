@@ -424,6 +424,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
     <button class="nav" onclick="switchTab('inventory',this)">재고</button>
     <button class="nav" onclick="switchTab('order',this)">발주</button>
     <button class="nav" id="testTabBtn" onclick="switchTab('test',this)" style="display:none">테스트</button>
+    <button class="nav" id="obsTabBtn" onclick="switchTab('observe',this)" style="display:none">관찰</button>
   </div>
 </div>
 
@@ -548,6 +549,36 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
   <div class="card">
     <div class="card-title">결과</div>
     <div class="json-result" id="jsonResult">결과가 여기에 표시됩니다.</div>
+  </div>
+</div>
+
+<!-- 관찰 패널 -->
+<div id="tab-observe" class="tab">
+  <div class="card">
+    <div class="card-title">일일 현장 관찰</div>
+    <div id="obsDateLabel" style="font-size:13px;color:var(--dim);margin-bottom:12px"></div>
+    <div id="obsForm" style="display:flex;flex-direction:column;gap:14px">
+      <label style="font-size:14px;display:flex;align-items:center;gap:8px">
+        <span>음성 사용 여부</span>
+        <select id="obsVoice" style="font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">
+          <option value="">선택</option><option value="true">예</option><option value="false">아니오</option>
+        </select>
+      </label>
+      <label style="font-size:14px;display:flex;align-items:center;gap:8px">
+        <span>종이 병행 여부</span>
+        <select id="obsPaper" style="font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">
+          <option value="">선택</option><option value="true">예</option><option value="false">아니오</option>
+        </select>
+      </label>
+      <label style="font-size:14px;display:flex;align-items:center;gap:8px">
+        <span>발주 완료 여부</span>
+        <select id="obsOrder" style="font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">
+          <option value="">선택</option><option value="true">예</option><option value="false">아니오</option>
+        </select>
+      </label>
+    </div>
+    <button class="btn-run" style="margin-top:14px;width:100%" onclick="_saveObservation()" id="obsSaveBtn">기록</button>
+    <div id="obsResult" style="margin-top:10px;font-size:13px"></div>
   </div>
 </div>
 
@@ -4067,6 +4098,44 @@ async function switchTab(n, btn) {
   if (rp) rp.style.display = 'none';
   if (n==='inventory') { if (!_items.length) await refreshItems(); renderInventory(); }
   if (n==='order') { _startOrderSession(); renderOrder(); }
+  if (n==='observe') { _loadObservation(); }
+}
+
+// ── 관찰 탭 ──
+async function _loadObservation() {
+  const today = new Date().toISOString().slice(0, 10);
+  const label = document.getElementById('obsDateLabel');
+  if (label) label.textContent = today;
+  // 기존 기록 로드
+  const { data } = await db.from('usage_observations')
+    .select('*').eq('store_id', SID).eq('date', today).maybeSingle();
+  document.getElementById('obsVoice').value = data ? String(data.voice_used) : '';
+  document.getElementById('obsPaper').value = data ? String(data.paper_used) : '';
+  document.getElementById('obsOrder').value = data ? String(data.order_completed) : '';
+  const res = document.getElementById('obsResult');
+  if (res) res.textContent = data ? '오늘 기록 있음 (수정 가능)' : '';
+}
+
+async function _saveObservation() {
+  const voice = document.getElementById('obsVoice').value;
+  const paper = document.getElementById('obsPaper').value;
+  const order = document.getElementById('obsOrder').value;
+  const res = document.getElementById('obsResult');
+  if (!voice || !paper || !order) { res.textContent = '3개 항목 모두 선택해주세요.'; res.style.color='#e74c3c'; return; }
+  const today = new Date().toISOString().slice(0, 10);
+  const row = {
+    store_id: SID,
+    date: today,
+    voice_used: voice === 'true',
+    paper_used: paper === 'true',
+    order_completed: order === 'true'
+  };
+  // upsert: 같은 날 같은 매장이면 덮어쓰기
+  const { error } = await db.from('usage_observations').upsert(row, { onConflict: 'store_id,date' });
+  if (error) { res.textContent = '저장 실패: ' + error.message; res.style.color='#e74c3c'; return; }
+  res.style.color = 'var(--primary)';
+  res.textContent = '기록 완료 (' + today + ')';
+  showToast('관찰 기록 저장됨');
 }
 
 async function _startOrderSession() {
@@ -4833,6 +4902,8 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
   if (_devMode) {
     const tb = document.getElementById('testTabBtn');
     if (tb) tb.style.display = '';
+    const ob = document.getElementById('obsTabBtn');
+    if (ob) ob.style.display = '';
   }
   const logo = document.getElementById('logoBtn');
   if (!logo) return;
@@ -4846,8 +4917,10 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
       localStorage.setItem('zk_dev_mode', _devMode);
       const tb = document.getElementById('testTabBtn');
       if (tb) tb.style.display = _devMode ? '' : 'none';
+      const ob = document.getElementById('obsTabBtn');
+      if (ob) ob.style.display = _devMode ? '' : 'none';
       showToast(_devMode ? '🔧 개발자 모드 ON' : '개발자 모드 OFF');
-      if (!_devMode && document.getElementById('tab-test')?.classList.contains('active')) {
+      if (!_devMode && (document.getElementById('tab-test')?.classList.contains('active') || document.getElementById('tab-observe')?.classList.contains('active'))) {
         switchTab('input', document.querySelector('.nav'));
       }
     }
