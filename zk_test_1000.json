@@ -86,7 +86,7 @@
     {"id":77,"cat":"half","input":"설탕 세 봉지 반","expect":[{"name":"설탕","qty":3.5,"unit":"봉지"}]},
     {"id":78,"cat":"half","input":"밀가루 한 봉 반","expect":[{"name":"밀가루","qty":1.5,"unit":"봉지"}]},
     {"id":79,"cat":"half","input":"피자도우 0.5박스","expect":[{"name":"피자도우","qty":0.5,"unit":"박스"}]},
-    {"id":80,"cat":"half","input":"모짜렐라 1.5키로","expect":[{"name":"모짜렐라","qty":1.5,"unit":"kg"}]},
+    {"id":80,"cat":"half","input":"모짜렐라 1.5키로","expect":[{"name":"모짜렐라치즈","qty":1.5,"unit":"kg"}]},
     {"id":81,"cat":"half","input":"올리브오일 2.5병","expect":[{"name":"올리브오일","qty":2.5,"unit":"병"}]},
     {"id":82,"cat":"half","input":"소금 0.5봉지","expect":[{"name":"소금","qty":0.5,"unit":"봉지"}]},
     {"id":83,"cat":"half","input":"크림치즈 반 통","expect":[{"name":"크림치즈","qty":0.5,"unit":"통"}]},
@@ -116,7 +116,7 @@
     {"id":106,"cat":"multi_item","input":"양파 두 망 반 당근 세 개 반","expect":[{"name":"양파","qty":2.5,"unit":"망"},{"name":"당근","qty":3.5,"unit":"개"}]},
     {"id":107,"cat":"multi_item","input":"고르곤 돌체 하나 고르곤졸라 두개","expect":[{"name":"고르곤 돌체","qty":1,"unit":"개"},{"name":"고르곤졸라","qty":2,"unit":"개"}]},
     {"id":108,"cat":"multi_item","input":"크림치즈 하나 크림소스 두개 크림파스타소스 세봉","expect":[{"name":"크림치즈","qty":1,"unit":"개"},{"name":"크림소스","qty":2,"unit":"개"},{"name":"크림파스타소스","qty":3,"unit":"봉지"}]},
-    {"id":109,"cat":"multi_item","input":"피자도우 반박스 모짜렐라 1.5키로","expect":[{"name":"피자도우","qty":0.5,"unit":"박스"},{"name":"모짜렐라","qty":1.5,"unit":"kg"}]},
+    {"id":109,"cat":"multi_item","input":"피자도우 반박스 모짜렐라 1.5키로","expect":[{"name":"피자도우","qty":0.5,"unit":"박스"},{"name":"모짜렐라치즈","qty":1.5,"unit":"kg"}]},
     {"id":110,"cat":"multi_item","input":"삼발이 반 통 오이피클 한 병 반","expect":[{"name":"삼발이","qty":0.5,"unit":"통"},{"name":"오이피클","qty":1.5,"unit":"병"}]},
     {"id":111,"cat":"multi_item","input":"어니언링 반 박스 감자튀김 한 박스 반","expect":[{"name":"어니언링","qty":0.5,"unit":"박스"},{"name":"감자튀김","qty":1.5,"unit":"박스"}]},
     {"id":112,"cat":"multi_item","input":"소금 한 봉지 후추 한 봉지","expect":[{"name":"소금","qty":1,"unit":"봉지"},{"name":"후추","qty":1,"unit":"봉지"}]},
@@ -248,7 +248,7 @@
     {"id":227,"cat":"half_multi","input":"치즈 한 봉지 반 햄 두 팩 반","expect":[{"name":"치즈","qty":1.5,"unit":"봉지"},{"name":"햄","qty":2.5,"unit":"팩"}]},
     {"id":228,"cat":"half_multi","input":"피자도우 반박스 올리브오일 반병","expect":[{"name":"피자도우","qty":0.5,"unit":"박스"},{"name":"올리브오일","qty":0.5,"unit":"병"}]},
     {"id":229,"cat":"half_multi","input":"우유 두 병 반 계란 한 판","expect":[{"name":"우유","qty":2.5,"unit":"병"},{"name":"계란","qty":1,"unit":"판"}]},
-    {"id":230,"cat":"half_multi","input":"모짜렐라 2키로 반 피자도우 1박스 반","expect":[{"name":"모짜렐라","qty":2.5,"unit":"kg"},{"name":"피자도우","qty":1.5,"unit":"박스"}]},
+    {"id":230,"cat":"half_multi","input":"모짜렐라 2키로 반 피자도우 1박스 반","expect":[{"name":"모짜렐라치즈","qty":2.5,"unit":"kg"},{"name":"피자도우","qty":1.5,"unit":"박스"}]},
 
     {"id":231,"cat":"number_end","input":"올리브오일 추가해줘 세 병","expect":[{"name":"올리브오일","qty":3,"unit":"병","action":"inbound"}]},
     {"id":232,"cat":"number_end","input":"토마토 넣어 다섯 개","expect":[{"name":"토마토","qty":5,"unit":"개","action":"inbound"}]},
@@ -287,7 +287,7 @@
     {"id":261,"cat":"action_half","input":"피자도우 반박스 입고","expect":[{"name":"피자도우","qty":0.5,"unit":"박스","action":"inbound"}]},
     {"id":262,"cat":"action_half","input":"치즈 한 봉지 반 사용","expect":[{"name":"치즈","qty":1.5,"unit":"봉지","action":"consume"}]},
     {"id":263,"cat":"action_half","input":"우유 반 병 추가","expect":[{"name":"우유","qty":0.5,"unit":"병","action":"inbound"}]},
-    {"id":264,"cat":"action_half","input":"모짜렐라 1.5키로 입고","expect":[{"name":"모짜렐라","qty":1.5,"unit":"kg","action":"inbound"}]},
+    {"id":264,"cat":"action_half","input":"모짜렐라 1.5키로 입고","expect":[{"name":"모짜렐라치즈","qty":1.5,"unit":"kg","action":"inbound"}]},
     {"id":265,"cat":"action_half","input":"올리브오일 반병 넣었어","expect":[{"name":"올리브오일","qty":0.5,"unit":"병","action":"inbound"}]},
 
     {"id":266,"cat":"compound_name","input":"토마토소스 2캔","expect":[{"name":"토마토소스","qty":2,"unit":"캔"}]},
@@ -462,7 +462,7 @@
     {"id":415,"cat":"basic","input":"당근 열셋","expect":[{"name":"당근","qty":13,"unit":"개"}]},
 
     {"id":416,"cat":"multi_item","input":"토마토소스 2캔 페스토 1병 올리브오일 1병","expect":[{"name":"토마토소스","qty":2,"unit":"캔"},{"name":"페스토","qty":1,"unit":"병"},{"name":"올리브오일","qty":1,"unit":"병"}]},
-    {"id":417,"cat":"multi_item","input":"크림치즈 2개 모짜렐라 3키로 파마산치즈 1봉지","expect":[{"name":"크림치즈","qty":2,"unit":"개"},{"name":"모짜렐라","qty":3,"unit":"kg"},{"name":"파마산치즈","qty":1,"unit":"봉지"}]},
+    {"id":417,"cat":"multi_item","input":"크림치즈 2개 모짜렐라 3키로 파마산치즈 1봉지","expect":[{"name":"크림치즈","qty":2,"unit":"개"},{"name":"모짜렐라치즈","qty":3,"unit":"kg"},{"name":"파마산치즈","qty":1,"unit":"봉지"}]},
     {"id":418,"cat":"multi_item","input":"냅킨 3묶음 랩 2롤 호일 1롤","expect":[{"name":"냅킨","qty":3,"unit":"묶음"},{"name":"랩","qty":2,"unit":"롤"},{"name":"호일","qty":1,"unit":"롤"}]},
     {"id":419,"cat":"multi_item","input":"콜라 1박스 사이다 1박스 생수 3박스","expect":[{"name":"콜라","qty":1,"unit":"박스"},{"name":"사이다","qty":1,"unit":"박스"},{"name":"생수","qty":3,"unit":"박스"}]},
     {"id":420,"cat":"multi_item","input":"청양고추 10개 깻잎 1묶음 부추 1단","expect":[{"name":"청양고추","qty":10,"unit":"개"},{"name":"깻잎","qty":1,"unit":"묶음"},{"name":"부추","qty":1,"unit":"단"}]},
@@ -558,7 +558,7 @@
     {"id":499,"cat":"basic","input":"코코아파우더 1봉지","expect":[{"name":"코코아파우더","qty":1,"unit":"봉지"}]},
     {"id":500,"cat":"basic","input":"슈가파우더 1봉지","expect":[{"name":"슈가파우더","qty":1,"unit":"봉지"}]},
 
-    {"id":501,"cat":"half","input":"모짜렐라 2키로 반","expect":[{"name":"모짜렐라","qty":2.5,"unit":"kg"}]},
+    {"id":501,"cat":"half","input":"모짜렐라 2키로 반","expect":[{"name":"모짜렐라치즈","qty":2.5,"unit":"kg"}]},
     {"id":502,"cat":"half","input":"닭가슴살 1키로 반","expect":[{"name":"닭가슴살","qty":1.5,"unit":"kg"}]},
     {"id":503,"cat":"half","input":"삼겹살 한 키로 반","expect":[{"name":"삼겹살","qty":1.5,"unit":"kg"}]},
     {"id":504,"cat":"half","input":"감자 두 키로 반","expect":[{"name":"감자","qty":2.5,"unit":"kg"}]},
@@ -1023,7 +1023,7 @@
     {"id":875,"cat":"basic","input":"페타치즈 2팩","expect":[{"name":"페타치즈","qty":2,"unit":"팩"}]},
     {"id":876,"cat":"basic","input":"마스카르포네 1통","expect":[{"name":"마스카르포네","qty":1,"unit":"통"}]},
 
-    {"id":877,"cat":"multi_item","input":"부라타 2개 모짜렐라 1키로 리코타 1통","expect":[{"name":"부라타","qty":2,"unit":"개"},{"name":"모짜렐라","qty":1,"unit":"kg"},{"name":"리코타","qty":1,"unit":"통"}]},
+    {"id":877,"cat":"multi_item","input":"부라타 2개 모짜렐라 1키로 리코타 1통","expect":[{"name":"부라타","qty":2,"unit":"개"},{"name":"모짜렐라치즈","qty":1,"unit":"kg"},{"name":"리코타","qty":1,"unit":"통"}]},
 
     {"id":878,"cat":"basic","input":"아스파라거스 1단","expect":[{"name":"아스파라거스","qty":1,"unit":"단"}]},
     {"id":879,"cat":"basic","input":"아티초크 3개","expect":[{"name":"아티초크","qty":3,"unit":"개"}]},
@@ -1072,7 +1072,7 @@
 
     {"id":915,"cat":"multi_item","input":"비빔냉면 1봉지 물냉면 1봉지 쫄면 1봉지","expect":[{"name":"비빔냉면","qty":1,"unit":"봉지"},{"name":"물냉면","qty":1,"unit":"봉지"},{"name":"쫄면","qty":1,"unit":"봉지"}]},
 
-    {"id":916,"cat":"half_multi","input":"모짜렐라 한 키로 반 리코타 반통","expect":[{"name":"모짜렐라","qty":1.5,"unit":"kg"},{"name":"리코타","qty":0.5,"unit":"통"}]},
+    {"id":916,"cat":"half_multi","input":"모짜렐라 한 키로 반 리코타 반통","expect":[{"name":"모짜렐라치즈","qty":1.5,"unit":"kg"},{"name":"리코타","qty":0.5,"unit":"통"}]},
     {"id":917,"cat":"half_multi","input":"크림치즈 반통 파마산 한 봉지 반","expect":[{"name":"크림치즈","qty":0.5,"unit":"통"},{"name":"파마산","qty":1.5,"unit":"봉지"}]},
     {"id":918,"cat":"half_multi","input":"삼겹살 2키로 반 목살 한 키로 반","expect":[{"name":"삼겹살","qty":2.5,"unit":"kg"},{"name":"목살","qty":1.5,"unit":"kg"}]},
     {"id":919,"cat":"half_multi","input":"파스타면 한 봉지 반 토마토소스 반캔","expect":[{"name":"파스타면","qty":1.5,"unit":"봉지"},{"name":"토마토소스","qty":0.5,"unit":"캔"}]},
@@ -1090,7 +1090,7 @@
     {"id":927,"cat":"no_space","input":"양파3개당근2개감자5키로","expect":[{"name":"양파","qty":3,"unit":"개"},{"name":"당근","qty":2,"unit":"개"},{"name":"감자","qty":5,"unit":"kg"}]},
     {"id":928,"cat":"no_space","input":"소금1봉지후추1봉지설탕2봉지","expect":[{"name":"소금","qty":1,"unit":"봉지"},{"name":"후추","qty":1,"unit":"봉지"},{"name":"설탕","qty":2,"unit":"봉지"}]},
 
-    {"id":929,"cat":"correction","input":"모짜렐라 3키로 아 2키로","expect":[{"name":"모짜렐라","qty":2,"unit":"kg"}]},
+    {"id":929,"cat":"correction","input":"모짜렐라 3키로 아 2키로","expect":[{"name":"모짜렐라치즈","qty":2,"unit":"kg"}]},
     {"id":930,"cat":"correction","input":"파마산 다섯 봉지 아니 세 봉지","expect":[{"name":"파마산","qty":3,"unit":"봉지"}]},
 
     {"id":931,"cat":"basic","input":"포장지 5묶음","expect":[{"name":"포장지","qty":5,"unit":"묶음"}]},
