@@ -2903,7 +2903,7 @@ async function saveInvItem(id) {
     const mergedQty = Number(existing.current_qty) + qty;
     const choice = await _showMergeCard(name, existing, qty, unit);
     if (choice === 'merge') {
-      // 합치기: 기존 품목에 수량 합산, 현재 품목 삭제
+      // 더하기: 기존 품목에 수량 합산, 현재 품목 삭제
       await db.from('items').update({
         current_qty: mergedQty, updated_at: new Date().toISOString()
       }).eq('item_id', existing.item_id);
@@ -2911,12 +2911,22 @@ async function saveInvItem(id) {
       await db.from('items').delete().eq('item_id', id);
       _items = _items.filter(x => x.item_id !== id);
       renderInventory();
-      showToast(`✅ ${name} 합침 (${mergedQty}${unit || existing.unit || '개'})`);
+      showToast(`✅ ${name} 더하기 (${mergedQty}${unit || existing.unit || '개'})`);
+      return;
+    } else if (choice === 'overwrite') {
+      // 바꾸기: 기존 품목을 새 수량으로 교체, 현재 품목 삭제
+      await db.from('items').update({
+        current_qty: qty, updated_at: new Date().toISOString()
+      }).eq('item_id', existing.item_id);
+      existing.current_qty = qty;
+      await db.from('items').delete().eq('item_id', id);
+      _items = _items.filter(x => x.item_id !== id);
+      renderInventory();
+      showToast(`✅ ${name} 바꾸기 (${qty}${unit || existing.unit || '개'})`);
       return;
     } else if (choice === 'cancel') {
-      return; // 수정 취소
+      return; // 유지: 기존 수량 유지, 수정 취소
     }
-    // 'keep' → 따로 유지, 아래로 계속 진행하여 이름만 변경
   }
 
   const oldItem = _items.find(x => x.item_id === id);
@@ -2952,15 +2962,15 @@ function _showMergeCard(name, existing, newQty, unit) {
       <div style="font-size:14px;font-weight:600;margin-bottom:8px">"${name}"가 이미 있습니다.</div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px">기존 ${existing.current_qty}${u} + 새 ${newQty}${u} = ${mergedQty}${u}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="dup-btn-merge" id="mergeBtn" style="font-size:13px;padding:7px 14px">더하기 (${mergedQty}${u})</button>
-        <button class="dup-btn-overwrite" id="keepBtn" style="font-size:13px;padding:7px 14px">바꾸기 (${newQty}${u})</button>
-        <button class="dup-btn-replace" id="mergeCancelBtn" style="font-size:13px;padding:7px 14px">유지 (${existing.current_qty}${u})</button>
+        <button class="dup-btn-merge" data-action="merge" style="font-size:13px;padding:7px 14px">더하기 (${mergedQty}${u})</button>
+        <button class="dup-btn-overwrite" data-action="overwrite" style="font-size:13px;padding:7px 14px">바꾸기 (${newQty}${u})</button>
+        <button class="dup-btn-replace" data-action="keep" style="font-size:13px;padding:7px 14px">유지 (${existing.current_qty}${u})</button>
       </div>`;
     container.after(overlay);
     overlay.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    overlay.querySelector('#mergeBtn').onclick = () => { overlay.remove(); resolve('merge'); };
-    overlay.querySelector('#keepBtn').onclick = () => { overlay.remove(); resolve('keep'); };
-    overlay.querySelector('#mergeCancelBtn').onclick = () => { overlay.remove(); resolve('cancel'); };
+    overlay.querySelector('[data-action="merge"]').onclick = () => { overlay.remove(); resolve('merge'); };
+    overlay.querySelector('[data-action="overwrite"]').onclick = () => { overlay.remove(); resolve('overwrite'); };
+    overlay.querySelector('[data-action="keep"]').onclick = () => { overlay.remove(); resolve('cancel'); };
   });
 }
 
