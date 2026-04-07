@@ -4112,12 +4112,18 @@ async function _parseComplexInput(text) {
   const prompt = `다음 입력을 품목별로 분리해서 JSON 배열로 응답.
 각 항목은 {"name": "품목명", "qty": 숫자, "unit": "단위", "action": "stock_check|inbound|consume|order", "vendor": "거래처명 또는 null"} 형태.
 
-수량 규칙:
+action 결정 규칙 (중요):
+- 기본값: 품목+수량+단위만 있고 동작 키워드가 직접 붙지 않은 항목 → action: "stock_check"
 - "다 떨어졌", "없어", "소진", "다 썼", "하나도 없" → qty: 0, action: "stock_check"
 - "거의 없", "밖에 안 남았" → qty: 0, action: "stock_check"
-- "반" = 0.5, "반 통" = 0.5
-- "시켜야 돼", "주문해야" → action: "order" (수량 명시 없으면 qty: null)
+- "시켜야 돼", "주문해야", "시켜줘", "발주" 등 주문 동작어 → action: "order"
+- 동작 키워드는 바로 앞 품목에만 적용. 앞쪽의 다른 품목에는 전파하지 말 것
+  예: "코카콜라 두박스 코카콜라제로 한박스 주문해야되고" → 코카콜라 두박스=stock_check, 코카콜라제로 한박스=order
+  예: "A 3개 B 2개 시켜야돼 C 1개" → A=stock_check, B=order, C=stock_check
 - action이 "order"이고 수량이 명시되지 않으면 반드시 qty: null (1로 추측하지 말 것)
+
+수량 규칙:
+- "반" = 0.5, "반 통" = 0.5
 - 수량이 명시되지 않은 일반 품목(stock_check/inbound/consume) → qty: 1
 
 품목명 규칙:
