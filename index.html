@@ -224,7 +224,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 /* no item */
 .no-item{text-align:center;padding:40px;color:var(--muted);font-size:14px;grid-column:1/-1}
 /* ResultCard */
-#reviewPanel{position:fixed;bottom:62px;left:0;right:0;z-index:25;padding:0 10px 6px;max-height:60dvh;overflow-y:auto}
+#reviewPanel{position:fixed;bottom:62px;left:0;right:0;z-index:25;padding:0 10px 6px;max-height:75dvh;overflow-y:auto}
 .result-card-wrap{background:var(--surface);border:1.5px solid var(--accent);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:0 -2px 12px rgba(0,0,0,.08)}
 .result-card-title{font-size:15px;font-weight:700;color:var(--text);padding-bottom:10px;border-bottom:1px solid var(--border)}
 .result-card-body{display:flex;flex-direction:column;gap:6px}
@@ -298,8 +298,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .dup-card{background:var(--surface);border:1.5px solid var(--warn);border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:10px;margin-bottom:10px;position:relative}
 .dup-card-title{font-size:14px;font-weight:700;color:var(--text)}
 .dup-card-detail{font-size:13px;color:var(--dim);line-height:1.5}
-.dup-card-btns{display:flex;gap:8px}
-.dup-card-btns button{flex:1;padding:12px;border-radius:10px;font-family:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.dup-card-btns{display:flex;gap:8px;flex-wrap:wrap}
+.dup-card-btns button{flex:1;min-width:0;padding:10px 8px;border-radius:10px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
 .dup-btn-merge{background:var(--accent);border:none;color:#fff}
 .dup-btn-overwrite{background:var(--primary);border:none;color:#fff}
 .dup-btn-replace{background:var(--surface2);border:1px solid var(--border);color:var(--text)}
@@ -3382,7 +3382,7 @@ async function _showDupCleanup() {
     return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="font-size:14px;font-weight:600">${name}</div>
       <div style="font-size:12px;color:var(--dim);margin:4px 0">${detail} = ${totalQty}${unit}</div>
-      <div style="display:flex;gap:6px;margin-top:4px">
+      <div style="display:flex;gap:6px;margin-top:4px;flex-wrap:wrap">
         <button class="dup-btn-merge" style="font-size:12px;padding:6px 14px" onclick="_mergeDup('${key}')">더하기 (${totalQty}${unit})</button>
         <button class="dup-btn-overwrite" style="font-size:12px;padding:6px 14px" onclick="_replaceDup('${key}')">바꾸기 (${latestQty}${unit})</button>
         <button class="dup-btn-replace" style="font-size:12px;padding:6px 14px" onclick="this.parentElement.parentElement.style.display='none'">유지</button>
