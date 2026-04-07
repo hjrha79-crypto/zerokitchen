@@ -3973,10 +3973,10 @@ async function runJson() {
 function _isComplexInput(text) {
   // 동작 키워드 그룹
   const actionPatterns = [
-    /시켜|시키|주문|발주/,         // order
-    /남았|남아|있어|재고|얼마/,    // stock_check
-    /입고|들어왔|받았|추가/,       // inbound
-    /사용|썼어|차감|빼|꺼냈|버렸/, // consume
+    /시켜|시키|주문|발주|발주해/,                   // order
+    /남았|남아|있어|재고|얼마/,                     // stock_check
+    /입고|들어왔|들어온|받았|추가|입고됐|입고, /,   // inbound
+    /사용|썼|차감|빼|꺼냈|버렸|소비|소진|뺐/,      // consume
   ];
   const matchedActions = actionPatterns.filter(p => p.test(text)).length;
 
@@ -3995,6 +3995,19 @@ async function _parseComplexInput(text) {
   const vendorNames = _vendors.map(v => v.vendor_name).join(', ') || '없음';
   const prompt = `다음 입력을 품목별로 분리해서 JSON 배열로 응답.
 각 항목은 {"name": "품목명", "qty": 숫자, "unit": "단위", "action": "stock_check|inbound|consume|order", "vendor": "거래처명 또는 null"} 형태.
+
+수량 규칙:
+- "다 떨어졌", "없어", "소진", "다 썼", "하나도 없" → qty: 0, action: "stock_check"
+- "거의 없", "밖에 안 남았" → qty: 0, action: "stock_check"
+- "반" = 0.5, "반 통" = 0.5
+- "시켜야 돼", "주문해야" → action: "order" (수량 명시 없으면 qty: 1)
+- 수량이 명시되지 않은 일반 품목 → qty: 1
+
+품목 분리 규칙:
+- "식기세척기 세제"와 "세제"는 별개 품목. 접두어가 있으면 별도 품목으로 구분할 것
+- 같은 품목이 다른 동작으로 언급되면 각각 별도 항목으로 분리 (예: 재고 확인 + 발주 = 2건)
+- 입력에 언급된 모든 품목을 누락 없이 포함할 것. 재고 현황 언급도 stock_check로 포함
+- 예시: "식기세척기 세제 반 통 남았고 세제 한 통 있는데 세제만 한 통 시켜줘" → [{"name":"식기세척기 세제","qty":0.5,"unit":"통","action":"stock_check"},{"name":"세제","qty":1,"unit":"통","action":"stock_check"},{"name":"세제","qty":1,"unit":"통","action":"order"}]
 
 등록된 품목: ${itemNames}
 등록된 거래처: ${vendorNames}
