@@ -256,8 +256,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .rc-summary{font-size:15px;font-weight:700;color:var(--text);padding-bottom:8px}
 .result-add-btn{width:100%;padding:9px;background:transparent;border:1px dashed var(--border);border-radius:8px;color:var(--text-muted);font-family:inherit;font-size:13px;cursor:pointer;display:none}
 .result-card-btns{display:flex;gap:8px}
-.rc-btn-primary{flex:2;padding:14px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:15px;font-weight:700;cursor:pointer}
-.rc-btn-secondary{flex:1;padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:10px;color:var(--text);font-family:inherit;font-size:14px;font-weight:600;cursor:pointer}
+.rc-btn-primary{flex:2;min-height:44px;padding:14px 16px;background:#2d8a4e;border:none;border-radius:12px;color:#fff;font-family:inherit;font-size:16px;font-weight:700;cursor:pointer;letter-spacing:.3px}
+.rc-btn-secondary{flex:1;min-height:44px;padding:14px 16px;background:transparent;border:1.5px solid var(--border);border-radius:12px;color:var(--muted);font-family:inherit;font-size:15px;font-weight:600;cursor:pointer}
 .rc-btn-cancel{flex:1;padding:14px;background:transparent;border:1px solid var(--border);border-radius:10px;color:var(--text-muted);font-family:inherit;font-size:14px;cursor:pointer}
 .rc-btn-primary:disabled{opacity:.5}
 
@@ -2756,6 +2756,12 @@ function renderInventory() {
     return va < vb ? -1 : va > vb ? 1 : a.item_name < b.item_name ? -1 : 1;
   });
   else items.sort((a,b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
+  // 설정된 품목(target_qty 또는 min_stock > 0) 우선 정렬
+  items.sort((a,b) => {
+    const aSet = (Number(a.target_qty) > 0 || Number(a.min_stock) > 0) ? 1 : 0;
+    const bSet = (Number(b.target_qty) > 0 || Number(b.min_stock) > 0) ? 1 : 0;
+    return bSet - aSet;
+  });
   document.getElementById('invCount').textContent = items.length + '개';
   if (!items.length) { grid.innerHTML = '<div class="no-item">품목 없음</div>'; return; }
 
@@ -2771,7 +2777,8 @@ function renderInventory() {
       const qCls = qty <= 0 ? 'red' : qty < tgt ? 'warn' : '';
       const uSel = unitOpts.map(u => `<option value="${u}"${(it.unit||'개')===u?' selected':''}>${u}</option>`).join('');
       const vSel = vOpts.replace(new RegExp(`value="${it.vendor_id}"`), `value="${it.vendor_id}" selected`);
-      return `<div class="inv-list-card ${cls}">
+      const unconfigured = tgt === 0 && min === 0;
+      return `<div class="inv-list-card ${cls}" style="${unconfigured ? 'opacity:0.4' : ''}">
         <div class="inv-lc-r">
           <input class="inv-lc-name" value="${it.item_name}" data-id="${it.item_id}" data-field="item_name" onchange="_saveListField(this)">
           <div class="inv-lc-step">
@@ -3086,12 +3093,14 @@ async function renderOrder() {
   list.innerHTML = '<div class="no-item"><span class="spin" style="border-color:var(--border);border-top-color:var(--accent)"></span></div>';
 
   try {
-    // 1) pending 발주 요청 로드
+    // 1) pending + ordered 발주 요청 로드
     const { data: pendingRows, error: oErr } = await db.from('order_requests')
-      .select('*').eq('store_id', SID).eq('status', 'pending')
+      .select('*').eq('store_id', SID).in('status', ['pending', 'ordered'])
       .order('created_at', { ascending: false });
     if (oErr) throw oErr;
     _orderRequests = (pendingRows || []).filter(r => Number(r.qty) > 0);
+    const _pendingItems = _orderRequests.filter(r => r.status === 'pending');
+    const _orderedItems = _orderRequests.filter(r => r.status === 'ordered');
 
     // 1.5) 이월된 발주 로드 (어제 이전 deferred)
     const today = new Date().toISOString().slice(0, 10);
@@ -3106,7 +3115,7 @@ async function renderOrder() {
 
     // 2) 재고 부족 품목 (자동 제안용)
     await refreshItems();
-    const pendingItemIds = new Set(_orderRequests.map(r => r.item_id));
+    const pendingItemIds = new Set(_pendingItems.map(r => r.item_id).concat(_orderedItems.map(r => r.item_id)));
     // 부족 품목 추출 + 소비량 계산
     const needItems = _items.filter(it =>
       (Number(it.current_qty) <= Number(it.min_stock || 0) ||
@@ -3171,7 +3180,7 @@ async function renderOrder() {
       }
     }
 
-    if (!_orderRequests.length && !suggestItems.length) {
+    if (!_pendingItems.length && !_orderedItems.length && !suggestItems.length) {
       const lastCheck = _items.reduce((latest, it) => {
         const d = new Date(it.updated_at || 0);
         return d > latest ? d : latest;
@@ -3187,13 +3196,13 @@ async function renderOrder() {
 
     let html = '';
 
-    // ── Section A: 진행 중 발주 (order_requests pending) ──
-    if (_orderRequests.length) {
+    // ── Section A: 발주 대기 (pending) ──
+    if (_pendingItems.length) {
       html += `<div class="ord-section">`;
-      html += `<div class="ord-section-title"><span class="ord-icon">📋</span> 진행 중 발주 <span class="ord-pending-badge">${_orderRequests.length}</span></div>`;
+      html += `<div class="ord-section-title"><span class="ord-icon">📋</span> 발주 대기 <span class="ord-pending-badge">${_pendingItems.length}</span></div>`;
 
       const grpMap = new Map();
-      for (const r of _orderRequests) {
+      for (const r of _pendingItems) {
         const vName = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
         if (!grpMap.has(vName)) grpMap.set(vName, []);
         grpMap.get(vName).push(r);
@@ -3227,7 +3236,7 @@ async function renderOrder() {
                 <span style="font-size:12px;color:var(--dim)">${r.unit}</span>
               </div>
               <div class="ord-status-btns">
-                <button class="ord-btn-done" onclick="completeOrder(${r.id})">발주 완료</button>
+                <button class="ord-btn-done" onclick="markOrdered(${r.id})">주문 완료</button>
                 <button class="ord-btn-cancel" onclick="cancelOrder(${r.id})">취소</button>
               </div>
             </div>
@@ -3236,6 +3245,39 @@ async function renderOrder() {
           <div style="padding:8px 12px">
             <button class="ord-btn-kakao" style="width:100%;padding:10px;border-radius:8px;font-size:13px" onclick="_copyPendingOrder('${vName.replace(/'/g,"\\'")}')">📋 ${vName} 발주 복사</button>
           </div>
+        </div>`;
+      }
+      html += `</div>`;
+    }
+
+    // ── Section A2: 주문 완료 (ordered — 입고 대기) ──
+    if (_orderedItems.length) {
+      html += `<div class="ord-section">`;
+      html += `<div class="ord-section-title"><span class="ord-icon">🚚</span> 주문 완료 · 입고 대기 <span class="ord-pending-badge" style="background:#3b82f6">${_orderedItems.length}</span></div>`;
+
+      const grpMap2 = new Map();
+      for (const r of _orderedItems) {
+        const vName = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
+        if (!grpMap2.has(vName)) grpMap2.set(vName, []);
+        grpMap2.get(vName).push(r);
+      }
+      for (const [vName, rows] of grpMap2) {
+        html += `<div class="ord-vendor-group">
+          <div class="ord-vendor-hdr"><span class="ord-vendor-name">${vName}</span></div>
+          ${rows.map(r => {
+            return `<div class="ord-item-row" style="border-left:3px solid #3b82f6">
+              <div>
+                <span class="ord-item-name">${r.item_name}</span>
+                <span style="font-size:12px;color:#3b82f6;font-weight:600;margin-left:6px">주문됨</span>
+              </div>
+              <div class="ord-item-right">
+                <span style="font-size:14px;font-weight:600">${r.qty}${r.unit}</span>
+                <div class="ord-status-btns">
+                  <button class="ord-btn-done" style="background:#3b82f6" onclick="markReceived(${r.id})">입고 완료</button>
+                </div>
+              </div>
+            </div>`;
+          }).join('')}
         </div>`;
       }
       html += `</div>`;
@@ -3540,27 +3582,34 @@ async function _savePendingQty(orderId) {
   if (r) r.qty = qty;
 }
 
-function _copyPendingOrder(vendorName) {
+async function _copyPendingOrder(vendorName) {
   const items = _orderRequests.filter(r => {
     const vn = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
-    return vn === vendorName;
+    return vn === vendorName && r.status === 'pending';
   });
   if (!items.length) { showToast('발주 품목이 없습니다'); return; }
   const lines = [];
+  const idsToOrder = [];
   for (const r of items) {
-    // DOM input에서 최신 수량 읽기
     const inp = document.getElementById('pqty_' + r.id);
     const qty = inp ? parseInt(inp.value) || 0 : Number(r.qty);
     if (qty <= 0) continue;
     lines.push(`${r.item_name} ${qty}${r.unit}`);
+    idsToOrder.push(r.id);
   }
   if (!lines.length) { showToast('발주 품목이 없습니다'); return; }
   const text = `[발주]\n${lines.join('\n')}`;
-  navigator.clipboard.writeText(text).then(() => {
-    showToast('📋 발주 내용 복사됨', 2000);
-  }).catch(() => {
-    showToast('복사 실패');
-  });
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch(e) { showToast('복사 실패'); return; }
+  // pending → ordered 자동 전환
+  if (idsToOrder.length) {
+    await db.from('order_requests')
+      .update({ status: 'ordered', updated_at: new Date().toISOString() })
+      .in('id', idsToOrder);
+  }
+  showToast(`📋 복사 완료 · ${idsToOrder.length}건 주문 완료 처리됨`, 3000);
+  renderOrder();
 }
 
 function _dismissSuggest(itemId) {
@@ -3737,28 +3786,36 @@ async function _deferAllOrders() {
 async function _insertOrderIfNotDup(row) {
   const { data: existing } = await db.from('order_requests')
     .select('id').eq('store_id', row.store_id).eq('item_id', row.item_id)
-    .eq('status', 'pending').limit(1);
+    .in('status', ['pending', 'ordered']).limit(1);
   if (existing?.length) return { data: null, error: null, skipped: true };
   const { data, error } = await db.from('order_requests').insert(row).select();
   return { data, error, skipped: false };
 }
 
-// 발주 완료 → status='done' + 재고 입고
-async function completeOrder(orderId) {
+// 주문 완료: pending → ordered
+async function markOrdered(orderId) {
   const row = _orderRequests.find(r => r.id === orderId);
   if (!row) return;
-  // 스테퍼에서 수정된 최신 수량 반영
   const qtyInp = document.getElementById('pqty_' + orderId);
   if (qtyInp) {
     const updatedQty = parseInt(qtyInp.value) || 0;
     if (updatedQty > 0) row.qty = updatedQty;
   }
+  await db.from('order_requests')
+    .update({ status: 'ordered', qty: row.qty, updated_at: new Date().toISOString() })
+    .eq('id', orderId);
+  showToast(`${row.item_name} ${row.qty}${row.unit} 주문 완료`);
+  renderOrder();
+}
+
+// 입고 완료: ordered → done + 재고 입고
+async function markReceived(orderId) {
+  const row = _orderRequests.find(r => r.id === orderId);
+  if (!row) return;
   if (!confirm(`${row.item_name} ${row.qty}${row.unit} 입고 완료하시겠습니까?`)) return;
-  // status 업데이트
   await db.from('order_requests')
     .update({ status: 'done', updated_at: new Date().toISOString() })
     .eq('id', orderId);
-  // 재고 입고 처리
   const item = _items.find(it => it.item_id === row.item_id);
   if (item) {
     const newQty = Number(item.current_qty) + Number(row.qty);
@@ -3776,6 +3833,9 @@ async function completeOrder(orderId) {
   showToast(`${row.item_name} ${row.qty}${row.unit} 입고 완료`);
   renderOrder();
 }
+
+// 기존 done 건 호환: completeOrder는 markOrdered로 리다이렉트
+async function completeOrder(orderId) { return markOrdered(orderId); }
 
 // 발주 취소
 async function cancelOrder(orderId) {
@@ -4597,14 +4657,22 @@ function _showFloatResult(msg, type) {
   clearTimeout(_floatResultTimer);
   el.classList.remove('show');
   const cls = type === 'err' ? 'fr-err' : type === 'warn' ? 'fr-warn' : 'fr-ok';
-  el.innerHTML = `<div class="fr-card ${cls}"><button class="fr-close" onclick="_hideFloatResult()">✕</button>${msg.replace(/\n/g,'<br>')}</div>`;
+  el.innerHTML = `<div class="fr-card ${cls}">
+    <button class="fr-close" onclick="event.stopPropagation();_hideFloatResult()">✕</button>
+    ${msg.replace(/\n/g,'<br>')}
+    <div style="font-size:11px;color:var(--muted);margin-top:6px">탭하면 홈으로 이동</div>
+  </div>`;
+  el.onclick = () => { _hideFloatResult(); switchTab('input', document.querySelector('.nav')); };
   void el.offsetWidth;
   el.classList.add('show');
-  _floatResultTimer = setTimeout(() => _hideFloatResult(), 4000);
+  _floatResultTimer = setTimeout(() => _hideFloatResult(), 6000);
+  // 현재 탭 데이터 갱신
+  if (document.getElementById('tab-inventory')?.classList.contains('active')) renderInventory();
+  if (document.getElementById('tab-order')?.classList.contains('active')) renderOrder();
 }
 function _hideFloatResult() {
   const el = document.getElementById('floatResult');
-  if (el) { el.classList.remove('show'); clearTimeout(_floatResultTimer); }
+  if (el) { el.classList.remove('show'); el.onclick = null; clearTimeout(_floatResultTimer); }
 }
 
 async function undoOperations(opIds, cardEl) {
