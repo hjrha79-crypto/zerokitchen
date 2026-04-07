@@ -4001,8 +4001,13 @@ async function _parseComplexInput(text) {
 - "다 떨어졌", "없어", "소진", "다 썼", "하나도 없" → qty: 0, action: "stock_check"
 - "거의 없", "밖에 안 남았" → qty: 0, action: "stock_check"
 - "반" = 0.5, "반 통" = 0.5
-- "시켜야 돼", "주문해야" → action: "order" (수량 명시 없으면 qty: 1)
-- 수량이 명시되지 않은 일반 품목 → qty: 1
+- "시켜야 돼", "주문해야" → action: "order" (수량 명시 없으면 qty: null)
+- action이 "order"이고 수량이 명시되지 않으면 반드시 qty: null (1로 추측하지 말 것)
+- 수량이 명시되지 않은 일반 품목(stock_check/inbound/consume) → qty: 1
+
+품목명 규칙:
+- 품목명은 사용자가 말한 그대로 반환할 것. DB 매칭이나 정식 명칭 변환 하지 말 것
+- "치즈"라고 했으면 "치즈", "토마토소스"라고 했으면 "토마토소스"로 반환
 
 품목 분리 규칙:
 - "식기세척기 세제"와 "세제"는 별개 품목. 접두어가 있으면 별도 품목으로 구분할 것
@@ -4050,13 +4055,18 @@ function _showComplexReviewCard(rawText, items) {
   panel.style.display = 'block';
   const wrap = panel.querySelector('.result-card-wrap');
   if (!wrap) return;
-  const rows = items.map(it => {
+  const rows = items.map((it, idx) => {
     const icon = _COMPLEX_ICON[it.action] || '📋';
     const actionLabel = { order: '발주', stock_check: '재고', inbound: '입고', consume: '차감' }[it.action] || '재고';
     const vendorTag = it.vendor ? ` <span style="color:var(--dim);font-size:12px">(${it.vendor})</span>` : '';
+    const needsQty = it.action === 'order' && it.qty == null;
+    const qtyDisplay = needsQty
+      ? `<input type="number" class="cx-qty-input" id="cxQty_${idx}" min="1" placeholder="수량" style="width:52px;padding:4px 6px;border:1.5px solid var(--accent);border-radius:6px;font-size:13px;text-align:center">${it.unit || '개'}`
+      : `${it.qty ?? ''}${it.unit || '개'}`;
+    const qtyLabel = needsQty ? ' — 몇 개 발주할까요?' : '';
     return `<div class="rc-row" style="display:flex;align-items:center;gap:8px">
       <span style="font-size:18px">${icon}</span>
-      <span class="rc-item-name" style="flex:1">${it.name} ${it.qty || ''}${it.unit || '개'}${vendorTag}</span>
+      <span class="rc-item-name" style="flex:1">${it.name} ${qtyDisplay}${vendorTag}${qtyLabel}</span>
       <span class="rc-item-qty" style="font-size:12px;color:var(--muted)">${actionLabel}</span>
     </div>`;
   }).join('');
@@ -4067,7 +4077,7 @@ function _showComplexReviewCard(rawText, items) {
       <div class="result-card-title">🧠 복합 입력 분석 — ${items.length}개 품목</div>
       <div class="result-card-body">${rows}</div>
       <div class="result-card-btns" style="margin-top:12px">
-        <button class="review-confirm-btn" onclick="_closeComplexCard();showToast('확인 완료 (내일 연결 예정)')">확인</button>
+        <button class="review-confirm-btn" onclick="_confirmComplexCard()">확인</button>
         <button class="review-edit-btn" onclick="_complexToEdit('${encodeURIComponent(rawText)}')">수정</button>
       </div>
     </div>`;
@@ -4075,6 +4085,25 @@ function _showComplexReviewCard(rawText, items) {
   // 임시 저장 (내일 연결용)
   window._lastComplexItems = items;
   window._lastComplexRaw = rawText;
+}
+
+function _confirmComplexCard() {
+  // qty null인 발주 항목에 입력값 반영
+  const items = window._lastComplexItems;
+  if (items) {
+    let missing = false;
+    items.forEach((it, idx) => {
+      if (it.action === 'order' && it.qty == null) {
+        const inp = document.getElementById('cxQty_' + idx);
+        const v = inp ? parseInt(inp.value) : 0;
+        if (v > 0) { it.qty = v; }
+        else { missing = true; if (inp) inp.style.borderColor = 'var(--red)'; }
+      }
+    });
+    if (missing) { showToast('발주 수량을 입력해 주세요'); return; }
+  }
+  _closeComplexCard();
+  showToast('확인 완료 (내일 연결 예정)');
 }
 
 function _closeComplexCard() {
