@@ -2561,10 +2561,15 @@ function formatResult(result) {
         const editLink = ` <span style="font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline" onclick="switchTab('inventory',document.querySelectorAll('.nav')[1]);document.getElementById('invSearch').value='${it.name}';renderInventory()">(수정)</span>`;
         if (it.is_new) return `🆕 ${it.name} ${after}${u} 등록${editLink}`;
         let sign, color;
-        if (it.action === 'inbound') { sign = '+'; color = '#22c55e'; }
+        if (it.action === 'order') { sign = '🛒'; color = '#3b82f6'; }
+        else if (it.action === 'inbound') { sign = '+'; color = '#22c55e'; }
         else if (it.action === 'consume') { sign = '-'; color = '#ef4444'; }
         else { sign = '='; color = '#999'; }
         const qty = it.inputQty != null ? it.inputQty : after;
+        if (it.action === 'order') {
+          const bigNum = `<span style="font-size:1.3em;font-weight:700;color:${color}">🛒 ${qty}${u} 발주</span>`;
+          return `${it.name} ${bigNum}${editLink}`;
+        }
         const bigNum = `<span style="font-size:1.3em;font-weight:700;color:${color}">${sign}${qty}${u}</span>`;
         const detail = it.qty_before != null ? ` <span style="color:#888;font-size:0.85em">${it.qty_before}→${after}${u}</span>` : '';
         return `${it.name} ${bigNum}${detail}${editLink}`;
@@ -4748,10 +4753,9 @@ async function _showDupChoices(dupChecks, rawText) {
             합계: <strong>${mergedQty}${dup.newUnit}</strong>
           </div>
           <div class="dup-card-btns">
-            <button class="dup-btn-merge" id="dupMerge">합치기 ${mergedQty}${dup.newUnit}</button>
-            <button class="dup-btn-overwrite" id="dupOverwrite">덮어쓰기 ${dup.newQty}${dup.newUnit}</button>
-            <button class="dup-btn-replace" id="dupReplace">따로 유지</button>
-            <button class="dup-btn-cancel" id="dupCancel">취소</button>
+            <button class="dup-btn-merge" id="dupMerge">더하기 (${mergedQty}${dup.newUnit})</button>
+            <button class="dup-btn-overwrite" id="dupOverwrite">바꾸기 (${dup.newQty}${dup.newUnit})</button>
+            <button class="dup-btn-replace" id="dupKeepPrev">유지 (${dup.prevQty}${dup.prevUnit})</button>
           </div>
         </div>`;
       let resolved = false;
@@ -4760,29 +4764,26 @@ async function _showDupChoices(dupChecks, rawText) {
       const closeBtn = document.getElementById('dupClose');
       const mergeBtn = document.getElementById('dupMerge');
       const overwriteBtn = document.getElementById('dupOverwrite');
-      const replaceBtn = document.getElementById('dupReplace');
-      const cancelBtn = document.getElementById('dupCancel');
+      const keepPrevBtn = document.getElementById('dupKeepPrev');
       const _resolve = (v) => { if (!resolved) { resolved = true; clearTimeout(_timeout); restore(); resolve(v); } };
-      if (closeBtn) closeBtn.onclick = () => _resolve('cancel');
+      if (closeBtn) closeBtn.onclick = () => _resolve('keep_prev');
       if (mergeBtn) mergeBtn.onclick = () => _resolve('merge');
       if (overwriteBtn) overwriteBtn.onclick = () => _resolve('overwrite');
-      if (replaceBtn) replaceBtn.onclick = () => _resolve('keep_both');
-      if (cancelBtn) cancelBtn.onclick = () => _resolve('cancel');
+      if (keepPrevBtn) keepPrevBtn.onclick = () => _resolve('keep_prev');
       panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
     if (dup.idx >= _draftItems.length) continue;
     if (choice === 'merge') {
-      // 합치기: 기존 + 새 수량
+      // 더하기: 기존 + 새 수량
       _draftItems[dup.idx].quantity = mergedQty;
     } else if (choice === 'overwrite') {
-      // 덮어쓰기: 새 수량으로 교체
+      // 바꾸기: 새 수량으로 교체
       _draftItems[dup.idx].quantity = dup.newQty;
-    } else if (choice === 'keep_both') {
-      // 따로 유지: 둘 다 유지 (이미 draft에 있음)
-    } else if (choice === 'cancel') {
-      _draftItems.splice(dup.idx, 1);
+    } else if (choice === 'keep_prev') {
+      // 유지: 기존 수량 유지, 새 입력 제거
+      _draftItems[dup.idx].quantity = dup.prevQty;
     } else if (choice === 'timeout') {
-      _draftItems.splice(dup.idx, 1);
+      _draftItems[dup.idx].quantity = dup.prevQty;
       addResult(dup.item_name, '⏰ 30초 무응답 — 입력이 자동 종료되었습니다.', 'warn');
     }
   }
