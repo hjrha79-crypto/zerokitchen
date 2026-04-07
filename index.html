@@ -3361,9 +3361,11 @@ async function _showDupCleanup() {
 
   let cardsHtml = dups.map(([key, items]) => {
     const name = items[0].item_name;
-    const sameUnit = items.every(it => (it.unit || '') === (items[0].unit || ''));
-    const unit = items[0].unit || '';
+    const _normalizeUnit = u => (u || '').trim().toLowerCase() || '개';
+    const sameUnit = items.every(it => _normalizeUnit(it.unit) === _normalizeUnit(items[0].unit));
+    const unit = items[0].unit || '개';
     const detail = items.map(it => `${Number(it.current_qty)}${it.unit || '개'}`).join(' + ');
+    console.log(`[중복정리] "${name}" 단위:`, items.map(it => JSON.stringify(it.unit)), '→ sameUnit:', sameUnit);
     if (!sameUnit) {
       const units = [...new Set(items.map(it => it.unit || '개'))].join('/');
       return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
