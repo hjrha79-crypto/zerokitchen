@@ -3372,7 +3372,8 @@ async function _showDupCleanup() {
       <div style="font-size:12px;color:var(--dim);margin:4px 0">${detail} = ${totalQty}${unit}</div>
       <div style="display:flex;gap:6px;margin-top:4px">
         <button class="dup-btn-merge" style="font-size:12px;padding:6px 14px" onclick="_mergeDup('${key}')">더하기 (${totalQty}${unit})</button>
-        <button class="dup-btn-replace" style="font-size:12px;padding:6px 14px" onclick="this.parentElement.parentElement.style.display='none'">유지 (${keepQty}${unit})</button>
+        <button class="dup-btn-overwrite" style="font-size:12px;padding:6px 14px" onclick="_replaceDup('${key}')">바꾸기 (${keepQty}${unit})</button>
+        <button class="dup-btn-replace" style="font-size:12px;padding:6px 14px" onclick="this.parentElement.parentElement.style.display='none'">유지</button>
       </div>
     </div>`;
   }).join('');
@@ -3430,6 +3431,30 @@ async function _mergeDup(nameKey) {
   showToast(`${primary.item_name} 합침 → ${totalQty}${primary.unit || ''}`);
   renderInventory();
   // 패널 업데이트
+  _showDupCleanup();
+}
+
+// 바꾸기: 첫 번째 품목 수량만 유지, 나머지 삭제
+async function _replaceDup(nameKey) {
+  const nameMap = {};
+  _items.forEach(it => {
+    const key = it.item_name.replace(/\s/g, '').toLowerCase();
+    if (!nameMap[key]) nameMap[key] = [];
+    nameMap[key].push(it);
+  });
+  const items = nameMap[nameKey];
+  if (!items || items.length < 2) return;
+  const primary = items[0];
+  // primary 수량 그대로 유지, 나머지 삭제
+  for (let i = 1; i < items.length; i++) {
+    if (items[i].item_name !== primary.item_name) {
+      _saveAlias(items[i].item_name, primary.item_name);
+    }
+    await db.from('items').delete().eq('item_id', items[i].item_id);
+    _items = _items.filter(x => x.item_id !== items[i].item_id);
+  }
+  showToast(`${primary.item_name} 바꾸기 → ${primary.current_qty}${primary.unit || ''}`);
+  renderInventory();
   _showDupCleanup();
 }
 
