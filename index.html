@@ -2440,7 +2440,7 @@ async function confirmReview() {
   if (invalid.length) { showToast('품목명을 입력해 주세요.'); return; }
 
   const btn = document.getElementById('confirmReviewBtn');
-  btn.disabled = true; btn.textContent = '저장 중...';
+  if (btn) { btn.disabled = true; btn.textContent = '저장 중...'; }
 
   try {
     const req = draftToRequest(_draftItems);
@@ -2509,7 +2509,7 @@ async function confirmReview() {
 
     showToast('저장 실패: ' + e.message);
   } finally {
-    btn.disabled = false; btn.textContent = '✅ 확정 저장';
+    if (btn) { btn.disabled = false; btn.textContent = '✅ 확정 저장'; }
   }
 }
 
@@ -4195,7 +4195,7 @@ function _showComplexSummaryCard(rawText, items) {
       <div class="result-card-title">🧠 복합 입력 분석 — ${items.length}개 품목</div>
       <div class="result-card-body">${rows}</div>
       <div class="result-card-btns" style="margin-top:12px">
-        <button class="review-confirm-btn" onclick="_closeComplexCard();showToast('확인 완료 (내일 연결 예정)')">확인</button>
+        <button class="review-confirm-btn" onclick="_confirmComplexItems()">확인</button>
         <button class="review-edit-btn" onclick="_complexToEdit('${encodeURIComponent(rawText)}')">수정</button>
       </div>
     </div>`;
@@ -4207,6 +4207,33 @@ function _showComplexSummaryCard(rawText, items) {
 function _closeComplexCard() {
   const panel = document.getElementById('reviewPanel');
   if (panel) panel.style.display = 'none';
+}
+
+// 복합 입력 확인 → 기존 confirmReview 재활용하여 DB 반영
+async function _confirmComplexItems() {
+  const items = window._lastComplexItems;
+  const rawText = window._lastComplexRaw || '';
+  if (!items?.length) return;
+
+  // _draftItems 형태로 변환 (confirmReview가 사용하는 포맷)
+  _draftItems = items.map(it => ({
+    item_name: it.name,
+    quantity: it.qty ?? 1,
+    unit: it.unit || '개',
+    action: it.action || 'stock_check',
+    vendor: it.vendor || null,
+    confidence: 'high'
+  }));
+
+  // reviewPanel에 rawText 설정 (confirmReview가 참조)
+  const panel = document.getElementById('reviewPanel');
+  if (panel) panel.dataset.rawText = rawText;
+
+  // _parseMeta 설정 (kitchen_logs 기록용)
+  _parseMeta = { confidence: 1, usedLLM: true };
+
+  // 기존 confirmReview 호출 — processRequest → DB 반영 + 결과 카드 표시
+  await confirmReview();
 }
 
 function _complexToEdit(encodedRaw) {
