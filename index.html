@@ -2952,9 +2952,9 @@ function _showMergeCard(name, existing, newQty, unit) {
       <div style="font-size:14px;font-weight:600;margin-bottom:8px">"${name}"가 이미 있습니다.</div>
       <div style="font-size:13px;color:var(--muted);margin-bottom:10px">기존 ${existing.current_qty}${u} + 새 ${newQty}${u} = ${mergedQty}${u}</div>
       <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="rc-btn-primary" id="mergeBtn" style="font-size:13px;padding:7px 14px">합치기 (${mergedQty}${u})</button>
-        <button class="rc-btn-secondary" id="keepBtn" style="font-size:13px;padding:7px 14px">따로 유지</button>
-        <button class="rc-btn-cancel" id="mergeCancelBtn" style="font-size:13px;padding:7px 14px">취소</button>
+        <button class="dup-btn-merge" id="mergeBtn" style="font-size:13px;padding:7px 14px">더하기 (${mergedQty}${u})</button>
+        <button class="dup-btn-overwrite" id="keepBtn" style="font-size:13px;padding:7px 14px">바꾸기 (${newQty}${u})</button>
+        <button class="dup-btn-replace" id="mergeCancelBtn" style="font-size:13px;padding:7px 14px">유지 (${existing.current_qty}${u})</button>
       </div>`;
     container.after(overlay);
     overlay.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -3361,17 +3361,18 @@ async function _showDupCleanup() {
         <div style="font-size:12px;color:var(--red);margin:4px 0">⚠️ 단위 다름 (${units}) — ${detail}</div>
         <div style="font-size:11px;color:var(--dim);margin-bottom:4px">단위를 통일한 후 합쳐주세요</div>
         <div style="display:flex;gap:6px;margin-top:4px">
-          <button style="font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);cursor:pointer;font-family:inherit" onclick="this.parentElement.parentElement.style.display='none'">무시</button>
+          <button style="font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);cursor:pointer;font-family:inherit" onclick="this.parentElement.parentElement.style.display='none'">유지</button>
         </div>
       </div>`;
     }
     const totalQty = items.reduce((s, it) => s + Number(it.current_qty), 0);
+    const keepQty = items[0].current_qty;
     return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="font-size:14px;font-weight:600">${name}</div>
       <div style="font-size:12px;color:var(--dim);margin:4px 0">${detail} = ${totalQty}${unit}</div>
       <div style="display:flex;gap:6px;margin-top:4px">
-        <button class="ord-btn-done" style="font-size:12px;padding:6px 14px" onclick="_mergeDup('${key}')">합치기 (${totalQty}${unit})</button>
-        <button style="font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);cursor:pointer;font-family:inherit" onclick="this.parentElement.parentElement.style.display='none'">무시</button>
+        <button class="dup-btn-merge" style="font-size:12px;padding:6px 14px" onclick="_mergeDup('${key}')">더하기 (${totalQty}${unit})</button>
+        <button class="dup-btn-replace" style="font-size:12px;padding:6px 14px" onclick="this.parentElement.parentElement.style.display='none'">유지 (${keepQty}${unit})</button>
       </div>
     </div>`;
   }).join('');
@@ -3382,7 +3383,7 @@ async function _showDupCleanup() {
       <div class="config-card-title">중복 품목 정리</div>
       <div style="font-size:12px;color:var(--dim);margin-bottom:8px">같은 이름의 품목을 하나로 합칩니다. 수량은 합산됩니다.</div>
       ${cardsHtml}
-      <button class="rc-btn-primary" style="margin-top:12px;width:100%" onclick="_mergeAllDups()">전체 합치기</button>
+      <button class="rc-btn-primary" style="margin-top:12px;width:100%" onclick="_mergeAllDups()">전체 더하기</button>
     </div>`;
   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -4639,9 +4640,9 @@ async function _showIntraDupChoices(intraDups, rawText) {
             입력: ${items.map(it => (it.quantity||0) + (it.unit||'개')).join(' + ')} = <strong>${totalQty}${unit}</strong>
           </div>
           <div class="dup-card-btns">
-            <button class="dup-btn-merge" id="intraMerge">합쳐서 ${totalQty}${unit}으로 할까요?</button>
-            <button class="dup-btn-replace" id="intraReplace">새로 ${lastQty}${unit}으로 바꿀까요?</button>
-            <button class="dup-btn-cancel" id="intraCancel">취소</button>
+            <button class="dup-btn-merge" id="intraMerge">더하기 (${totalQty}${unit})</button>
+            <button class="dup-btn-overwrite" id="intraReplace">바꾸기 (${lastQty}${unit})</button>
+            <button class="dup-btn-replace" id="intraKeep">유지 (${items[0].quantity||0}${unit})</button>
           </div>
         </div>`;
       let resolved = false;
@@ -4650,17 +4651,17 @@ async function _showIntraDupChoices(intraDups, rawText) {
       const safeResolve = (val) => { if (!resolved) { resolved = true; clearTimeout(_timeout); restore(); resolve(val); } };
       document.getElementById('intraMerge')?.addEventListener('click', () => safeResolve('merge'));
       document.getElementById('intraReplace')?.addEventListener('click', () => safeResolve('replace'));
-      document.getElementById('intraCancel')?.addEventListener('click', () => safeResolve('cancel'));
+      document.getElementById('intraKeep')?.addEventListener('click', () => safeResolve('keep'));
       panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
-    if (choice === 'merge' || choice === 'replace') {
+    if (choice === 'merge' || choice === 'replace' || choice === 'keep') {
       _createDecisionEvent({
         entity: name,
         ai_suggestion: lastQty,
-        final_value: choice === 'merge' ? totalQty : lastQty,
-        user_decision: choice === 'merge' ? 'EDIT' : 'REJECT',
-        decision_action: choice === 'merge' ? 'MERGE' : 'REPLACE',
+        final_value: choice === 'merge' ? totalQty : choice === 'replace' ? lastQty : items[0].quantity,
+        user_decision: choice === 'keep' ? 'ACCEPT' : 'EDIT',
+        decision_action: choice === 'merge' ? 'MERGE' : choice === 'replace' ? 'REPLACE' : 'KEEP',
         edit_delta: choice === 'merge' ? totalQty : null,
         harness_trigger: 'duplicate_entry'
       });
@@ -4672,11 +4673,15 @@ async function _showIntraDupChoices(intraDups, rawText) {
     } else if (choice === 'replace') {
       _draftItems[validIndices[0]].quantity = lastQty;
       for (const idx of sortedIndices) { if (idx !== validIndices[0]) _draftItems.splice(idx, 1); }
-    } else {
-      for (const idx of sortedIndices) { _draftItems.splice(idx, 1); }
-      if (choice === 'timeout') {
-        addResult(name, '⏰ 30초 무응답 — 입력이 자동 종료되었습니다.', 'warn');
-      }
+    } else if (choice === 'keep') {
+      // 유지: 첫 번째 항목 수량 유지, 나머지 제거
+      _draftItems[validIndices[0]].quantity = items[0].quantity || 0;
+      for (const idx of sortedIndices) { if (idx !== validIndices[0]) _draftItems.splice(idx, 1); }
+    } else if (choice === 'timeout') {
+      // 타임아웃: 첫 번째 항목 유지
+      _draftItems[validIndices[0]].quantity = items[0].quantity || 0;
+      for (const idx of sortedIndices) { if (idx !== validIndices[0]) _draftItems.splice(idx, 1); }
+      addResult(name, '⏰ 30초 무응답 — 첫 입력값으로 유지됩니다.', 'warn');
     }
   }
 }
