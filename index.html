@@ -646,7 +646,8 @@ const db = createClient(SUPABASE_URL, SUPABASE_KEY);
    전역 상태
 ════════════════════════════════════════════════════════ */
 let SID = null;         // store_id
-let _claudeApiKey = '';  // Claude API 키 (Vita 런타임 주입 또는 수동 설정)
+let _claudeApiKey = localStorage.getItem('zk_claude_key') || '';
+if (!_claudeApiKey) console.warn('Claude API 키 미설정. 설정 방법: localStorage.setItem(\'zk_claude_key\', \'키값\') 후 새로고침');
 let _items = [];        // 품목 캐시
 let _pendingOps = [];   // pending 작업 큐 { id, req, timer, el }
 let _pendingSeq = 0;
