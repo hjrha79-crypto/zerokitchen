@@ -4413,11 +4413,30 @@ function _showComplexSummaryCard(rawText, items) {
 }
 
 function _closeComplexCard() {
+  _restoreReviewPanel();
   const panel = document.getElementById('reviewPanel');
   if (panel) panel.style.display = 'none';
+  window._lastComplexItems = null;
+  window._lastComplexRaw = null;
 }
 
-// 복합 입력 확인 → 기존 confirmReview 재활용하여 DB 반영
+// _showComplexSummaryCard가 파괴한 reviewPanel DOM 복원
+function _restoreReviewPanel() {
+  const wrap = document.querySelector('#reviewPanel .result-card-wrap');
+  if (!wrap || document.getElementById('confirmReviewBtn')) return; // 이미 정상 상태
+  wrap.innerHTML = `
+    <button class="card-close-x" onclick="cancelReview()">✕</button>
+    <div class="result-card-title" id="resultCardTitle"></div>
+    <div class="result-card-body" id="reviewBody"></div>
+    <button class="result-add-btn" onclick="addReviewRow()">+ 품목 추가</button>
+    <div class="result-card-btns">
+      <button class="rc-btn-primary" id="confirmReviewBtn" onclick="confirmReview()">확인 · 실행</button>
+      <button class="rc-btn-secondary" onclick="editReview()">수정</button>
+      <button class="rc-btn-cancel" onclick="cancelReview()">취소</button>
+    </div>`;
+}
+
+// 복합 입력 확인 → DB 반영 후 패널 정리
 async function _confirmComplexItems() {
   const items = window._lastComplexItems;
   const rawText = window._lastComplexRaw || '';
@@ -4433,15 +4452,19 @@ async function _confirmComplexItems() {
     confidence: 'high'
   }));
 
-  // reviewPanel에 rawText 설정 (confirmReview가 참조)
+  // reviewPanel 복원 후 rawText 설정 (confirmReview가 참조)
+  _restoreReviewPanel();
   const panel = document.getElementById('reviewPanel');
   if (panel) panel.dataset.rawText = rawText;
 
   // _parseMeta 설정 (kitchen_logs 기록용)
   _parseMeta = { confidence: 1, usedLLM: true };
 
-  // 기존 confirmReview 호출 — processRequest → DB 반영 + 결과 카드 표시
+  // DB 반영 + 결과 카드 표시
   await confirmReview();
+  // 복합 상태 정리
+  window._lastComplexItems = null;
+  window._lastComplexRaw = null;
 }
 
 function _complexToEdit(encodedRaw) {
