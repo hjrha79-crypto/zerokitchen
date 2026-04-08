@@ -3294,6 +3294,50 @@ async function renderOrder() {
 
     let html = '';
 
+    // ── 거래처별 텍스트 발주 리스트 (최상단) ──
+    {
+      const _textPendingIds = new Set(_pendingItems.map(r => r.item_id));
+      const _textAllItems = [];
+      for (const r of _pendingItems) {
+        const it = _items.find(x => x.item_id === r.item_id);
+        const unitVal = r.unit || it?.order_unit_name || it?.unit || '개';
+        const vendorId = r.vendor_id || it?.vendor_id || null;
+        const vendorName = vendorId ? (_vendors.find(v => v.vendor_id === vendorId)?.vendor_name || null) : null;
+        _textAllItems.push({ item_id: r.item_id, name: r.item_name, qty: Number(r.qty), unit: unitVal, vendor: vendorName });
+      }
+      for (const s of suggestItems) {
+        if (_textPendingIds.has(s.item_id)) continue;
+        const it = _items.find(x => x.item_id === s.item_id);
+        const unitVal = it?.order_unit_name || s.unit || '개';
+        _textAllItems.push({ item_id: s.item_id, name: s.name, qty: s.suggested_qty, unit: unitVal, vendor: s.vendor || null });
+      }
+      if (!_textAllItems.length) {
+        html += `<div style="font-size:14px;color:#999;padding:12px 0">발주 필요 품목 없음</div>`;
+      } else {
+        const _textGroups = new Map();
+        for (const it of _textAllItems) {
+          const key = it.vendor || '미분류';
+          if (!_textGroups.has(key)) _textGroups.set(key, []);
+          _textGroups.get(key).push(it);
+        }
+        const _textSorted = [..._textGroups.entries()].sort((a, b) => {
+          if (a[0] === '미분류') return 1;
+          if (b[0] === '미분류') return -1;
+          return a[0] < b[0] ? -1 : 1;
+        });
+        html += `<div style="font-size:18px;font-weight:700;margin-bottom:12px">📋 발주 리스트</div>`;
+        for (const [vName, items] of _textSorted) {
+          html += `<div style="font-size:14px;font-weight:600;color:#666;margin-top:16px">[${vName}]</div>`;
+          for (const it of items) {
+            html += `<div style="font-size:16px;padding:6px 0" data-textorder-vendor="${vName}">${it.name} ${it.qty}${it.unit}</div>`;
+          }
+          html += `<button style="width:100%;padding:12px;background:#222;color:#fff;border:none;border-radius:8px;font-size:14px;margin-top:8px;cursor:pointer;font-family:inherit" onclick="_copyOrderText(this,'${vName.replace(/'/g,"\\'")}')">📋 ${vName} 복사</button>`;
+        }
+        html += `<button style="width:100%;padding:12px;background:#222;color:#fff;border:none;border-radius:8px;font-size:14px;margin-top:16px;cursor:pointer;font-family:inherit" onclick="_copyOrderTextAll()">📋 전체 복사</button>`;
+      }
+      html += `<div style="border-bottom:1px solid #ddd;margin:24px 0"></div>`;
+    }
+
     // ── Section A: 발주 대기 (pending) ──
     if (_pendingItems.length) {
       html += `<div class="ord-section">`;
@@ -3420,62 +3464,7 @@ async function renderOrder() {
       }
       html += `</div>`;
 
-      // ── Section B1.5: 거래처별 텍스트 발주 리스트 ──
-      html += `<div style="border-bottom:1px solid #ddd;margin:24px 0"></div>`;
-      {
-        // 데이터 합산: pending order_requests + suggestItems (중복 제거)
-        const _textPendingIds = new Set(_pendingItems.map(r => r.item_id));
-        const _textAllItems = [];
 
-        // 1) pending order_requests
-        for (const r of _pendingItems) {
-          const it = _items.find(x => x.item_id === r.item_id);
-          const unitVal = r.unit || it?.order_unit_name || it?.unit || '개';
-          const vendorId = r.vendor_id || it?.vendor_id || null;
-          const vendorName = vendorId ? (_vendors.find(v => v.vendor_id === vendorId)?.vendor_name || null) : null;
-          _textAllItems.push({ item_id: r.item_id, name: r.item_name, qty: Number(r.qty), unit: unitVal, vendor: vendorName });
-        }
-
-        // 2) suggestItems (pending에 없는 것만)
-        for (const s of suggestItems) {
-          if (_textPendingIds.has(s.item_id)) continue;
-          const it = _items.find(x => x.item_id === s.item_id);
-          const unitVal = it?.order_unit_name || s.unit || '개';
-          _textAllItems.push({ item_id: s.item_id, name: s.name, qty: s.suggested_qty, unit: unitVal, vendor: s.vendor || null });
-        }
-
-        if (!_textAllItems.length) {
-          html += `<div style="font-size:14px;color:#999;padding:12px 0">발주 필요 품목 없음</div>`;
-        } else {
-          // 거래처별 그룹핑
-          const _textGroups = new Map();
-          for (const it of _textAllItems) {
-            const key = it.vendor || '미분류';
-            if (!_textGroups.has(key)) _textGroups.set(key, []);
-            _textGroups.get(key).push(it);
-          }
-          // 정렬: 거래처 있는 그룹 먼저, 미분류 마지막
-          const _textSorted = [..._textGroups.entries()].sort((a, b) => {
-            if (a[0] === '미분류') return 1;
-            if (b[0] === '미분류') return -1;
-            return a[0] < b[0] ? -1 : 1;
-          });
-
-          html += `<div style="font-size:18px;font-weight:700;margin-bottom:12px">📋 발주 리스트</div>`;
-
-          for (const [vName, items] of _textSorted) {
-            html += `<div style="font-size:14px;font-weight:600;color:#666;margin-top:16px">[${vName}]</div>`;
-            for (const it of items) {
-              html += `<div style="font-size:16px;padding:6px 0" data-textorder-vendor="${vName}">${it.name} ${it.qty}${it.unit}</div>`;
-            }
-            html += `<button style="width:100%;padding:12px;background:#222;color:#fff;border:none;border-radius:8px;font-size:14px;margin-top:8px;cursor:pointer;font-family:inherit" onclick="_copyOrderText(this,'${vName.replace(/'/g,"\\'")}')">📋 ${vName} 복사</button>`;
-          }
-
-          // 전체 복사 버튼
-          html += `<button style="width:100%;padding:12px;background:#222;color:#fff;border:none;border-radius:8px;font-size:14px;margin-top:16px;cursor:pointer;font-family:inherit" onclick="_copyOrderTextAll()">📋 전체 복사</button>`;
-        }
-      }
-      html += `<div style="border-bottom:1px solid #ddd;margin:24px 0"></div>`;
 
       // ── Section B2: 전체 보기 (항상 표시, 접힘 토글) ──
       const top5Ids = new Set(top5.map(t => t.item_id));
@@ -4376,7 +4365,20 @@ function _parseQtyAnswer(text) {
   const m = s.match(/^(하나|한|두|세|석|넷|네|다섯|여섯|일곱|여덟|아홉|열|\d+\.?\d*)\s*(.*)$/);
   if (!m) return null;
   const qty = KR[m[1]] ?? parseFloat(m[1]);
-  const unitPart = m[2].replace(/[으로요줘해]$/,'').trim();
+  let unitRaw = m[2].trim();
+  // 단위 정규화: 먼저 _UNIT_MAP에서 매칭 시도 (조사 제거 전)
+  let unitPart = unitRaw;
+  if (!_UNIT_MAP[unitPart]) {
+    // 조사 제거: "으로/로/요/줘/해" — 단, "키로"처럼 단위 자체에 "로"가 포함된 경우 보존
+    const stripped1 = unitRaw.replace(/(?:으로|로)$/,'').trim();
+    if (stripped1 && _UNIT_MAP[stripped1]) { unitPart = stripped1; }
+    else {
+      const stripped2 = unitRaw.replace(/[요줘해]$/,'').trim();
+      if (stripped2 && _UNIT_MAP[stripped2]) { unitPart = stripped2; }
+      else if (stripped1) { unitPart = stripped1; }
+    }
+  }
+  if (unitPart && _UNIT_MAP[unitPart]) unitPart = _UNIT_MAP[unitPart];
   return isNaN(qty) || qty <= 0 ? null : { qty, unit: unitPart || null };
 }
 
