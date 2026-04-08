@@ -1406,6 +1406,12 @@ async function handleNaturalInput() {
       return;
     }
 
+    // 복합 플로우 진행 중(되물음 완료→확인 카드 대기) — 새 입력 무시
+    if (_pendingComplexItems) {
+      document.getElementById('parseLoading')?.remove();
+      return;
+    }
+
     // 복합 입력 우선 체크 — detectCommand보다 먼저 실행
     if (_isComplexInput(raw)) {
       if (!_claudeApiKey) {
@@ -4265,6 +4271,7 @@ action 결정 규칙 (중요):
 
 // 복합 입력 수량 질문 상태
 let _complexQtyState = null; // { items, rawText, pendingIdxs, currentIdx }
+let _pendingComplexItems = false; // 되물음~확인 카드 완료까지 true → handleNaturalInput에서 복합 입력 분기 스킵
 const _COMPLEX_ICON = { order: '🛒', stock_check: '📋', inbound: '📦', consume: '📦' };
 
 // 숫자 파싱 (한국어 수사 지원)
@@ -4280,6 +4287,7 @@ function _parseQtyAnswer(text) {
 }
 
 function _startComplexQtyFlow(rawText, items) {
+  _pendingComplexItems = true; // 되물음~확인 완료까지 복합 입력 재진입 차단
   // 수량 없는 발주 항목 인덱스 수집
   const pendingIdxs = items.map((it, i) => it.action === 'order' && it.qty == null ? i : -1).filter(i => i >= 0);
 
@@ -4413,6 +4421,7 @@ function _showComplexSummaryCard(rawText, items) {
 }
 
 function _closeComplexCard() {
+  _pendingComplexItems = false;
   _restoreReviewPanel();
   const panel = document.getElementById('reviewPanel');
   if (panel) panel.style.display = 'none';
@@ -4463,6 +4472,7 @@ async function _confirmComplexItems() {
   // DB 반영 + 결과 카드 표시
   await confirmReview();
   // 복합 상태 정리
+  _pendingComplexItems = false;
   window._lastComplexItems = null;
   window._lastComplexRaw = null;
 }
