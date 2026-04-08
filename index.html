@@ -4301,7 +4301,13 @@ function _startComplexQtyFlow(rawText, items) {
   const pendingIdxs = items.map((it, i) => it.action === 'order' && it.qty == null ? i : -1).filter(i => i >= 0);
 
   if (!pendingIdxs.length) {
-    // 모두 수량 있음 → 바로 요약 카드
+    if (items.length <= 1) {
+      // 단일 품목 + 수량 있음 → 확인 카드 생략, 즉시 DB 반영
+      console.log('[COMPLEX] 단일 품목 수량 있음 → 즉시 DB 반영');
+      _autoConfirmComplexItems(rawText, items);
+      return;
+    }
+    // 2개 이상 → 요약 카드
     _showComplexSummaryCard(rawText, items);
     return;
   }
@@ -4314,10 +4320,18 @@ function _startComplexQtyFlow(rawText, items) {
 function _askNextComplexQty() {
   const st = _complexQtyState;
   if (!st || st.step >= st.pendingIdxs.length) {
-    // 모든 질문 완료 → 요약 카드
-    console.log('[COMPLEX] 되물음 완료 → _showComplexSummaryCard 호출 예정');
     const state = _complexQtyState;
     _complexQtyState = null;
+
+    // 1개 품목 → 확인 카드 생략, 즉시 DB 반영
+    if (state.items.length <= 1) {
+      console.log('[COMPLEX] 단일 품목 되물음 완료 → 즉시 DB 반영');
+      _autoConfirmComplexItems(state.rawText, state.items);
+      return;
+    }
+
+    // 2개 이상 → 요약 카드로 확인
+    console.log('[COMPLEX] 되물음 완료 → _showComplexSummaryCard 호출');
     _showComplexSummaryCard(state.rawText, state.items);
     return;
   }
@@ -4454,6 +4468,39 @@ function _restoreReviewPanel() {
       <button class="rc-btn-secondary" onclick="editReview()">수정</button>
       <button class="rc-btn-cancel" onclick="cancelReview()">취소</button>
     </div>`;
+}
+
+// 단일 품목 되물음 완료 → 확인 카드 생략, 즉시 DB 반영
+async function _autoConfirmComplexItems(rawText, items) {
+  _draftItems = items.map(it => ({
+    item_name: it.name,
+    quantity: it.qty ?? 1,
+    unit: it.unit || '개',
+    action: it.action || 'stock_check',
+    vendor: it.vendor || null,
+    confidence: 'high'
+  }));
+
+  const inp = document.getElementById('nlInput');
+  if (inp) inp.placeholder = '품목 입력 (예: 양파 3개 입고)';
+  _parseMeta = { confidence: 1, usedLLM: true };
+
+  try {
+    const req = draftToRequest(_draftItems);
+    req._source = 'complex_auto';
+    const result = await processRequest(req);
+    const opIds = result.operation_ids || [];
+    addResult(rawText, formatResult(result), result.status === 'success' ? 'ok' : 'warn', opIds);
+    renderInventory();
+    if (document.getElementById('tab-order')?.classList.contains('active')) renderOrder();
+  } catch(e) {
+    addResult(rawText, '❌ 저장 실패: ' + e.message, 'err');
+  } finally {
+    _pendingComplexItems = false;
+    _draftItems = [];
+    window._lastComplexItems = null;
+    window._lastComplexRaw = null;
+  }
 }
 
 // 복합 입력 확인 → DB 반영 후 패널 정리
