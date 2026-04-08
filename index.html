@@ -1564,6 +1564,18 @@ async function handleNaturalInput() {
       parsed = ruleResult.results;
       document.getElementById('parseLoading')?.remove();
       console.log('Rule Engine 처리:', parsed.length, '개 품목 (최저 신뢰도:', Math.round(_parseMeta.confidence*100)+'%)');
+
+      // 발주 항목 중 수량 미입력 → 되물음 플로우
+      const _orderNoQty = parsed.filter(it => it.action === 'order' && it.quantity == null);
+      if (_orderNoQty.length) {
+        const complexItems = parsed.map(it => ({
+          name: it.item_name, qty: it.quantity, unit: it.unit,
+          action: it.action, vendor: null
+        }));
+        inp.value = '';
+        _startComplexQtyFlow(raw, complexItems);
+        return;
+      }
     } else {
       // 2차: LLM fallback
       _parseMeta.usedLLM = true;
@@ -1585,6 +1597,18 @@ async function handleNaturalInput() {
       }).then(({ error }) => {
         if (error) console.warn('kitchen_logs insert failed:', error.message);
       });
+      return;
+    }
+
+    // 발주 항목 중 수량 미입력 → 되물음 플로우 (LLM fallback 경로)
+    const _llmOrderNoQty = parsed.filter(it => it.action === 'order' && it.quantity == null);
+    if (_llmOrderNoQty.length) {
+      const complexItems = parsed.map(it => ({
+        name: it.item_name, qty: it.quantity, unit: it.unit,
+        action: it.action, vendor: it.vendor || null
+      }));
+      inp.value = '';
+      _startComplexQtyFlow(raw, complexItems);
       return;
     }
 
@@ -1932,7 +1956,7 @@ function _ruleNormalize(text) {
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
 
   // 5a. 복합 동작어구 → 마커 치환 (단일 동작어보다 먼저 처리)
-  const _SUFFIX = '(?:했어요?|하고|해줘|했음|함|고|어요?|서|해|줘|자|었어요?|았어요?|습니다|었습니다|았습니다)?';
+  const _SUFFIX = '(?:했어요?|하고|해줘|했음|함|고|어요?|서|해야\\s*(?:돼요?|되|해|하|된다|됩니다)?|해|줘|자|었어요?|았어요?|습니다|었습니다|았습니다)?';
   for (const [pat, act] of _COMPOUND_ACTIONS) {
     s = s.replace(new RegExp(pat + _SUFFIX + '(?=\\s|,|$)', 'g'),
       '\x01' + act + '\x01');
@@ -1987,7 +2011,7 @@ function _ruleTokenize(s) {
       if (trailingNum) {
         segs.push({rawName:trailingNum[1].trim(), qty:parseFloat(trailingNum[2]), unit:'개', action: tailAction, qtyParsed:true});
       } else {
-        segs.push({rawName:cleanTail,qty:1,unit:'개', action: tailAction, qtyParsed:false});
+        segs.push({rawName:cleanTail, qty: tailAction === 'order' ? null : 1, unit:'개', action: tailAction, qtyParsed:false});
       }
     }
   }
@@ -4146,6 +4170,15 @@ async function runJson() {
 ════════════════════════════════════════════════════════ */
 // ── 복잡도 판단 ──
 function _isComplexInput(text) {
+  // 발주/주문 키워드 + 등록된 품목명이 함께 있으면 → 복합 입력 (개별 품목 발주)
+  const hasOrderKw = /발주|주문|시켜/.test(text);
+  if (hasOrderKw) {
+    const hasItemName = _items.some(it =>
+      it.item_name.length >= 2 && text.includes(it.item_name)
+    );
+    if (hasItemName) return true;
+  }
+
   // 동작 키워드 그룹
   const actionPatterns = [
     /시켜|시키|주문|발주|발주해/,                   // order
