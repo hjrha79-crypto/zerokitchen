@@ -3296,17 +3296,26 @@ async function renderOrder() {
 
     // ── 거래처별 텍스트 발주 리스트 (최상단) ──
     {
-      const _textPendingIds = new Set(_pendingItems.map(r => r.item_id));
+      const _textSeenIds = new Set();
       const _textAllItems = [];
+      // 1) pending order_requests (같은 item_id는 수량 합산)
       for (const r of _pendingItems) {
+        if (_textSeenIds.has(r.item_id)) {
+          const existing = _textAllItems.find(x => x.item_id === r.item_id);
+          if (existing) existing.qty += Number(r.qty);
+          continue;
+        }
+        _textSeenIds.add(r.item_id);
         const it = _items.find(x => x.item_id === r.item_id);
         const unitVal = r.unit || it?.order_unit_name || it?.unit || '개';
         const vendorId = r.vendor_id || it?.vendor_id || null;
         const vendorName = vendorId ? (_vendors.find(v => v.vendor_id === vendorId)?.vendor_name || null) : null;
         _textAllItems.push({ item_id: r.item_id, name: r.item_name, qty: Number(r.qty), unit: unitVal, vendor: vendorName });
       }
+      // 2) suggestItems (pending에 이미 있는 item_id 제외)
       for (const s of suggestItems) {
-        if (_textPendingIds.has(s.item_id)) continue;
+        if (_textSeenIds.has(s.item_id)) continue;
+        _textSeenIds.add(s.item_id);
         const it = _items.find(x => x.item_id === s.item_id);
         const unitVal = it?.order_unit_name || s.unit || '개';
         _textAllItems.push({ item_id: s.item_id, name: s.name, qty: s.suggested_qty, unit: unitVal, vendor: s.vendor || null });
@@ -4366,10 +4375,9 @@ function _parseQtyAnswer(text) {
   if (!m) return null;
   const qty = KR[m[1]] ?? parseFloat(m[1]);
   let unitRaw = m[2].trim();
-  // 단위 정규화: 먼저 _UNIT_MAP에서 매칭 시도 (조사 제거 전)
+  // 단위 정규화: _UNIT_MAP 매칭 → 조사 제거 → 접두사 매칭 순서
   let unitPart = unitRaw;
   if (!_UNIT_MAP[unitPart]) {
-    // 조사 제거: "으로/로/요/줘/해" — 단, "키로"처럼 단위 자체에 "로"가 포함된 경우 보존
     const stripped1 = unitRaw.replace(/(?:으로|로)$/,'').trim();
     if (stripped1 && _UNIT_MAP[stripped1]) { unitPart = stripped1; }
     else {
@@ -4377,6 +4385,11 @@ function _parseQtyAnswer(text) {
       if (stripped2 && _UNIT_MAP[stripped2]) { unitPart = stripped2; }
       else if (stripped1) { unitPart = stripped1; }
     }
+  }
+  // 접두사 매칭: "키" → "키로", "킬" → "킬로" 등 (정확 매칭 실패 시)
+  if (unitPart && !_UNIT_MAP[unitPart]) {
+    const prefix = _UNITS.find(u => u.startsWith(unitPart) && u !== unitPart);
+    if (prefix) unitPart = prefix;
   }
   if (unitPart && _UNIT_MAP[unitPart]) unitPart = _UNIT_MAP[unitPart];
   return isNaN(qty) || qty <= 0 ? null : { qty, unit: unitPart || null };
