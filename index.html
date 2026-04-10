@@ -3832,21 +3832,57 @@ function _getTextOrderData() {
   return groups;
 }
 
-function _copyOrderText(btn, vendorName) {
+async function _markVendorPendingAsOrdered(vendorName) {
+  // '미분류' → vendor_id IS NULL, 그 외 → 이름으로 vendor_id 조회
+  const nowIso = new Date().toISOString();
+  let q = db.from('order_requests')
+    .update({ status: 'ordered', updated_at: nowIso })
+    .eq('store_id', SID)
+    .eq('status', 'pending');
+  if (vendorName === '미분류') {
+    q = q.is('vendor_id', null);
+  } else {
+    const v = _vendors.find(x => x.vendor_name === vendorName);
+    if (!v) return 0;
+    q = q.eq('vendor_id', v.vendor_id);
+  }
+  const { data, error } = await q.select('id');
+  if (error) { console.warn('markVendorPendingAsOrdered 실패:', error); return 0; }
+  return (data || []).length;
+}
+
+async function _copyOrderText(btn, vendorName) {
   const els = document.querySelectorAll(`[data-textorder-vendor="${vendorName}"]`);
   const lines = [...els].map(el => el.textContent);
   if (!lines.length) { showToast('복사할 항목이 없습니다'); return; }
-  navigator.clipboard.writeText(lines.join('\n')).then(() => showToast('복사 완료', 2000)).catch(() => showToast('복사 실패'));
+  try {
+    await navigator.clipboard.writeText(lines.join('\n'));
+  } catch {
+    showToast('복사 실패'); return;
+  }
+  const n = await _markVendorPendingAsOrdered(vendorName);
+  showToast(n > 0 ? `복사 완료 · ${n}건 주문 완료` : '복사 완료', 2000);
+  renderOrder();
 }
 
-function _copyOrderTextAll() {
+async function _copyOrderTextAll() {
   const groups = _getTextOrderData();
   if (!groups.size) { showToast('복사할 항목이 없습니다'); return; }
   const parts = [];
   for (const [vendor, lines] of groups) {
     parts.push(`[${vendor}]\n${lines.join('\n')}`);
   }
-  navigator.clipboard.writeText(parts.join('\n\n')).then(() => showToast('복사 완료', 2000)).catch(() => showToast('복사 실패'));
+  try {
+    await navigator.clipboard.writeText(parts.join('\n\n'));
+  } catch {
+    showToast('복사 실패'); return;
+  }
+  let total = 0;
+  for (const vendor of groups.keys()) {
+    total += await _markVendorPendingAsOrdered(vendor);
+  }
+  showToast(total > 0 ? `복사 완료 · ${total}건 주문 완료` : '복사 완료', 2000);
+  renderOrder();
 }
 
 async function _confirmAllOrders() {
@@ -4536,9 +4572,9 @@ function _showComplexSummaryCard(rawText, items) {
       <button class="card-close-x" onclick="_closeComplexCard()">✕</button>
       <div class="result-card-title">🧠 복합 입력 분석 — ${items.length}개 품목</div>
       <div class="result-card-body">${rows}</div>
-      <div class="result-card-btns" style="margin-top:12px">
-        <button class="review-confirm-btn" onclick="_confirmComplexItems()">확인</button>
-        <button class="review-edit-btn" onclick="_complexToEdit('${encodeURIComponent(rawText)}')">수정</button>
+      <div class="result-card-btns" style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <button class="review-confirm-btn" onclick="_confirmComplexItems()" style="width:60%;min-height:44px;background:#2d8a4e;color:#fff;border:none;border-radius:8px;font-size:16px;font-weight:600;cursor:pointer;font-family:inherit">확인</button>
+        <button class="review-edit-btn" onclick="_complexToEdit('${encodeURIComponent(rawText)}')" style="width:35%;min-height:44px;background:#fff;color:#333;border:1px solid #999;border-radius:8px;font-size:16px;cursor:pointer;font-family:inherit">수정</button>
       </div>
     </div>`;
   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -4936,10 +4972,16 @@ function addResult(raw, msg, type, operationIds) {
   if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
   updateJustTalk();
 
-  // 홈 탭이 아닐 때 플로팅 배너로 결과 표시
+  // 홈 탭이 아닐 때 → 홈 탭으로 자동 전환 후 결과 카드 표시
   const homeTab = document.getElementById('tab-input');
   if (homeTab && !homeTab.classList.contains('active')) {
-    _showFloatResult(msg, type);
+    const homeNavBtn = document.querySelector('.nav');
+    if (homeNavBtn) switchTab('input', homeNavBtn);
+    // 전환 후 스크롤 하단 고정
+    setTimeout(() => {
+      const ca = document.getElementById('chatArea');
+      if (ca) ca.scrollTop = ca.scrollHeight;
+    }, 50);
   }
 }
 
