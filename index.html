@@ -3307,7 +3307,7 @@ async function renderOrder() {
         }
         _textSeenIds.add(r.item_id);
         const it = _items.find(x => x.item_id === r.item_id);
-        const unitVal = r.unit || it?.order_unit_name || it?.unit || '개';
+        const unitVal = it?.unit || it?.order_unit_name || r.unit || '개';
         const vendorId = r.vendor_id || it?.vendor_id || null;
         const vendorName = vendorId ? (_vendors.find(v => v.vendor_id === vendorId)?.vendor_name || null) : null;
         _textAllItems.push({ item_id: r.item_id, name: r.item_name, qty: Number(r.qty), unit: unitVal, vendor: vendorName });
