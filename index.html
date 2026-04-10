@@ -3248,9 +3248,10 @@ async function renderOrder() {
       });
     }
 
-    // 이월 품목 합치기 (중복 제거 + dismissed 체크)
+    // 이월 품목 합치기 (중복 제거 + dismissed 체크 + 이미 pending/ordered인 건 제외)
     for (const def of _deferredItems) {
       if (_dismissedItemIds.has(def.item_id)) continue; // 제외/발주완료한 이월 품목 skip
+      if (pendingItemIds.has(def.item_id)) continue; // 이미 pending/ordered 상태면 skip
       const existing = suggestItems.find(s => s.item_id === def.item_id);
       if (existing) {
         // 재고 변동 반영하여 수량 재계산
@@ -3296,6 +3297,8 @@ async function renderOrder() {
 
     // ── 거래처별 텍스트 발주 리스트 (최상단) ──
     {
+      const _orderedItemIds = new Set(_orderedItems.map(r => r.item_id));
+      console.log('[renderOrder] _pendingItems=', _pendingItems.length, '_orderedItems=', _orderedItems.length, 'suggestItems=', suggestItems.length, '_orderedItemIds=', [..._orderedItemIds]);
       const _textSeenIds = new Set();
       const _textAllItems = [];
       // 1) pending order_requests (같은 item_id는 수량 합산)
@@ -3312,9 +3315,13 @@ async function renderOrder() {
         const vendorName = vendorId ? (_vendors.find(v => v.vendor_id === vendorId)?.vendor_name || null) : null;
         _textAllItems.push({ source: 'pending', order_id: r.id, item_id: r.item_id, name: r.item_name, qty: Number(r.qty), unit: unitVal, vendor: vendorName, vendor_id: vendorId });
       }
-      // 2) suggestItems (pending에 이미 있는 item_id 제외)
+      // 2) suggestItems (pending/ordered에 이미 있는 item_id 제외)
       for (const s of suggestItems) {
         if (_textSeenIds.has(s.item_id)) continue;
+        if (_orderedItemIds.has(s.item_id)) {
+          console.log('[renderOrder] suggest 제외 (이미 ordered):', s.item_id, s.name);
+          continue;
+        }
         _textSeenIds.add(s.item_id);
         const it = _items.find(x => x.item_id === s.item_id);
         const unitVal = it?.order_unit_name || s.unit || '개';
@@ -3904,7 +3911,9 @@ async function _copyOrderText(btn, vendorName) {
   const items = _getTextCacheForVendor(vendorName);
   const n = await _markTextItemsAsOrdered(items);
   showToast(n > 0 ? `복사 완료 · ${n}건 주문 완료` : '복사 완료', 2000);
+  console.log('[copyOrder] renderOrder() 호출 직전');
   await renderOrder();
+  console.log('[copyOrder] renderOrder() 완료');
 }
 
 async function _copyOrderTextAll() {
