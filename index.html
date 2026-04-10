@@ -4992,6 +4992,16 @@ function resetToHome() {
 
 let _undoCounter = 0;
 function addResult(raw, msg, type, operationIds) {
+  // 홈 탭이 아닐 때 → 먼저 홈 탭으로 전환 (결과 카드를 홈에서 보여주기 위해)
+  const homeTab = document.getElementById('tab-input');
+  if (homeTab && !homeTab.classList.contains('active')) {
+    const homeNavBtn = document.querySelector('.nav');
+    if (homeNavBtn) {
+      console.log('[addResult] 홈 탭으로 자동 전환');
+      switchTab('input', homeNavBtn);
+    }
+  }
+
   const list = document.getElementById('resList');
   const now  = new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
 
@@ -5019,22 +5029,12 @@ function addResult(raw, msg, type, operationIds) {
     list.appendChild(sysBubble);
   }
 
-  // 스크롤을 맨 아래로
-  const chatArea = document.getElementById('chatArea');
-  if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+  // 스크롤을 맨 아래로 (레이아웃 완료 후)
+  requestAnimationFrame(() => {
+    const chatArea = document.getElementById('chatArea');
+    if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+  });
   updateJustTalk();
-
-  // 홈 탭이 아닐 때 → 홈 탭으로 자동 전환 후 결과 카드 표시
-  const homeTab = document.getElementById('tab-input');
-  if (homeTab && !homeTab.classList.contains('active')) {
-    const homeNavBtn = document.querySelector('.nav');
-    if (homeNavBtn) switchTab('input', homeNavBtn);
-    // 전환 후 스크롤 하단 고정
-    setTimeout(() => {
-      const ca = document.getElementById('chatArea');
-      if (ca) ca.scrollTop = ca.scrollHeight;
-    }, 50);
-  }
 }
 
 let _floatResultTimer = null;
