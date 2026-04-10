@@ -3832,40 +3832,66 @@ function _getTextOrderData() {
   return groups;
 }
 
-async function _markVendorPendingAsOrdered(vendorName) {
-  // '미분류' → vendor_id IS NULL, 그 외 → 이름으로 vendor_id 조회
-  const nowIso = new Date().toISOString();
-  let q = db.from('order_requests')
-    .update({ status: 'ordered', updated_at: nowIso })
-    .eq('store_id', SID)
-    .eq('status', 'pending');
-  if (vendorName === '미분류') {
-    q = q.is('vendor_id', null);
-  } else {
+// 현재 캐시된 _orderRequests에서 특정 거래처의 pending id 목록 추출
+function _getPendingIdsForVendor(vendorName) {
+  let vendorId = null;
+  if (vendorName !== '미분류') {
     const v = _vendors.find(x => x.vendor_name === vendorName);
-    if (!v) return 0;
-    q = q.eq('vendor_id', v.vendor_id);
+    if (!v) {
+      console.warn('[copyOrder] _vendors에서 거래처 못 찾음:', vendorName, '/ _vendors=', _vendors.map(x => x.vendor_name));
+      return [];
+    }
+    vendorId = v.vendor_id;
   }
-  const { data, error } = await q.select('id');
-  if (error) { console.warn('markVendorPendingAsOrdered 실패:', error); return 0; }
+  const rows = (_orderRequests || []).filter(r => {
+    if (r.status !== 'pending') return false;
+    if (vendorName === '미분류') return !r.vendor_id;
+    return r.vendor_id === vendorId;
+  });
+  console.log('[copyOrder] 거래처:', vendorName, 'vendor_id:', vendorId, '→ pending rows:', rows);
+  return rows.map(r => r.id);
+}
+
+async function _markOrderIdsAsOrdered(ids) {
+  if (!ids || !ids.length) {
+    console.log('[copyOrder] UPDATE 대상 없음');
+    return 0;
+  }
+  const nowIso = new Date().toISOString();
+  console.log('[copyOrder] UPDATE 호출 → ids=', ids);
+  const { data, error, status, statusText } = await db.from('order_requests')
+    .update({ status: 'ordered', updated_at: nowIso })
+    .in('id', ids)
+    .select('id, item_id, item_name, status');
+  if (error) {
+    console.error('[copyOrder] UPDATE 에러:', error, 'status=', status, statusText);
+    showToast('상태 전환 실패: ' + (error.message || 'unknown'));
+    return 0;
+  }
+  console.log('[copyOrder] UPDATE 성공 →', data);
   return (data || []).length;
 }
 
 async function _copyOrderText(btn, vendorName) {
+  console.log('[copyOrder] _copyOrderText 클릭:', vendorName);
   const els = document.querySelectorAll(`[data-textorder-vendor="${vendorName}"]`);
   const lines = [...els].map(el => el.textContent);
   if (!lines.length) { showToast('복사할 항목이 없습니다'); return; }
   try {
     await navigator.clipboard.writeText(lines.join('\n'));
-  } catch {
+    console.log('[copyOrder] 클립보드 복사 완료');
+  } catch (e) {
+    console.error('[copyOrder] 복사 실패:', e);
     showToast('복사 실패'); return;
   }
-  const n = await _markVendorPendingAsOrdered(vendorName);
+  const ids = _getPendingIdsForVendor(vendorName);
+  const n = await _markOrderIdsAsOrdered(ids);
   showToast(n > 0 ? `복사 완료 · ${n}건 주문 완료` : '복사 완료', 2000);
-  renderOrder();
+  await renderOrder();
 }
 
 async function _copyOrderTextAll() {
+  console.log('[copyOrder] _copyOrderTextAll 클릭');
   const groups = _getTextOrderData();
   if (!groups.size) { showToast('복사할 항목이 없습니다'); return; }
   const parts = [];
@@ -3874,15 +3900,18 @@ async function _copyOrderTextAll() {
   }
   try {
     await navigator.clipboard.writeText(parts.join('\n\n'));
-  } catch {
+    console.log('[copyOrder] 전체 클립보드 복사 완료');
+  } catch (e) {
+    console.error('[copyOrder] 전체 복사 실패:', e);
     showToast('복사 실패'); return;
   }
-  let total = 0;
+  const allIds = [];
   for (const vendor of groups.keys()) {
-    total += await _markVendorPendingAsOrdered(vendor);
+    allIds.push(..._getPendingIdsForVendor(vendor));
   }
+  const total = await _markOrderIdsAsOrdered(allIds);
   showToast(total > 0 ? `복사 완료 · ${total}건 주문 완료` : '복사 완료', 2000);
-  renderOrder();
+  await renderOrder();
 }
 
 async function _confirmAllOrders() {
