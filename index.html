@@ -707,6 +707,13 @@ let _pendingSeq = 0;
 let _vendors = [];      // 거래처 캐시
 let _orderRequests = []; // 발주 요청 캐시
 let _dupOrigHTML = '';
+let _dismissedDupFingerprints = new Set(); // 세션 동안 "유지"로 무시된 중복 그룹 지문 (item_id 정렬 조인)
+function _dupFingerprint(items) {
+  return items.map(it => it.item_id).sort((a, b) => a - b).join('|');
+}
+function _dupKeyOf(it) {
+  return it.item_name.replace(/\s/g, '').toLowerCase();
+}
 let _stores = [];      // 전체 매장 목록
 let _currentSessionId = null;
 let _sessionStartedAt = null;
@@ -2833,11 +2840,14 @@ function renderInventory() {
   if (dupBar && dupText) {
     const nameCount = {};
     _items.forEach(it => {
-      const key = it.item_name.replace(/\s/g, '').toLowerCase();
+      const key = _dupKeyOf(it);
       if (!nameCount[key]) nameCount[key] = [];
       nameCount[key].push(it);
     });
-    const dups = Object.entries(nameCount).filter(([k, v]) => v.length > 1);
+    // 세션 중 "유지"로 무시된 동일 품목 세트는 바 카운트에서 제외
+    const dups = Object.entries(nameCount)
+      .filter(([k, v]) => v.length > 1)
+      .filter(([k, v]) => !_dismissedDupFingerprints.has(_dupFingerprint(v)));
     if (dups.length > 0) {
       const totalDup = dups.reduce((s, [k, v]) => s + v.length, 0);
       dupText.textContent = `⚠️ 중복 품목 ${dups.length}종 (${totalDup}개)`;
@@ -3568,8 +3578,24 @@ function _dupCleanupClickHandler(e) {
   if (action === 'merge')        _mergeDup(key);
   else if (action === 'replace') _replaceDup(key);
   else if (action === 'keep') {
+    // 유지: 이번 세션 동안 해당 품목 그룹을 무시 (지문 = item_id 정렬 조인)
     const card = btn.closest('[data-dup-card]');
+    const dupKey = card?.dataset.dupKey;
+    if (dupKey) {
+      const currentItems = _items.filter(it => _dupKeyOf(it) === dupKey);
+      if (currentItems.length > 1) {
+        _dismissedDupFingerprints.add(_dupFingerprint(currentItems));
+      }
+    }
     if (card) card.style.display = 'none';
+    // 남은 dup가 없으면 팝업 닫기 + 재고 알림바 갱신
+    const panel = document.getElementById('reviewPanel');
+    const wrap = panel.querySelector('.result-card-wrap');
+    const visible = wrap.querySelectorAll('[data-dup-card]');
+    let anyVisible = false;
+    visible.forEach(c => { if (c.style.display !== 'none') anyVisible = true; });
+    if (!anyVisible) _closeDupCleanup();
+    renderInventory();
   }
   else if (action === 'merge-all') _mergeAllDups();
   else if (action === 'close')     _closeDupCleanup();
@@ -3578,11 +3604,14 @@ function _dupCleanupClickHandler(e) {
 async function _showDupCleanup() {
   const nameMap = {};
   _items.forEach(it => {
-    const key = it.item_name.replace(/\s/g, '').toLowerCase();
+    const key = _dupKeyOf(it);
     if (!nameMap[key]) nameMap[key] = [];
     nameMap[key].push(it);
   });
-  const dups = Object.entries(nameMap).filter(([k, v]) => v.length > 1);
+  // 세션 중 "유지"로 무시된 그룹은 팝업에서 제외 (동일 item_id 세트일 때만)
+  const dups = Object.entries(nameMap)
+    .filter(([k, v]) => v.length > 1)
+    .filter(([k, v]) => !_dismissedDupFingerprints.has(_dupFingerprint(v)));
   if (!dups.length) {
     showToast('중복 품목이 없습니다');
     // 이미 dup cleanup UI가 떠 있다면 원복
@@ -3619,18 +3648,18 @@ async function _showDupCleanup() {
     const keyAttr = _escAttr(key);
     if (!sameUnit) {
       const units = [...new Set(items.map(it => it.unit || '개'))].join('/');
-      return `<div data-dup-card style="padding:10px 0;border-bottom:1px solid var(--border)">
+      return `<div data-dup-card data-dup-key="${keyAttr}" style="padding:10px 0;border-bottom:1px solid var(--border)">
         <div style="font-size:14px;font-weight:600">${name}</div>
         <div style="font-size:12px;color:var(--red);margin:4px 0">⚠️ 단위 다름 (${units}) — ${detail}</div>
         <div style="font-size:11px;color:var(--dim);margin-bottom:4px">단위를 통일한 후 합쳐주세요</div>
         <div style="display:flex;gap:6px;margin-top:4px">
-          <button type="button" data-dup-action="keep" style="font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);cursor:pointer;font-family:inherit">유지</button>
+          <button type="button" data-dup-action="keep" style="font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);cursor:pointer;font-family:inherit">무시</button>
         </div>
       </div>`;
     }
     const totalQty = items.reduce((s, it) => s + Number(it.current_qty), 0);
     const latestQty = items[items.length - 1].current_qty;
-    return `<div data-dup-card style="padding:10px 0;border-bottom:1px solid var(--border)">
+    return `<div data-dup-card data-dup-key="${keyAttr}" style="padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="font-size:14px;font-weight:600">${name}</div>
       <div style="font-size:12px;color:var(--dim);margin:4px 0">${detail} = ${totalQty}${unit}</div>
       <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
@@ -3756,9 +3785,10 @@ async function _mergeAllDups() {
     }
     count++;
   }
-  document.getElementById('reviewPanel').style.display = 'none';
   showToast(`${count}종 중복 품목 정리 완료`);
   renderInventory();
+  // 단위 불일치 등으로 처리되지 않은 중복이 있으면 팝업 유지, 없으면 _showDupCleanup 내부에서 자동 닫힘
+  _showDupCleanup();
 }
 
 function _toggleSuggestAll() {
