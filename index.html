@@ -263,8 +263,14 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 
 /* 자연어 입력존 — 하단 고정 */
 .global-input-zone{background:var(--surface);border-top:1px solid var(--border);padding:10px 14px;position:fixed;bottom:0;left:0;right:0;z-index:20}
-.nl-input-zone{display:flex;gap:8px;align-items:center}
-.nl-input{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:16px;font-family:inherit;color:var(--text);outline:none;transition:border-color .15s}
+.nl-input-zone{display:flex;gap:8px;align-items:center;flex-wrap:nowrap;min-width:0}
+.nl-input{flex:1 1 0;min-width:0;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;font-size:16px;font-family:inherit;color:var(--text);outline:none;transition:border-color .15s}
+@media (max-width:380px){
+  .nl-input-zone{gap:6px}
+  .nl-mic-btn{width:44px;height:44px;font-size:18px}
+  .nl-input{padding:11px 12px;font-size:15px}
+  .nl-send-btn{padding:11px 14px;font-size:14px}
+}
 .nl-input:focus{border-color:var(--accent)}
 .nl-input::placeholder{color:var(--text-muted);font-size:14px}
 .nl-mic-btn{width:52px;height:52px;border-radius:50%;border:2px solid var(--accent);background:var(--accent-lt);cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
@@ -484,7 +490,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 
 <!-- 재고탭 -->
 <div id="tab-inventory" class="tab">
-  <div id="invAlertBar" style="display:none;padding:10px 14px;background:rgba(192,84,10,.08);border:1px solid rgba(192,84,10,.2);border-radius:10px;cursor:pointer;margin-bottom:4px" onclick="document.getElementById('invFilter').value='low_stock';renderInventory()">
+  <div id="invAlertBar" style="display:none;padding:10px 14px;background:rgba(192,84,10,.08);border:1px solid rgba(192,84,10,.2);border-radius:10px;cursor:pointer;margin-bottom:4px" onclick="document.getElementById('invSearch').value='';document.getElementById('invFilter').value='low_stock';renderInventory()">
     <span style="font-size:13px;font-weight:600;color:var(--warn)" id="invAlertText"></span>
   </div>
   <div id="invDupBar" style="display:none" class="inv-dup-bar">
@@ -2473,6 +2479,34 @@ function showReviewPanel(rawText) {
   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// 이미 처리된 품목을 홈 탭에서 인라인 편집 (재고 탭 이동 없이)
+// 확인 카드를 열어 해당 품목만 로드하고 바로 편집 모드로 전환.
+// 확정 시 stock_check 액션으로 처리되어 재고가 입력값으로 재설정됨 (inbound/consume 중복 적용 방지).
+function _editProcessedItem(name, qty, unit) {
+  if (typeof name !== 'string') return;
+  _draftItems = [{
+    item_name: name,
+    quantity: Number.isFinite(qty) ? qty : (parseFloat(qty) || 0),
+    unit: unit || '개',
+    action: 'stock_check',
+    vendor: null,
+    confidence: 'high'
+  }];
+  const panel = document.getElementById('reviewPanel');
+  if (!panel) return;
+  panel.style.display = 'block';
+  panel.dataset.rawText = `${name} 수정`;
+  _reviewEditMode = true;  // 바로 편집 모드
+  const title = document.getElementById('resultCardTitle');
+  if (title) title.textContent = `${name} 편집`;
+  const addBtn = panel.querySelector('.result-add-btn');
+  if (addBtn) addBtn.style.display = 'block';
+  const confirmBtn = document.getElementById('confirmReviewBtn');
+  if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = '확인 · 실행'; }
+  renderReviewRows();
+  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
 let _reviewEditMode = false;
 
 function renderReviewRows() {
@@ -2699,7 +2733,11 @@ function formatResult(result) {
       return (result.updated_items||[]).map(it => {
         const u = it.unit || '';
         const after = it.quantity;
-        const editLink = ` <span style="font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline" onclick="switchTab('inventory',document.querySelectorAll('.nav')[1]);document.getElementById('invSearch').value='${it.name}';renderInventory()">(수정)</span>`;
+        // 재고 탭으로 이동하지 않고 홈 탭 내에서 확인 카드로 인라인 편집 진입
+        const editQty = it.inputQty != null ? it.inputQty : after;
+        const escName = String(it.name).replace(/'/g, "&#39;");
+        const escUnit = String(u).replace(/'/g, "&#39;");
+        const editLink = ` <span style="font-size:11px;color:var(--accent);cursor:pointer;text-decoration:underline" onclick="_editProcessedItem('${escName}', ${Number(editQty)||0}, '${escUnit}')">(수정)</span>`;
         if (it.is_new) return `🆕 ${it.name} ${after}${u} 등록${editLink}`;
         let sign, color;
         if (it.action === 'order') { sign = '🛒'; color = '#3b82f6'; }
@@ -2734,7 +2772,9 @@ function _renderInvCard(it, qty, tgt, cls, vName) {
   const vOpts = _vendors.map(v =>
     `<option value="${v.vendor_id}" ${v.vendor_id===it.vendor_id?'selected':''}>${v.vendor_name}</option>`
   ).join('');
-  return `<div class="inv-card ${cls}" id="ic_${it.item_id}" onclick="toggleInvDetail(${it.item_id}, event)">
+  // 카드 탭 = 바로 수정창 진입 (기존 3단계 카드→상세→수정 버튼을 1단계로 단축)
+  // 기본 표시는 품목명 + 수량 + 단위만. 목표/최소/거래처는 탭 시 펼쳐지는 편집 영역에 포함.
+  return `<div class="inv-card ${cls}" id="ic_${it.item_id}" onclick="toggleInvEdit(${it.item_id}, event)">
     <div class="inv-card-main">
       <div class="inv-name">${it.item_name}</div>
       <div class="inv-qty-wrap">
@@ -2742,30 +2782,22 @@ function _renderInvCard(it, qty, tgt, cls, vName) {
         <span class="inv-unit">${it.unit||''}</span>
       </div>
     </div>
-    <div class="inv-card-detail" id="icd_${it.item_id}">
-      ${vName ? `<div class="inv-card-detail-row"><span>거래처</span><span>${vName}</span></div>` : ''}
-      ${tgt > 0 ? `<div class="inv-card-detail-row"><span>목표</span><span>${tgt}${it.unit||''}</span></div>` : ''}
-      ${Number(it.min_stock) > 0 ? `<div class="inv-card-detail-row"><span>최소</span><span>${it.min_stock}${it.unit||''}</span></div>` : ''}
-      <div class="inv-card-detail-row"><span>업데이트</span><span>${it.updated_at ? new Date(it.updated_at).toLocaleDateString('ko-KR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'}</span></div>
-      <div class="inv-card-detail-acts">
-        <button class="inv-act-edit" onclick="event.stopPropagation();toggleInvEdit(${it.item_id})">수정</button>
-        <button class="inv-act-del" onclick="event.stopPropagation();deleteInvItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">삭제</button>
-      </div>
-    </div>
     <div class="inv-edit-form" id="ief_${it.item_id}">
-      <div><div class="inv-edit-label">품목명</div><input class="inv-edit-inp" id="ien_${it.item_id}" value="${it.item_name}" placeholder="품목명"></div>
+      <div><div class="inv-edit-label">품목명</div><input class="inv-edit-inp" id="ien_${it.item_id}" value="${it.item_name}" placeholder="품목명" onclick="event.stopPropagation()"></div>
       <div style="display:flex;gap:6px;align-items:flex-end">
-        <div style="flex:2"><div class="inv-edit-label">수량</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('ieq_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="ieq_${it.item_id}" type="number" value="${qty}" placeholder="0"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('ieq_${it.item_id}',1)">+</button></div></div>
-        <div style="flex:1"><div class="inv-edit-label">단위</div><input class="inv-edit-inp" id="ieu_${it.item_id}" value="${it.unit||''}" placeholder="봉/개" style="width:100%;padding:7px 6px;text-align:center"></div>
+        <div style="flex:2"><div class="inv-edit-label">수량</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('ieq_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="ieq_${it.item_id}" type="number" value="${qty}" placeholder="0" onclick="event.stopPropagation()"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('ieq_${it.item_id}',1)">+</button></div></div>
+        <div style="flex:1"><div class="inv-edit-label">단위</div><input class="inv-edit-inp" id="ieu_${it.item_id}" value="${it.unit||''}" placeholder="봉/개" style="width:100%;padding:7px 6px;text-align:center" onclick="event.stopPropagation()"></div>
       </div>
       <div style="display:flex;gap:6px">
-        <div style="flex:1"><div class="inv-edit-label">목표</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iet_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="iet_${it.item_id}" type="number" value="${tgt}" placeholder="0"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iet_${it.item_id}',1)">+</button></div></div>
-        <div style="flex:1"><div class="inv-edit-label">최소</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iem_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="iem_${it.item_id}" type="number" value="${it.min_stock||0}" placeholder="0"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iem_${it.item_id}',1)">+</button></div></div>
+        <div style="flex:1"><div class="inv-edit-label">목표</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iet_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="iet_${it.item_id}" type="number" value="${tgt}" placeholder="0" onclick="event.stopPropagation()"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iet_${it.item_id}',1)">+</button></div></div>
+        <div style="flex:1"><div class="inv-edit-label">최소</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iem_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="iem_${it.item_id}" type="number" value="${it.min_stock||0}" placeholder="0" onclick="event.stopPropagation()"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iem_${it.item_id}',1)">+</button></div></div>
       </div>
-      <div><div class="inv-edit-label">거래처</div><select class="inv-edit-inp" id="iev_${it.item_id}" style="width:100%;padding:7px 6px"><option value="">없음</option>${vOpts}</select></div>
+      <div><div class="inv-edit-label">거래처</div><select class="inv-edit-inp" id="iev_${it.item_id}" style="width:100%;padding:7px 6px" onclick="event.stopPropagation()"><option value="">없음</option>${vOpts}</select></div>
+      <div style="font-size:11px;color:var(--dim);margin-top:2px">업데이트: ${it.updated_at ? new Date(it.updated_at).toLocaleDateString('ko-KR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'}</div>
       <div style="display:flex;gap:6px;margin-top:4px">
         <button class="inv-save-btn" onclick="event.stopPropagation();saveInvItem(${it.item_id})">저장</button>
         <button class="inv-cancel-btn" onclick="event.stopPropagation();toggleInvEdit(${it.item_id})">취소</button>
+        <button class="inv-cancel-btn" style="color:var(--red);border-color:var(--red)" onclick="event.stopPropagation();deleteInvItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">삭제</button>
       </div>
     </div>
   </div>`;
@@ -2855,11 +2887,20 @@ function renderInventory() {
       alertBar.style.display = '';
       alertBar.style.background = 'var(--surface2)';
       alertBar.style.borderColor = 'var(--border)';
-      alertBar.onclick = () => { document.getElementById('invFilter').value='all'; renderInventory(); };
+      alertBar.onclick = () => {
+        document.getElementById('invSearch').value = '';
+        document.getElementById('invFilter').value = 'all';
+        renderInventory();
+      };
     } else {
       alertBar.style.background = 'rgba(192,84,10,.08)';
       alertBar.style.borderColor = 'rgba(192,84,10,.2)';
-      alertBar.onclick = () => { document.getElementById('invFilter').value='low_stock'; renderInventory(); };
+      alertBar.onclick = () => {
+        // 부족 알림 클릭 — 이전 검색어 클리어 후 부족 필터 적용 (잔존 검색어 때문에 필터 결과가 비는 문제 수정)
+        document.getElementById('invSearch').value = '';
+        document.getElementById('invFilter').value = 'low_stock';
+        renderInventory();
+      };
     }
   }
   // 중복 품목 감지
@@ -2992,32 +3033,30 @@ function renderInventory() {
   }
 }
 
-function toggleInvDetail(itemId, e) {
-  const editForm = document.getElementById('ief_' + itemId);
-  if (editForm && editForm.style.display === 'flex') return;
-  const card = document.getElementById('ic_' + itemId);
-  if (!card) return;
-  document.querySelectorAll('.inv-card.expanded').forEach(c => {
-    if (c !== card) c.classList.remove('expanded');
-  });
-  card.classList.toggle('expanded');
-}
-
-function toggleInvEdit(id) {
+// 카드 탭 = 바로 편집창 토글 (기존 toggleInvDetail은 제거되고 이 함수 하나로 통합)
+function toggleInvEdit(id, e) {
   const form = document.getElementById('ief_' + id);
-  const detail = document.getElementById('icd_' + id);
   const card = document.getElementById('ic_' + id);
-  if (!form) return;
+  if (!form || !card) return;
   const isOpen = form.style.display === 'flex';
   if (isOpen) {
     form.style.display = 'none';
-    if (detail) detail.style.display = '';
+    card.classList.remove('expanded');
   } else {
-    if (detail) detail.style.display = 'none';
+    // 다른 카드가 열려 있으면 닫고 현재 카드만 열기
+    document.querySelectorAll('.inv-card.expanded').forEach(c => {
+      if (c !== card) {
+        c.classList.remove('expanded');
+        const otherForm = c.querySelector('.inv-edit-form');
+        if (otherForm) otherForm.style.display = 'none';
+      }
+    });
     form.style.display = 'flex';
-    if (card) card.classList.add('expanded');
+    card.classList.add('expanded');
   }
 }
+// 구버전 호환: 일부 코드가 toggleInvDetail을 호출할 수 있음
+function toggleInvDetail(id, e) { return toggleInvEdit(id, e); }
 
 async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
   if (!newVendorId) return;
@@ -3085,18 +3124,31 @@ async function saveInvItem(id) {
   if (oldName !== name && oldName) {
     _saveAlias(oldName, name);
   }
-  const oldQty = oldItem?.current_qty;
+  const oldQty = Number(oldItem?.current_qty ?? 0);
+  const oldUnit = oldItem?.unit || '';
+  const oldTgt = Number(oldItem?.target_qty ?? 0);
+  const oldMin = Number(oldItem?.min_stock ?? 0);
+  const oldVid = oldItem?.vendor_id ?? null;
   await db.from('items').update({
     item_name: name, current_qty: qty, unit, target_qty: tgt,
     vendor_id: vid, min_stock: minVal, updated_at: new Date().toISOString()
   }).eq('item_id', id);
   if (oldItem) Object.assign(oldItem, { item_name:name, current_qty:qty, unit, target_qty:tgt, vendor_id:vid, min_stock:minVal });
   renderInventory();
-  // 채팅 영역에 수정 결과 표시
+  // 채팅 영역에 수정 결과 표시 — 변경된 필드만 diff 형식으로 나열 (예: "하드롤 — 목표 3→5 수정됨")
+  const u = unit || oldUnit || '';
   const changes = [];
-  if (oldName !== name) changes.push(`이름: ${oldName} → ${name}`);
-  if (oldQty !== qty) changes.push(`수량: ${qty}${unit || '개'}`);
-  const detail = changes.length ? changes.join(', ') : '수정됨';
+  if (oldName !== name)   changes.push(`이름 ${oldName}→${name}`);
+  if (oldQty !== qty)     changes.push(`수량 ${oldQty}${u}→${qty}${u}`);
+  if (oldUnit !== unit && unit) changes.push(`단위 ${oldUnit||'-'}→${unit}`);
+  if (oldTgt !== tgt)     changes.push(`목표 ${oldTgt}${u}→${tgt}${u}`);
+  if (oldMin !== minVal)  changes.push(`최소 ${oldMin}${u}→${minVal}${u}`);
+  if (oldVid !== vid) {
+    const oldVn = _vendors.find(v => v.vendor_id === oldVid)?.vendor_name || '없음';
+    const newVn = _vendors.find(v => v.vendor_id === vid)?.vendor_name || '없음';
+    changes.push(`거래처 ${oldVn}→${newVn}`);
+  }
+  const detail = changes.length ? changes.join(' · ') + ' 수정됨' : '수정됨';
   addResult(`${name} 수정`, `✅ ${name} — ${detail}`, 'ok');
 }
 
@@ -5897,9 +5949,10 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
 })();
 
 /* ── 시작 ── */
-// 마이크 힌트: 한번도 안 쓴 사용자에게 표시
+// 마이크 힌트: 한번도 안 쓴 사용자에게 잠깐 표시 후 자동 숨김
+// (입력창을 가리는 문제가 있어 3초 후 자동 fade-out, localStorage로 재노출 방지)
 (function initMicHint() {
-  if (localStorage.getItem('zk_mic_used')) return;
+  if (localStorage.getItem('zk_mic_hint_shown')) return;
   setTimeout(() => {
     const wrapper = document.getElementById('micBtn')?.parentElement;
     if (!wrapper) return;
@@ -5909,9 +5962,18 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
     hint.textContent = '말로도 입력할 수 있어요';
     hint.style.cursor = 'pointer';
     hint.style.pointerEvents = 'auto';
-    hint.onclick = () => { hint.remove(); localStorage.setItem('zk_mic_used', 'true'); };
+    const dismiss = () => {
+      if (!hint.parentNode) return;
+      hint.style.transition = 'opacity .3s ease';
+      hint.style.opacity = '0';
+      setTimeout(() => hint.remove(), 320);
+      localStorage.setItem('zk_mic_hint_shown', 'true');
+    };
+    hint.onclick = dismiss;
     wrapper.appendChild(hint);
-  }, 2000);
+    // 3초 후 자동 숨김 (입력창 가림 문제 해결)
+    setTimeout(dismiss, 3000);
+  }, 1500);
 })();
 
 // 마지막 입력 반복
