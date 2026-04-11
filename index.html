@@ -84,9 +84,12 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .inv-view-toggle{display:flex;gap:4px}
 .inv-view-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;font-family:inherit}
 .inv-view-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
-.inv-list-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:4px}
+.inv-list-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:4px;cursor:pointer;-webkit-user-select:none;user-select:none}
+.inv-list-card:active{transform:scale(0.995)}
 .inv-list-card.low{border-left:3px solid var(--warn)}
 .inv-list-card.zero{border-left:3px solid var(--red)}
+.inv-lc-detail{display:none;margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);animation:fadeIn .15s ease}
+.inv-list-card.expanded .inv-lc-detail{display:block}
 .inv-lc-r{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
 .inv-lc-r+.inv-lc-r{margin-top:4px}
 .inv-lc-name{font-size:13px;font-weight:700;color:var(--text);border:none;background:transparent;outline:none;padding:0;font-family:inherit;width:100px;flex:0 0 100px;overflow:hidden;text-overflow:ellipsis}
@@ -2963,30 +2966,36 @@ function renderInventory() {
       const uSel = unitOpts.map(u => `<option value="${u}"${(it.unit||'개')===u?' selected':''}>${u}</option>`).join('');
       const vSel = vOpts.replace(new RegExp(`value="${it.vendor_id}"`), `value="${it.vendor_id}" selected`);
       const unconfigured = tgt === 0 && min === 0;
-      return `<div class="inv-list-card ${cls}" style="${unconfigured ? 'opacity:0.4' : ''}">
+      // 목록뷰 — 기본 표시는 품목명+수량+단위만, 탭 시 상세(목표/최소/거래처/발주단위) 펼침
+      const stop = `onclick="event.stopPropagation()"`;
+      return `<div class="inv-list-card ${cls}" id="ilc_${it.item_id}" onclick="toggleListCard(${it.item_id}, event)" style="${unconfigured ? 'opacity:0.4' : ''}">
         <div class="inv-lc-r">
-          <input class="inv-lc-name" value="${it.item_name}" data-id="${it.item_id}" data-field="item_name" onchange="_saveListField(this)">
+          <input class="inv-lc-name" value="${it.item_name}" data-id="${it.item_id}" data-field="item_name" onchange="_saveListField(this)" ${stop}>
           <div class="inv-lc-step">
-            <button onclick="_lStep(${it.item_id},'current_qty',-1)">−</button>
-            <input class="inv-lc-n ${qCls}" type="number" inputmode="numeric" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)">
-            <button onclick="_lStep(${it.item_id},'current_qty',1)">+</button>
+            <button onclick="event.stopPropagation();_lStep(${it.item_id},'current_qty',-1)">−</button>
+            <input class="inv-lc-n ${qCls}" type="number" inputmode="numeric" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)" ${stop}>
+            <button onclick="event.stopPropagation();_lStep(${it.item_id},'current_qty',1)">+</button>
           </div>
-          <select class="inv-lc-s" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:52px">${uSel}</select>
-          <span class="inv-lc-lb">목표</span>
-          <input class="inv-lc-n ${tgt===0?'dim':''}" type="number" inputmode="numeric" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)">
-          <span class="inv-lc-lb">최소</span>
-          <input class="inv-lc-n ${min===0?'dim':''}" type="number" inputmode="numeric" value="${min}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)">
-          <button class="inv-lc-del" onclick="_deleteListItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">🗑</button>
+          <select class="inv-lc-s" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:52px" ${stop}>${uSel}</select>
         </div>
-        <div class="inv-lc-r">
-          <span class="inv-lc-lb">거래처</span>
-          <select class="inv-lc-s" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="width:90px">
-            <option value="">-</option>${vSel}
-          </select>
-          <span class="inv-lc-lb">발주</span>
-          <input class="inv-lc-n ${ouq<=1?'dim':''}" type="number" inputmode="numeric" value="${ouq}" data-id="${it.item_id}" data-field="order_unit_qty" onchange="_saveListField(this)" style="width:32px" min="1">
-          <span class="inv-lc-lb">${it.unit||'개'}=1</span>
-          <input class="inv-lc-s" value="${oun}" data-id="${it.item_id}" data-field="order_unit_name" onchange="_saveListField(this)" placeholder="박스" style="width:48px;font-size:11px;padding:5px 3px">
+        <div class="inv-lc-detail">
+          <div class="inv-lc-r">
+            <span class="inv-lc-lb">목표</span>
+            <input class="inv-lc-n ${tgt===0?'dim':''}" type="number" inputmode="numeric" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)" ${stop}>
+            <span class="inv-lc-lb">최소</span>
+            <input class="inv-lc-n ${min===0?'dim':''}" type="number" inputmode="numeric" value="${min}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)" ${stop}>
+            <button class="inv-lc-del" onclick="event.stopPropagation();_deleteListItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">🗑</button>
+          </div>
+          <div class="inv-lc-r">
+            <span class="inv-lc-lb">거래처</span>
+            <select class="inv-lc-s" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="width:90px" ${stop}>
+              <option value="">-</option>${vSel}
+            </select>
+            <span class="inv-lc-lb">발주</span>
+            <input class="inv-lc-n ${ouq<=1?'dim':''}" type="number" inputmode="numeric" value="${ouq}" data-id="${it.item_id}" data-field="order_unit_qty" onchange="_saveListField(this)" style="width:32px" min="1" ${stop}>
+            <span class="inv-lc-lb">${it.unit||'개'}=1</span>
+            <input class="inv-lc-s" value="${oun}" data-id="${it.item_id}" data-field="order_unit_name" onchange="_saveListField(this)" placeholder="박스" style="width:48px;font-size:11px;padding:5px 3px" ${stop}>
+          </div>
         </div>
       </div>`;
     }).join('');
@@ -3057,6 +3066,17 @@ function toggleInvEdit(id, e) {
 }
 // 구버전 호환: 일부 코드가 toggleInvDetail을 호출할 수 있음
 function toggleInvDetail(id, e) { return toggleInvEdit(id, e); }
+
+// 목록뷰 카드 탭 시 상세 영역 펼치기/접기. 다른 카드 열려 있으면 자동 닫음.
+function toggleListCard(id, e) {
+  const card = document.getElementById('ilc_' + id);
+  if (!card) return;
+  const isOpen = card.classList.contains('expanded');
+  document.querySelectorAll('.inv-list-card.expanded').forEach(c => {
+    if (c !== card) c.classList.remove('expanded');
+  });
+  card.classList.toggle('expanded', !isOpen);
+}
 
 async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
   if (!newVendorId) return;
