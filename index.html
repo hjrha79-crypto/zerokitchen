@@ -24,9 +24,10 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .store-tab{padding:3px 8px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);font-size:11px;font-weight:600;color:var(--dim);cursor:pointer;white-space:nowrap;transition:all .15s;font-family:inherit}
 .store-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
 .store-tab-add{padding:3px 8px;border-radius:12px;border:1px dashed var(--border);background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:inherit;white-space:nowrap}
-.navs{display:flex;gap:5px;margin-left:auto;align-items:center}
-.home-clock{font-size:12px;color:var(--dim);opacity:.55;font-weight:400;padding:0 4px;font-variant-numeric:tabular-nums;white-space:nowrap}
-.nav{padding:6px 11px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--dim);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
+.navs{display:flex;gap:5px;margin-left:auto;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;min-width:0}
+.navs::-webkit-scrollbar{display:none}
+.home-clock{font-size:12px;color:var(--dim);opacity:.55;font-weight:400;padding:0 4px;font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}
+.nav{padding:6px 11px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--dim);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap;flex-shrink:0}
 .nav.active{background:var(--accent);border-color:var(--accent);color:#fff}
 /* 탭 */
 .tab-wrap{flex:1;overflow:hidden}
@@ -86,7 +87,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 @media (min-width:768px){ .inv-grid{grid-template-columns:repeat(3,minmax(0,1fr))} }
 .inv-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 10px;display:flex;align-items:center;gap:6px;flex-wrap:nowrap;min-width:0;transition:background .1s;-webkit-user-select:none;user-select:none}
 .inv-card.zero{border-left:3px solid var(--red);background:rgba(217,48,37,.04)}
-.inv-card .inv-name{font-size:14px;font-weight:600;line-height:1.3;flex:2 1 40px;min-width:40px;border:1px solid transparent;background:transparent;color:var(--text);font-family:inherit;outline:none;padding:3px 4px;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inv-card .inv-name{font-size:14px;font-weight:600;line-height:1.3;flex:1 1 0;min-width:0;border:1px solid transparent;background:transparent;color:var(--text);font-family:inherit;outline:none;padding:3px 4px;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .inv-card .inv-name:hover{border-color:var(--border);background:var(--bg)}
 .inv-card .inv-name:focus{border-color:var(--accent);background:var(--bg);overflow:visible;text-overflow:clip}
 .inv-card .inv-qty-wrap{display:flex;align-items:baseline;gap:2px;flex-shrink:0}
@@ -97,10 +98,16 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .inv-card .inv-qty.zero{color:var(--red)}
 .inv-card .inv-unit{font-size:11px;color:var(--dim);flex-shrink:0}
 /* 거래처 드롭다운은 남는 가로폭만큼만 차지하고 필요 시 축소 */
-.inv-card .inv-vendor-sel{flex:1 1 60px;min-width:50px;max-width:130px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:4px 5px;font-size:12px;font-family:inherit;color:var(--text);outline:none;text-overflow:ellipsis}
+.inv-card .inv-vendor-sel{flex:0 0 auto;min-width:0;max-width:130px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:4px 5px;font-size:12px;font-family:inherit;color:var(--text);outline:none;text-overflow:ellipsis}
 .inv-card .inv-vendor-sel:focus{border-color:var(--accent)}
 .inv-card .inv-del-btn{flex-shrink:0;width:24px;height:24px;border:none;background:transparent;color:var(--muted);font-size:13px;cursor:pointer;padding:0;line-height:1}
 .inv-card .inv-del-btn:hover{color:var(--red)}
+@media (max-width:480px){
+  .inv-card{gap:4px;padding:8px}
+  .inv-card .inv-vendor-sel{max-width:80px;font-size:11px;padding:3px 4px}
+  .inv-card .inv-del-btn{width:20px;height:20px;font-size:12px}
+  .inv-card .inv-qty{width:38px}
+}
 @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
 .inv-unit{font-size:13px;color:var(--dim)}
 /* 발주 */
@@ -2773,6 +2780,16 @@ function formatResult(result) {
 }
 
 
+// 인라인 편집 focus 시 모바일 키보드가 가리지 않도록 해당 카드를 화면 중앙으로 스크롤
+function _invEditFocus(el) {
+  const card = el.closest('.inv-card');
+  if (!card) return;
+  // 키보드가 올라오는 시간을 기다린 뒤 스크롤
+  setTimeout(() => {
+    try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
+  }, 300);
+}
+
 function _renderInvCard(it, qty, tgt, cls, vName) {
   // 한 줄 카드: 품목명(인라인 편집) + 수량(인라인 편집) + 단위 + 거래처 + 삭제.
   // 품목명/수량은 input으로 렌더되어 탭 시 즉시 편집, blur/Enter 시 자동 저장.
@@ -2782,10 +2799,12 @@ function _renderInvCard(it, qty, tgt, cls, vName) {
   const safeName = it.item_name.replace(/"/g,'&quot;').replace(/'/g,"&#39;");
   return `<div class="inv-card ${cls}" id="ic_${it.item_id}">
     <input class="inv-name" type="text" value="${safeName}" data-id="${it.item_id}"
+      onfocus="_invEditFocus(this)"
       onblur="_saveInvName(${it.item_id}, this)"
       onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">
     <div class="inv-qty-wrap">
       <input class="inv-qty ${cls}" type="number" inputmode="decimal" value="${qty}" data-id="${it.item_id}" min="0" step="0.1"
+        onfocus="_invEditFocus(this)"
         onblur="_saveInvQty(${it.item_id}, this)"
         onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">
       <span class="inv-unit">${it.unit||''}</span>
