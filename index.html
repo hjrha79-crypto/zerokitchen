@@ -17,15 +17,15 @@
 body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;display:flex;flex-direction:column}
 /* 헤더 */
 .hdr{background:var(--surface);border-bottom:1px solid var(--border);padding:0 14px;display:flex;align-items:center;gap:8px;height:52px;flex-shrink:0;position:sticky;top:0;z-index:10}
-.logo{font-size:18px;font-weight:700;color:var(--accent)}
+.logo{font-size:18px;font-weight:700;color:var(--accent);flex-shrink:0}
 .store-nm{font-size:12px;color:var(--muted);font-weight:500}
-.store-tabs{display:flex;gap:4px;align-items:center;overflow-x:auto;max-width:180px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.store-tabs{display:flex;gap:4px;align-items:center;overflow-x:auto;max-width:180px;scrollbar-width:none;-webkit-overflow-scrolling:touch;flex-shrink:0}
 .store-tabs::-webkit-scrollbar{display:none}
 .store-tab{padding:3px 8px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);font-size:11px;font-weight:600;color:var(--dim);cursor:pointer;white-space:nowrap;transition:all .15s;font-family:inherit}
 .store-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
 .store-tab-add{padding:3px 8px;border-radius:12px;border:1px dashed var(--border);background:transparent;font-size:11px;color:var(--muted);cursor:pointer;font-family:inherit;white-space:nowrap}
-.navs{display:flex;gap:5px;margin-left:auto;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none;min-width:0}
-.navs::-webkit-scrollbar{display:none}
+.navs{display:flex;gap:5px;margin-left:auto;align-items:center;flex:1 1 0;min-width:0;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;-webkit-overflow-scrolling:touch;scrollbar-width:none;justify-content:flex-end}
+.navs::-webkit-scrollbar{display:none;width:0;height:0}
 .home-clock{font-size:12px;color:var(--dim);opacity:.55;font-weight:400;padding:0 4px;font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}
 .nav{padding:6px 11px;border-radius:20px;border:1px solid var(--border);background:transparent;color:var(--dim);font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap;flex-shrink:0}
 .nav.active{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -269,7 +269,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .mic-hint{position:fixed;bottom:76px;left:14px;background:var(--text);color:var(--bg);font-size:12px;font-weight:600;padding:6px 12px;border-radius:8px;white-space:nowrap;pointer-events:none;animation:mic-hint-fade 0.3s ease;z-index:25}
 .mic-hint::after{content:'';position:absolute;bottom:-5px;left:20px;border-left:6px solid transparent;border-right:6px solid transparent;border-top:6px solid var(--text)}
 @keyframes mic-hint-fade{from{opacity:0;transform:translateX(-50%) translateY(4px)}to{opacity:1;transform:translateX(-50%) translateY(0)}}
-.api-key-btn{background:none;border:none;font-size:18px;cursor:pointer;padding:4px;color:var(--dim);line-height:1}
+.api-key-btn{background:none;border:none;font-size:18px;cursor:pointer;padding:4px;color:var(--dim);line-height:1;flex-shrink:0}
 .api-key-popup{display:none;position:fixed;top:0;left:0;right:0;bottom:0;z-index:100;background:rgba(0,0,0,.4);align-items:center;justify-content:center}
 .api-key-popup.open{display:flex}
 .api-key-popup .akp-box{background:var(--surface);border-radius:14px;padding:20px;width:min(340px,90vw);box-shadow:0 8px 32px rgba(0,0,0,.18)}
@@ -432,8 +432,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
   <div class="store-tabs" id="storeTabs"><span class="store-nm" id="storeNm">로딩 중...</span></div>
   <button class="api-key-btn" id="apiKeyBtn" onclick="_toggleApiKeyPopup()" title="API 키 설정">⚙<span class="api-key-dot" id="apiKeyDot"></span></button>
   <div class="navs">
-    <button class="nav active" onclick="switchTab('input',this)">홈</button>
     <span class="home-clock" id="homeClock"></span>
+    <button class="nav active" onclick="switchTab('input',this)">홈</button>
     <button class="nav" onclick="switchTab('inventory',this)">재고</button>
     <button class="nav" onclick="switchTab('order',this)">발주</button>
     <button class="nav" id="testTabBtn" onclick="switchTab('test',this)" style="display:none">테스트</button>
@@ -2780,14 +2780,29 @@ function formatResult(result) {
 }
 
 
-// 인라인 편집 focus 시 모바일 키보드가 가리지 않도록 해당 카드를 화면 중앙으로 스크롤
+// 인라인 편집 focus 시 모바일 키보드가 가리지 않도록 해당 카드를 안정적으로 스크롤
+// - 500ms 후 scrollIntoView(block:'nearest') 로 편집 요소를 가시 영역에 유지
+// - visualViewport.resize(키보드 높이 변동) 시 편집 중인 요소를 다시 스크롤
+let _invEditActive = null;
 function _invEditFocus(el) {
-  const card = el.closest('.inv-card');
-  if (!card) return;
-  // 키보드가 올라오는 시간을 기다린 뒤 스크롤
+  _invEditActive = el;
   setTimeout(() => {
-    try { card.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch(e) {}
-  }, 300);
+    if (_invEditActive !== el) return;
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch(e) {}
+  }, 500);
+}
+function _invEditBlur() {
+  _invEditActive = null;
+}
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', () => {
+    if (!_invEditActive) return;
+    // 키보드 높이 변동 → 다시 편집 요소를 가시 영역으로
+    setTimeout(() => {
+      if (!_invEditActive) return;
+      try { _invEditActive.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); } catch(e) {}
+    }, 100);
+  });
 }
 
 function _renderInvCard(it, qty, tgt, cls, vName) {
@@ -2800,12 +2815,12 @@ function _renderInvCard(it, qty, tgt, cls, vName) {
   return `<div class="inv-card ${cls}" id="ic_${it.item_id}">
     <input class="inv-name" type="text" value="${safeName}" data-id="${it.item_id}"
       onfocus="_invEditFocus(this)"
-      onblur="_saveInvName(${it.item_id}, this)"
+      onblur="_invEditBlur();_saveInvName(${it.item_id}, this)"
       onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">
     <div class="inv-qty-wrap">
       <input class="inv-qty ${cls}" type="number" inputmode="decimal" value="${qty}" data-id="${it.item_id}" min="0" step="0.1"
         onfocus="_invEditFocus(this)"
-        onblur="_saveInvQty(${it.item_id}, this)"
+        onblur="_invEditBlur();_saveInvQty(${it.item_id}, this)"
         onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">
       <span class="inv-unit">${it.unit||''}</span>
     </div>
