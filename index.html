@@ -81,34 +81,6 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .undo-btn:disabled{opacity:.3;cursor:default;border-color:#999;color:#999}
 /* 재고 그리드 */
 .inv-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.inv-view-toggle{display:flex;gap:4px}
-.inv-view-btn{padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--surface2);font-size:12px;font-weight:600;color:var(--dim);cursor:pointer;font-family:inherit}
-.inv-view-btn.active{background:var(--accent);border-color:var(--accent);color:#fff}
-.inv-list-card{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:8px 10px;margin-bottom:4px;cursor:pointer;-webkit-user-select:none;user-select:none}
-.inv-list-card:active{transform:scale(0.995)}
-.inv-list-card.low{border-left:3px solid var(--warn)}
-.inv-list-card.zero{border-left:3px solid var(--red)}
-.inv-lc-detail{display:none;margin-top:6px;padding-top:6px;border-top:1px dashed var(--border);animation:fadeIn .15s ease}
-.inv-list-card.expanded .inv-lc-detail{display:block}
-.inv-lc-r{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
-.inv-lc-r+.inv-lc-r{margin-top:4px}
-.inv-lc-name{font-size:13px;font-weight:700;color:var(--text);border:none;background:transparent;outline:none;padding:0;font-family:inherit;width:100px;flex:0 0 100px;overflow:hidden;text-overflow:ellipsis}
-.inv-lc-name:focus{border-bottom:2px solid var(--accent)}
-.inv-lc-n{width:40px;border:1px solid var(--border);background:var(--bg);border-radius:5px;padding:5px 3px;font-size:13px;font-weight:700;font-family:'JetBrains Mono',monospace;text-align:center;color:var(--accent);outline:none;box-sizing:border-box;-moz-appearance:textfield;appearance:textfield}
-.inv-lc-n::-webkit-outer-spin-button,.inv-lc-n::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
-.inv-lc-n:focus{border-color:var(--accent);box-shadow:0 0 0 2px rgba(30,110,60,.1)}
-.inv-lc-n.dim{color:var(--muted);font-weight:400}
-.inv-lc-n.warn{color:var(--warn)}
-.inv-lc-n.red{color:var(--red)}
-.inv-lc-s{border:1px solid var(--border);background:var(--bg);border-radius:5px;padding:5px 2px;font-size:11px;font-family:inherit;color:var(--text);outline:none;box-sizing:border-box}
-.inv-lc-s:focus{border-color:var(--accent)}
-.inv-lc-lb{font-size:10px;color:var(--muted);white-space:nowrap}
-.inv-lc-del{border:none;background:none;cursor:pointer;font-size:12px;padding:2px;color:var(--muted);margin-left:auto}
-.inv-lc-step{display:inline-flex;align-items:center;gap:0}
-.inv-lc-step button{width:24px;height:26px;border:1px solid var(--border);background:var(--surface2);font-size:14px;font-weight:700;cursor:pointer;color:var(--text);font-family:inherit;padding:0;line-height:1}
-.inv-lc-step button:first-child{border-radius:5px 0 0 5px;border-right:none}
-.inv-lc-step button:last-child{border-radius:0 5px 5px 0;border-left:none}
-.inv-lc-step .inv-lc-n{border-radius:0;width:36px}
 .inv-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 12px;display:flex;flex-direction:column;gap:2px;cursor:pointer;transition:all .15s;-webkit-user-select:none;user-select:none}
 .inv-card:active{transform:scale(0.98)}
 .inv-card.low{border-left:3px solid var(--warn);background:rgba(192,84,10,.04)}
@@ -502,13 +474,9 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
   </div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <input id="invSearch" style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit;color:var(--text);outline:none" placeholder="품목명 검색..." oninput="renderInventory()">
-    <div class="inv-view-toggle">
-      <button class="inv-view-btn active" id="viewCard" onclick="_setInvView('card')">카드</button>
-      <button class="inv-view-btn" id="viewList" onclick="_setInvView('list')">목록</button>
-    </div>
     <select id="invFilter" onchange="renderInventory()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;color:var(--text);outline:none">
       <option value="all">전체</option>
-      <option value="low_stock">부족만</option>
+      <option value="low_stock">재고 없음만</option>
     </select>
     <select id="invSort" onchange="renderInventory()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;color:var(--text);outline:none">
       <option value="updated">업데이트순</option>
@@ -728,7 +696,6 @@ let _currentSessionId = null;
 let _sessionStartedAt = null;
 let _dismissedItemIds = new Set();  // 이번 세션에서 취소/이월한 품목
 let _storeAliases = [];  // 매장별 alias 캐시
-let _invView = localStorage.getItem('zk_inv_view') || 'card';
 
 /*  order_requests 테이블 (Supabase SQL Editor에서 실행):
     CREATE TABLE IF NOT EXISTS order_requests (
@@ -771,9 +738,6 @@ async function init() {
     _storeAliases = aliases || [];
     _lastRawInput = localStorage.getItem('zk_last_input_' + SID) || '';
     _updateLastInputChip();
-    // 뷰 토글 초기 상태
-    document.getElementById('viewCard')?.classList.toggle('active', _invView === 'card');
-    document.getElementById('viewList')?.classList.toggle('active', _invView === 'list');
   } catch(e) {
     showToast('초기화 실패: ' + e.message);
   }
@@ -2772,11 +2736,13 @@ function formatResult(result) {
 
 
 function _renderInvCard(it, qty, tgt, cls, vName) {
+  // 카드 기본 표시: 품목명 + 수량 + 단위만.
+  // 탭 시 펼쳐지는 영역에는 거래처 드롭다운(즉시 저장) + 삭제만.
+  // 목표/최소/발주단위/수량 편집은 UI에서 제거. 수량/이름 수정은 홈 탭 자연어 입력으로 처리.
   const vOpts = _vendors.map(v =>
     `<option value="${v.vendor_id}" ${v.vendor_id===it.vendor_id?'selected':''}>${v.vendor_name}</option>`
   ).join('');
-  // 카드 탭 = 바로 수정창 진입 (기존 3단계 카드→상세→수정 버튼을 1단계로 단축)
-  // 기본 표시는 품목명 + 수량 + 단위만. 목표/최소/거래처는 탭 시 펼쳐지는 편집 영역에 포함.
+  const safeName = it.item_name.replace(/'/g,"&#39;");
   return `<div class="inv-card ${cls}" id="ic_${it.item_id}" onclick="toggleInvEdit(${it.item_id}, event)">
     <div class="inv-card-main">
       <div class="inv-name">${it.item_name}</div>
@@ -2786,101 +2752,39 @@ function _renderInvCard(it, qty, tgt, cls, vName) {
       </div>
     </div>
     <div class="inv-edit-form" id="ief_${it.item_id}">
-      <div><div class="inv-edit-label">품목명</div><input class="inv-edit-inp" id="ien_${it.item_id}" value="${it.item_name}" placeholder="품목명" onclick="event.stopPropagation()"></div>
-      <div style="display:flex;gap:6px;align-items:flex-end">
-        <div style="flex:2"><div class="inv-edit-label">수량</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('ieq_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="ieq_${it.item_id}" type="number" value="${qty}" placeholder="0" onclick="event.stopPropagation()"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('ieq_${it.item_id}',1)">+</button></div></div>
-        <div style="flex:1"><div class="inv-edit-label">단위</div><input class="inv-edit-inp" id="ieu_${it.item_id}" value="${it.unit||''}" placeholder="봉/개" style="width:100%;padding:7px 6px;text-align:center" onclick="event.stopPropagation()"></div>
+      <div><div class="inv-edit-label">거래처</div>
+        <select class="inv-edit-inp" id="iev_${it.item_id}" style="width:100%;padding:9px 8px" onclick="event.stopPropagation()" onchange="event.stopPropagation();_saveInvVendor(${it.item_id}, this.value)">
+          <option value="">없음</option>${vOpts}
+        </select>
       </div>
-      <div style="display:flex;gap:6px">
-        <div style="flex:1"><div class="inv-edit-label">목표</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iet_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="iet_${it.item_id}" type="number" value="${tgt}" placeholder="0" onclick="event.stopPropagation()"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iet_${it.item_id}',1)">+</button></div></div>
-        <div style="flex:1"><div class="inv-edit-label">최소</div><div class="inv-stepper"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iem_${it.item_id}',-1)">−</button><input class="inv-edit-inp" id="iem_${it.item_id}" type="number" value="${it.min_stock||0}" placeholder="0" onclick="event.stopPropagation()"><button class="inv-stepper-btn" onclick="event.stopPropagation();_stepVal('iem_${it.item_id}',1)">+</button></div></div>
-      </div>
-      <div><div class="inv-edit-label">거래처</div><select class="inv-edit-inp" id="iev_${it.item_id}" style="width:100%;padding:7px 6px" onclick="event.stopPropagation()"><option value="">없음</option>${vOpts}</select></div>
-      <div style="font-size:11px;color:var(--dim);margin-top:2px">업데이트: ${it.updated_at ? new Date(it.updated_at).toLocaleDateString('ko-KR',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}) : '-'}</div>
-      <div style="display:flex;gap:6px;margin-top:4px">
-        <button class="inv-save-btn" onclick="event.stopPropagation();saveInvItem(${it.item_id})">저장</button>
-        <button class="inv-cancel-btn" onclick="event.stopPropagation();toggleInvEdit(${it.item_id})">취소</button>
-        <button class="inv-cancel-btn" style="color:var(--red);border-color:var(--red)" onclick="event.stopPropagation();deleteInvItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">삭제</button>
+      <div style="display:flex;gap:6px;margin-top:6px">
+        <button class="inv-cancel-btn" style="flex:1" onclick="event.stopPropagation();toggleInvEdit(${it.item_id})">닫기</button>
+        <button class="inv-cancel-btn" style="flex:1;color:var(--red);border-color:var(--red)" onclick="event.stopPropagation();deleteInvItem(${it.item_id},'${safeName}')">삭제</button>
       </div>
     </div>
   </div>`;
 }
 
-function _setInvView(view) {
-  _invView = view;
-  localStorage.setItem('zk_inv_view', view);
-  document.getElementById('viewCard').classList.toggle('active', view === 'card');
-  document.getElementById('viewList').classList.toggle('active', view === 'list');
-  renderInventory();
-}
-
-function _lStep(itemId, field, delta) {
-  const inp = document.querySelector(`input[data-id="${itemId}"][data-field="${field}"]`);
-  if (!inp) return;
-  let val = parseFloat(inp.value) || 0;
-  val = Math.max(0, val + delta);
-  inp.value = val;
-  _saveListField(inp);
-}
-
-async function _saveListField(el) {
-  const id = parseInt(el.dataset.id);
-  const field = el.dataset.field;
-  let value = el.value;
-
-  if (field === 'current_qty' || field === 'target_qty' || field === 'min_stock' || field === 'order_unit_qty') {
-    value = parseFloat(value) || (field === 'order_unit_qty' ? 1 : 0);
-  } else if (field === 'vendor_id') {
-    value = value ? parseInt(value) : null;
-  } else {
-    value = value.trim();
-    if (field === 'item_name' && !value) { showToast('품목명을 입력해 주세요'); renderInventory(); return; }
-  }
-
-  const patch = { [field]: value, updated_at: new Date().toISOString() };
-  await db.from('items').update(patch).eq('item_id', id);
-
+// 거래처 변경 즉시 저장
+async function _saveInvVendor(id, val) {
+  const vid = val ? parseInt(val) : null;
+  await db.from('items').update({ vendor_id: vid, updated_at: new Date().toISOString() }).eq('item_id', id);
   const item = _items.find(i => i.item_id === id);
-  if (item) item[field] = value;
-
-  // 저장 피드백
-  el.style.borderColor = 'var(--accent)';
-  setTimeout(() => { el.style.borderColor = ''; }, 600);
-}
-
-async function _deleteListItem(id, name) {
-  if (!confirm(`${name}을(를) 삭제하시겠습니까?`)) return;
-  await db.from('items').delete().eq('item_id', id);
-  _items = _items.filter(i => i.item_id !== id);
-  renderInventory();
-  showToast('🗑 삭제됨');
-}
-
-function _stepVal(inputId, delta) {
-  const inp = document.getElementById(inputId);
-  if (!inp) return;
-  let val = parseFloat(inp.value) || 0;
-  val = Math.max(0, val + delta);
-  inp.value = val;
+  if (item) item.vendor_id = vid;
+  const vName = _vendors.find(v => v.vendor_id === vid)?.vendor_name || '없음';
+  showToast(`거래처 → ${vName}`);
 }
 
 function renderInventory() {
   const grid = document.getElementById('invGrid');
   if (!grid) return;
-  // 부족 품목 요약 바
+  // 재고 없음 요약 바 (목표/최소 기반 "부족" 개념은 제거 — 재고 0 기준만)
   const alertBar = document.getElementById('invAlertBar');
   const alertText = document.getElementById('invAlertText');
   if (alertBar && alertText) {
-    const lowCount = _items.filter(it => Number(it.current_qty) < Number(it.target_qty) && Number(it.target_qty) > 0).length;
     const zeroCount = _items.filter(it => Number(it.current_qty) <= 0).length;
-    if (lowCount > 0 || zeroCount > 0) {
-      let msg = '⚠️ ';
-      if (zeroCount > 0) msg += `재고 없음 ${zeroCount}개`;
-      if (zeroCount > 0 && lowCount > zeroCount) msg += ' · ';
-      if (lowCount > zeroCount) msg += `부족 ${lowCount - zeroCount}개`;
-      if (lowCount === zeroCount && zeroCount > 0) {} // 재고 없음만
-      else if (zeroCount === 0) msg = `⚠️ 부족 ${lowCount}개`;
-      alertText.textContent = msg;
+    if (zeroCount > 0) {
+      alertText.textContent = `⚠️ 재고 없음 ${zeroCount}개`;
       alertBar.style.display = '';
     } else {
       alertBar.style.display = 'none';
@@ -2933,7 +2837,8 @@ function renderInventory() {
   let items = [..._items];
   const sort = document.getElementById('invSort')?.value || 'updated';
   if (q) items = items.filter(it => it.item_name.includes(q));
-  if (flt === 'low_stock') items = items.filter(it => Number(it.current_qty) < Number(it.target_qty) || Number(it.current_qty) <= 0);
+  // "재고 없음만" 필터 (이름은 low_stock 유지 — 호환). 기준: 재고 0
+  if (flt === 'low_stock') items = items.filter(it => Number(it.current_qty) <= 0);
   if (sort === 'name') items.sort((a,b) => a.item_name < b.item_name ? -1 : 1);
   else if (sort === 'qty_asc') items.sort((a,b) => Number(a.current_qty) - Number(b.current_qty));
   else if (sort === 'qty_desc') items.sort((a,b) => Number(b.current_qty) - Number(a.current_qty));
@@ -2944,65 +2849,10 @@ function renderInventory() {
     return va < vb ? -1 : va > vb ? 1 : a.item_name < b.item_name ? -1 : 1;
   });
   else items.sort((a,b) => new Date(b.updated_at || 0) - new Date(a.updated_at || 0));
-  // 설정된 품목(target_qty 또는 min_stock > 0) 우선 정렬
-  items.sort((a,b) => {
-    const aSet = (Number(a.target_qty) > 0 || Number(a.min_stock) > 0) ? 1 : 0;
-    const bSet = (Number(b.target_qty) > 0 || Number(b.min_stock) > 0) ? 1 : 0;
-    return bSet - aSet;
-  });
   document.getElementById('invCount').textContent = items.length + '개';
   if (!items.length) { grid.innerHTML = '<div class="no-item">품목 없음</div>'; return; }
 
-  // 목록뷰 — 콤팩트 카드
-  if (_invView === 'list') {
-    grid.classList.remove('inv-grid');
-    const unitOpts = ['개','봉지','박스','팩','캔','통','병','kg','g','장','묶음','롤'];
-    const vOpts = _vendors.map(v => `<option value="${v.vendor_id}">${v.vendor_name}</option>`).join('');
-    grid.innerHTML = items.map(it => {
-      const qty = Number(it.current_qty), tgt = Number(it.target_qty), min = Number(it.min_stock || 0);
-      const ouq = Number(it.order_unit_qty) || 1, oun = it.order_unit_name || '';
-      const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
-      const qCls = qty <= 0 ? 'red' : qty < tgt ? 'warn' : '';
-      const uSel = unitOpts.map(u => `<option value="${u}"${(it.unit||'개')===u?' selected':''}>${u}</option>`).join('');
-      const vSel = vOpts.replace(new RegExp(`value="${it.vendor_id}"`), `value="${it.vendor_id}" selected`);
-      const unconfigured = tgt === 0 && min === 0;
-      // 목록뷰 — 기본 표시는 품목명+수량+단위만, 탭 시 상세(목표/최소/거래처/발주단위) 펼침
-      const stop = `onclick="event.stopPropagation()"`;
-      return `<div class="inv-list-card ${cls}" id="ilc_${it.item_id}" onclick="toggleListCard(${it.item_id}, event)" style="${unconfigured ? 'opacity:0.4' : ''}">
-        <div class="inv-lc-r">
-          <input class="inv-lc-name" value="${it.item_name}" data-id="${it.item_id}" data-field="item_name" onchange="_saveListField(this)" ${stop}>
-          <div class="inv-lc-step">
-            <button onclick="event.stopPropagation();_lStep(${it.item_id},'current_qty',-1)">−</button>
-            <input class="inv-lc-n ${qCls}" type="number" inputmode="numeric" value="${qty}" data-id="${it.item_id}" data-field="current_qty" onchange="_saveListField(this)" ${stop}>
-            <button onclick="event.stopPropagation();_lStep(${it.item_id},'current_qty',1)">+</button>
-          </div>
-          <select class="inv-lc-s" data-id="${it.item_id}" data-field="unit" onchange="_saveListField(this)" style="width:52px" ${stop}>${uSel}</select>
-        </div>
-        <div class="inv-lc-detail">
-          <div class="inv-lc-r">
-            <span class="inv-lc-lb">목표</span>
-            <input class="inv-lc-n ${tgt===0?'dim':''}" type="number" inputmode="numeric" value="${tgt}" data-id="${it.item_id}" data-field="target_qty" onchange="_saveListField(this)" ${stop}>
-            <span class="inv-lc-lb">최소</span>
-            <input class="inv-lc-n ${min===0?'dim':''}" type="number" inputmode="numeric" value="${min}" data-id="${it.item_id}" data-field="min_stock" onchange="_saveListField(this)" ${stop}>
-            <button class="inv-lc-del" onclick="event.stopPropagation();_deleteListItem(${it.item_id},'${it.item_name.replace(/'/g,"&#39;")}')">🗑</button>
-          </div>
-          <div class="inv-lc-r">
-            <span class="inv-lc-lb">거래처</span>
-            <select class="inv-lc-s" data-id="${it.item_id}" data-field="vendor_id" onchange="_saveListField(this)" style="width:90px" ${stop}>
-              <option value="">-</option>${vSel}
-            </select>
-            <span class="inv-lc-lb">발주</span>
-            <input class="inv-lc-n ${ouq<=1?'dim':''}" type="number" inputmode="numeric" value="${ouq}" data-id="${it.item_id}" data-field="order_unit_qty" onchange="_saveListField(this)" style="width:32px" min="1" ${stop}>
-            <span class="inv-lc-lb">${it.unit||'개'}=1</span>
-            <input class="inv-lc-s" value="${oun}" data-id="${it.item_id}" data-field="order_unit_name" onchange="_saveListField(this)" placeholder="박스" style="width:48px;font-size:11px;padding:5px 3px" ${stop}>
-          </div>
-        </div>
-      </div>`;
-    }).join('');
-    return;
-  }
-
-  // 카드뷰 (기존)
+  // 카드뷰만 유지 (목록뷰는 제거됨)
   // 거래처순 정렬이면 그룹으로 렌더링
   if (sort === 'vendor') {
     const groups = {};
@@ -3015,7 +2865,7 @@ function renderInventory() {
     grid.innerHTML = Object.entries(groups).map(([vName, groupItems]) => {
       const cards = groupItems.map(it => {
         const qty = Number(it.current_qty), tgt = Number(it.target_qty);
-        const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+        const cls = qty <= 0 ? 'zero' : '';
         const vN = _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || '';
         return _renderInvCard(it, qty, tgt, cls, vN);
       }).join('');
@@ -3067,16 +2917,6 @@ function toggleInvEdit(id, e) {
 // 구버전 호환: 일부 코드가 toggleInvDetail을 호출할 수 있음
 function toggleInvDetail(id, e) { return toggleInvEdit(id, e); }
 
-// 목록뷰 카드 탭 시 상세 영역 펼치기/접기. 다른 카드 열려 있으면 자동 닫음.
-function toggleListCard(id, e) {
-  const card = document.getElementById('ilc_' + id);
-  if (!card) return;
-  const isOpen = card.classList.contains('expanded');
-  document.querySelectorAll('.inv-list-card.expanded').forEach(c => {
-    if (c !== card) c.classList.remove('expanded');
-  });
-  card.classList.toggle('expanded', !isOpen);
-}
 
 async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
   if (!newVendorId) return;
@@ -3096,105 +2936,6 @@ async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
   }
   showToast(`${count}개 품목 거래처 → ${newVendor.vendor_name}`);
   renderInventory();
-}
-
-async function saveInvItem(id) {
-  const name = document.getElementById('ien_'+id)?.value.trim();
-  const qty  = parseFloat(document.getElementById('ieq_'+id)?.value) || 0;
-  const unit = document.getElementById('ieu_'+id)?.value.trim();
-  const tgt  = parseFloat(document.getElementById('iet_'+id)?.value) || 0;
-  const vid  = parseInt(document.getElementById('iev_'+id)?.value) || null;
-  const minVal = parseFloat(document.getElementById('iem_'+id)?.value) || 0;
-  if (!name) { showToast('품목명을 입력해 주세요.'); return; }
-
-  // 중복 감지: 같은 이름의 다른 품목이 이미 있으면 합치기 카드 표시
-  const existing = _items.find(x => x.item_id !== id && x.item_name.replace(/\s/g,'') === name.replace(/\s/g,''));
-  if (existing) {
-    const mergedQty = Number(existing.current_qty) + qty;
-    const choice = await _showMergeCard(name, existing, qty, unit);
-    if (choice === 'merge') {
-      // 더하기: 기존 품목에 수량 합산, 현재 품목 삭제
-      await db.from('items').update({
-        current_qty: mergedQty, updated_at: new Date().toISOString()
-      }).eq('item_id', existing.item_id);
-      existing.current_qty = mergedQty;
-      await db.from('items').delete().eq('item_id', id);
-      _items = _items.filter(x => x.item_id !== id);
-      renderInventory();
-      showToast(`✅ ${name} 더하기 (${mergedQty}${unit || existing.unit || '개'})`);
-      return;
-    } else if (choice === 'overwrite') {
-      // 바꾸기: 기존 품목을 새 수량으로 교체, 현재 품목 삭제
-      await db.from('items').update({
-        current_qty: qty, updated_at: new Date().toISOString()
-      }).eq('item_id', existing.item_id);
-      existing.current_qty = qty;
-      await db.from('items').delete().eq('item_id', id);
-      _items = _items.filter(x => x.item_id !== id);
-      renderInventory();
-      showToast(`✅ ${name} 바꾸기 (${qty}${unit || existing.unit || '개'})`);
-      return;
-    } else if (choice === 'cancel') {
-      return; // 유지: 기존 수량 유지, 수정 취소
-    }
-  }
-
-  const oldItem = _items.find(x => x.item_id === id);
-  const oldName = oldItem?.item_name || name;
-  if (oldName !== name && oldName) {
-    _saveAlias(oldName, name);
-  }
-  const oldQty = Number(oldItem?.current_qty ?? 0);
-  const oldUnit = oldItem?.unit || '';
-  const oldTgt = Number(oldItem?.target_qty ?? 0);
-  const oldMin = Number(oldItem?.min_stock ?? 0);
-  const oldVid = oldItem?.vendor_id ?? null;
-  await db.from('items').update({
-    item_name: name, current_qty: qty, unit, target_qty: tgt,
-    vendor_id: vid, min_stock: minVal, updated_at: new Date().toISOString()
-  }).eq('item_id', id);
-  if (oldItem) Object.assign(oldItem, { item_name:name, current_qty:qty, unit, target_qty:tgt, vendor_id:vid, min_stock:minVal });
-  renderInventory();
-  // 채팅 영역에 수정 결과 표시 — 변경된 필드만 diff 형식으로 나열 (예: "하드롤 — 목표 3→5 수정됨")
-  const u = unit || oldUnit || '';
-  const changes = [];
-  if (oldName !== name)   changes.push(`이름 ${oldName}→${name}`);
-  if (oldQty !== qty)     changes.push(`수량 ${oldQty}${u}→${qty}${u}`);
-  if (oldUnit !== unit && unit) changes.push(`단위 ${oldUnit||'-'}→${unit}`);
-  if (oldTgt !== tgt)     changes.push(`목표 ${oldTgt}${u}→${tgt}${u}`);
-  if (oldMin !== minVal)  changes.push(`최소 ${oldMin}${u}→${minVal}${u}`);
-  if (oldVid !== vid) {
-    const oldVn = _vendors.find(v => v.vendor_id === oldVid)?.vendor_name || '없음';
-    const newVn = _vendors.find(v => v.vendor_id === vid)?.vendor_name || '없음';
-    changes.push(`거래처 ${oldVn}→${newVn}`);
-  }
-  const detail = changes.length ? changes.join(' · ') + ' 수정됨' : '수정됨';
-  addResult(`${name} 수정`, `✅ ${name} — ${detail}`, 'ok');
-}
-
-function _showMergeCard(name, existing, newQty, unit) {
-  const mergedQty = Number(existing.current_qty) + newQty;
-  const u = unit || existing.unit || '개';
-  return new Promise(resolve => {
-    const card = document.getElementById('ic_' + existing.item_id);
-    const container = card || document.getElementById('invGrid');
-    const overlay = document.createElement('div');
-    overlay.className = 'merge-card-overlay';
-    overlay.style.cssText = 'background:var(--bg);border:1px solid var(--accent);border-radius:12px;padding:14px;margin:8px 0';
-    overlay.innerHTML = `
-      <div style="font-size:14px;font-weight:600;margin-bottom:8px">"${name}"가 이미 있습니다.</div>
-      <div style="font-size:13px;color:var(--muted);margin-bottom:10px">기존 ${existing.current_qty}${u} + 새 ${newQty}${u} = ${mergedQty}${u}</div>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        <button class="dup-btn-merge" data-action="merge" style="font-size:13px;padding:7px 14px">더하기 (${mergedQty}${u})</button>
-        <button class="dup-btn-overwrite" data-action="overwrite" style="font-size:13px;padding:7px 14px">바꾸기 (${newQty}${u})</button>
-        <button class="dup-btn-replace" data-action="keep" style="font-size:13px;padding:7px 14px">유지 (${existing.current_qty}${u})</button>
-      </div>`;
-    container.after(overlay);
-    overlay.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    overlay.querySelector('[data-action="merge"]').onclick = () => { overlay.remove(); resolve('merge'); };
-    overlay.querySelector('[data-action="overwrite"]').onclick = () => { overlay.remove(); resolve('overwrite'); };
-    overlay.querySelector('[data-action="keep"]').onclick = () => { overlay.remove(); resolve('cancel'); };
-  });
 }
 
 async function deleteInvItem(id, name) {
@@ -3329,14 +3070,11 @@ async function renderOrder() {
       defer_count: r.defer_count || 0
     }));
 
-    // 2) 재고 부족 품목 (자동 제안용)
+    // 2) 재고 부족 품목 (자동 제안용) — 추천 기준: current_qty <= 0 만
     await refreshItems();
     const pendingItemIds = new Set(_pendingItems.map(r => r.item_id).concat(_orderedItems.map(r => r.item_id)));
-    // 부족 품목 추출 + 소비량 계산
     const needItems = _items.filter(it =>
-      (Number(it.current_qty) <= Number(it.min_stock || 0) ||
-       Number(it.current_qty) < Number(it.target_qty) ||
-       Number(it.current_qty) <= 0) &&
+      Number(it.current_qty) <= 0 &&
       !pendingItemIds.has(it.item_id) &&
       !_dismissedItemIds.has(it.item_id)
     );
@@ -3344,9 +3082,8 @@ async function renderOrder() {
     for (const it of needItems) {
       const consumption = await _calcConsumption(it.item_id);
       const order = _calcOrderQty(Number(it.current_qty), Number(it.target_qty), consumption, it.order_unit_qty);
-      if (order.qty <= 0 && Number(it.current_qty) > 0) continue;
-      // 재고 0인데 추천 수량도 0이면 (목표재고 미설정) → 수량 1로 강제 추가
-      if (order.qty <= 0 && Number(it.current_qty) <= 0) {
+      // 목표/소비량이 없는 경우(재고 0 단독) 수량 1로 강제 추가
+      if (order.qty <= 0) {
         order.qty = 1;
         order.source = 'stockout';
       }
@@ -3472,6 +3209,7 @@ async function renderOrder() {
         }
         html += `<button style="width:100%;padding:12px;background:#222;color:#fff;border:none;border-radius:8px;font-size:14px;margin-top:16px;cursor:pointer;font-family:inherit" onclick="_copyOrderTextAll()">📋 전체 복사</button>`;
       }
+      html += `<div style="font-size:13px;color:#999;text-align:center;margin-top:16px">제로키친은 사용할수록 정확한 발주를 도와드립니다</div>`;
       html += `<div style="border-bottom:1px solid #ddd;margin:24px 0"></div>`;
     }
 
