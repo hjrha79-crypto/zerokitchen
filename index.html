@@ -85,9 +85,14 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 @media (min-width:768px){ .inv-grid{grid-template-columns:repeat(3,minmax(0,1fr))} }
 .inv-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;transition:background .1s;-webkit-user-select:none;user-select:none}
 .inv-card.zero{border-left:3px solid var(--red);background:rgba(217,48,37,.04)}
-.inv-card .inv-name{font-size:14px;font-weight:600;line-height:1.3;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inv-card .inv-name{font-size:14px;font-weight:600;line-height:1.3;flex:1 1 auto;min-width:0;border:1px solid transparent;background:transparent;color:var(--text);font-family:inherit;outline:none;padding:3px 4px;border-radius:4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inv-card .inv-name:hover{border-color:var(--border);background:var(--bg)}
+.inv-card .inv-name:focus{border-color:var(--accent);background:var(--bg);overflow:visible;text-overflow:clip}
 .inv-card .inv-qty-wrap{display:flex;align-items:baseline;gap:2px;flex-shrink:0}
-.inv-card .inv-qty{font-size:16px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent)}
+.inv-card .inv-qty{width:48px;font-size:16px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent);border:1px solid transparent;background:transparent;outline:none;padding:2px 4px;border-radius:4px;text-align:center;-moz-appearance:textfield;appearance:textfield}
+.inv-card .inv-qty::-webkit-outer-spin-button,.inv-card .inv-qty::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.inv-card .inv-qty:hover{border-color:var(--border);background:var(--bg)}
+.inv-card .inv-qty:focus{border-color:var(--accent);background:var(--bg)}
 .inv-card .inv-qty.zero{color:var(--red)}
 .inv-card .inv-unit{font-size:11px;color:var(--dim)}
 /* 좁은 폭에서는 거래처 드롭다운이 다음 줄로 wrap — 카드 내부 flex-wrap:wrap로 처리 */
@@ -2731,16 +2736,20 @@ function formatResult(result) {
 
 
 function _renderInvCard(it, qty, tgt, cls, vName) {
-  // 한 줄 카드: 품목명 + 수량 + 단위 + 거래처 드롭다운 + 삭제. 펼침/접힘 없음.
-  // 예: "위생장갑 1개 [쿠팡 v] 🗑"
+  // 한 줄 카드: 품목명(인라인 편집) + 수량(인라인 편집) + 단위 + 거래처 + 삭제.
+  // 품목명/수량은 input으로 렌더되어 탭 시 즉시 편집, blur/Enter 시 자동 저장.
   const vOpts = _vendors.map(v =>
     `<option value="${v.vendor_id}" ${v.vendor_id===it.vendor_id?'selected':''}>${v.vendor_name}</option>`
   ).join('');
-  const safeName = it.item_name.replace(/'/g,"&#39;");
+  const safeName = it.item_name.replace(/"/g,'&quot;').replace(/'/g,"&#39;");
   return `<div class="inv-card ${cls}" id="ic_${it.item_id}">
-    <div class="inv-name">${it.item_name}</div>
+    <input class="inv-name" type="text" value="${safeName}" data-id="${it.item_id}"
+      onblur="_saveInvName(${it.item_id}, this)"
+      onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">
     <div class="inv-qty-wrap">
-      <span class="inv-qty ${cls}">${qty}</span>
+      <input class="inv-qty ${cls}" type="number" inputmode="decimal" value="${qty}" data-id="${it.item_id}" min="0" step="0.1"
+        onblur="_saveInvQty(${it.item_id}, this)"
+        onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">
       <span class="inv-unit">${it.unit||''}</span>
     </div>
     <select class="inv-vendor-sel" onchange="_saveInvVendor(${it.item_id}, this.value)">
@@ -2758,6 +2767,52 @@ async function _saveInvVendor(id, val) {
   if (item) item.vendor_id = vid;
   const vName = _vendors.find(v => v.vendor_id === vid)?.vendor_name || '없음';
   showToast(`거래처 → ${vName}`);
+}
+
+// 품목명 인라인 저장 (blur 시 호출)
+async function _saveInvName(id, el) {
+  const item = _items.find(i => i.item_id === id);
+  if (!item) return;
+  const newName = el.value.trim();
+  const oldName = item.item_name;
+  if (!newName) { el.value = oldName; showToast('품목명은 비워둘 수 없습니다'); return; }
+  if (newName === oldName) return;
+  await db.from('items').update({ item_name: newName, updated_at: new Date().toISOString() }).eq('item_id', id);
+  item.item_name = newName;
+  el.defaultValue = newName;
+  if (typeof _saveAlias === 'function') _saveAlias(oldName, newName);
+  el.style.borderColor = 'var(--accent)';
+  setTimeout(() => { el.style.borderColor = ''; }, 600);
+  showToast(`${oldName} → ${newName}`);
+}
+
+// 수량 인라인 저장 (blur 시 호출)
+async function _saveInvQty(id, el) {
+  const item = _items.find(i => i.item_id === id);
+  if (!item) return;
+  const newQty = parseFloat(el.value);
+  if (!Number.isFinite(newQty) || newQty < 0) { el.value = item.current_qty; return; }
+  if (newQty === Number(item.current_qty)) return;
+  const oldQty = Number(item.current_qty);
+  await db.from('items').update({ current_qty: newQty, updated_at: new Date().toISOString() }).eq('item_id', id);
+  item.current_qty = newQty;
+  el.defaultValue = newQty;
+  // 재고 0 클래스 상태 갱신
+  el.classList.toggle('zero', newQty <= 0);
+  const card = document.getElementById('ic_' + id);
+  if (card) card.classList.toggle('zero', newQty <= 0);
+  // kitchen_operations에 재고 직접 수정 이력 기록
+  try {
+    await db.from('kitchen_operations').insert({
+      store_id: SID, item_id: id, item_name: item.item_name,
+      action_type: 'stock_check', quantity: newQty, unit: item.unit || '개',
+      qty_before: oldQty, qty_after: newQty,
+      input_method: 'inv_card_edit', raw_text: `재고 ${oldQty}→${newQty}`
+    });
+  } catch (e) { /* 이력 실패는 무시 */ }
+  el.style.borderColor = 'var(--accent)';
+  setTimeout(() => { el.style.borderColor = ''; }, 600);
+  showToast(`${item.item_name}: ${oldQty}→${newQty}${item.unit||''}`);
 }
 
 function renderInventory() {
