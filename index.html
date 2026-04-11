@@ -896,17 +896,45 @@ async function processRequest(json) {
                   .select('vendor_id').eq('item_id', item.item_id).eq('is_default', true).limit(1);
                 if (vmap?.length) vid = vmap[0].vendor_id;
               }
-              const { error, skipped } = await _insertOrderIfNotDup({
+              const newUnit = unit || item.unit;
+              const { error, skipped, existing } = await _insertOrderIfNotDup({
                 store_id: SID, item_id: item.item_id, item_name: item.item_name,
-                qty: qty, unit: unit || item.unit,
+                qty: qty, unit: newUnit,
                 vendor_id: vid, status: 'pending'
               });
               if (error) { errors.push({ name, reason: error.message }); continue; }
-              if (skipped) { errors.push({ name, reason: '이미 pending 발주 존재' }); continue; }
+              if (skipped) {
+                // 이미 pending/ordered 건이 있으면 사용자에게 수량 변경 의사 확인
+                const prevQty = existing?.qty ?? '?';
+                const prevUnit = existing?.unit || newUnit || '';
+                const ok = (typeof confirm === 'function') &&
+                  confirm(`${item.item_name}: 이미 발주 중(${prevQty}${prevUnit}). ${qty}${newUnit}(으)로 변경할까요?`);
+                if (!ok) {
+                  errors.push({ name, reason: `이미 발주 중 (${prevQty}${prevUnit})` });
+                  continue;
+                }
+                const { error: updErr } = await db.from('order_requests')
+                  .update({ qty: qty, unit: newUnit, updated_at: new Date().toISOString() })
+                  .eq('id', existing.id);
+                if (updErr) { errors.push({ name, reason: updErr.message }); continue; }
+                // 이력: 발주 수량 변경도 kitchen_operations에 기록
+                await db.from('kitchen_operations').insert({
+                  store_id: SID, item_id: item.item_id, item_name: item.item_name,
+                  action_type: 'order', quantity: qty, unit: newUnit,
+                  qty_before: item.current_qty, qty_after: item.current_qty,
+                  input_method: json._source || 'api', raw_text: JSON.stringify(req)
+                });
+                const { data: _opUpdOrd } = await db.from('kitchen_operations')
+                  .select('operation_id').eq('store_id', SID).eq('item_id', item.item_id)
+                  .order('created_at', { ascending: false }).limit(1);
+                if (_opUpdOrd?.length) operationIds.push(_opUpdOrd[0].operation_id);
+                updated.push({ name: item.item_name, quantity: item.current_qty, inputQty: qty, unit: newUnit, action: 'order' });
+                continue;
+              }
 
               const { data: _insOrd, error: _insOrdErr } = await db.from('kitchen_operations').insert({
                 store_id: SID, item_id: item.item_id, item_name: item.item_name,
-                action_type: 'order', quantity: qty, unit: unit || item.unit,
+                action_type: 'order', quantity: qty, unit: newUnit,
                 qty_before: item.current_qty, qty_after: item.current_qty,
                 input_method: json._source || 'api', raw_text: JSON.stringify(req)
               });
@@ -4132,12 +4160,14 @@ async function _deferAllOrders() {
   renderOrder();
 }
 
-// 중복 발주 방지: 같은 store_id+item_id로 pending 건이 있으면 INSERT 스킵
+// 중복 발주 방지: 같은 store_id+item_id로 pending/ordered 건이 있으면 INSERT 스킵
+// skipped=true일 때 existing 필드로 기존 row 정보를 반환하여 호출자가
+// 수량 업데이트 등 후속 처리를 결정할 수 있음.
 async function _insertOrderIfNotDup(row) {
   const { data: existing } = await db.from('order_requests')
-    .select('id').eq('store_id', row.store_id).eq('item_id', row.item_id)
+    .select('id, qty, unit, status').eq('store_id', row.store_id).eq('item_id', row.item_id)
     .in('status', ['pending', 'ordered']).limit(1);
-  if (existing?.length) return { data: null, error: null, skipped: true };
+  if (existing?.length) return { data: null, error: null, skipped: true, existing: existing[0] };
   const { data, error } = await db.from('order_requests').insert(row).select();
   return { data, error, skipped: false };
 }
