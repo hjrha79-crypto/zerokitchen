@@ -1971,7 +1971,7 @@ function _ruleNormalize(text) {
     function(m,w,j,t){ return _UNITS.includes(w) ? m : w+t; });
 
   // 5a. 복합 동작어구 → 마커 치환 (단일 동작어보다 먼저 처리)
-  const _SUFFIX = '(?:했어요?|하고|해줘|했음|함|고|어요?|서|해야\\s*(?:돼요?|되|해|하|된다|됩니다)?|해|줘|자|었어요?|았어요?|습니다|었습니다|았습니다)?';
+  const _SUFFIX = '(?:했어요?|하고|해줘|했음|함|고|어요?|서|해야\\s*(?:돼요?|되|해|하|된다|됩니다|됨)?|해|줘|자|었어요?|았어요?|습니다|었습니다|았습니다)?';
   for (const [pat, act] of _COMPOUND_ACTIONS) {
     s = s.replace(new RegExp(pat + _SUFFIX + '(?=\\s|,|$)', 'g'),
       '\x01' + act + '\x01');
@@ -2013,6 +2013,14 @@ function _ruleTokenize(s) {
     if (am) { segAction = am[1]; qp.lastIndex += am[0].length; }
     const { text: before, action: preAction } = _extractAction(raw);
     if (before) segs.push({rawName:before, qty:parseFloat(m[1]), unit:m[2], action: segAction || preAction, qtyParsed:true});
+    else if ((segAction || preAction) && segs.length > 0) {
+      // "스파게티 5개 한 박스 발주" 패턴 — 품목명 없이 수량+단위+동작어만 있으면
+      // 직전 품목명 상속. 이전 seg의 null action은 stock_check로 고정하여
+      // fallbackAction이 order를 전체 전파하지 않도록 한다.
+      const prev = segs[segs.length - 1];
+      if (!prev.action) prev.action = 'stock_check';
+      segs.push({rawName: prev.rawName, qty: parseFloat(m[1]), unit: m[2], action: segAction || preAction, qtyParsed: true});
+    }
     li=qp.lastIndex;
   }
   const tail=s.slice(li).trim();
@@ -3549,6 +3557,24 @@ async function renderOrder() {
   }
 }
 
+// 중복 정리 이벤트 델리게이션 — wrap 엘리먼트는 innerHTML 교체에도 그대로 유지되므로
+// 여기에 바인딩된 리스너는 재렌더 후에도 살아남음. 이전 구조(inline onclick)는 첫 번째 품목
+// 처리 후 두 번째 버튼 클릭이 먹지 않는 버그가 있어 델리게이션으로 교체.
+function _dupCleanupClickHandler(e) {
+  const btn = e.target.closest('[data-dup-action]');
+  if (!btn) return;
+  const action = btn.dataset.dupAction;
+  const key = btn.dataset.dupKey || '';
+  if (action === 'merge')        _mergeDup(key);
+  else if (action === 'replace') _replaceDup(key);
+  else if (action === 'keep') {
+    const card = btn.closest('[data-dup-card]');
+    if (card) card.style.display = 'none';
+  }
+  else if (action === 'merge-all') _mergeAllDups();
+  else if (action === 'close')     _closeDupCleanup();
+}
+
 async function _showDupCleanup() {
   const nameMap = {};
   _items.forEach(it => {
@@ -3557,12 +3583,31 @@ async function _showDupCleanup() {
     nameMap[key].push(it);
   });
   const dups = Object.entries(nameMap).filter(([k, v]) => v.length > 1);
-  if (!dups.length) { showToast('중복 품목이 없습니다'); return; }
+  if (!dups.length) {
+    showToast('중복 품목이 없습니다');
+    // 이미 dup cleanup UI가 떠 있다면 원복
+    const panel = document.getElementById('reviewPanel');
+    const wrap = panel.querySelector('.result-card-wrap');
+    if (wrap.querySelector('[data-dup-root]')) _closeDupCleanup();
+    return;
+  }
 
   const panel = document.getElementById('reviewPanel');
   panel.style.display = 'block';
   const wrap = panel.querySelector('.result-card-wrap');
-  _dupOrigHTML = wrap.innerHTML;
+
+  // 원본 HTML은 최초 진입 시에만 저장 (재진입 시 덮어쓰면 복원이 깨짐)
+  if (!wrap.querySelector('[data-dup-root]')) {
+    _dupOrigHTML = wrap.innerHTML;
+  }
+
+  // 클릭 핸들러는 wrap에 한 번만 부착 (innerHTML 교체에도 유지됨)
+  if (!wrap._dupHandlerBound) {
+    wrap.addEventListener('click', _dupCleanupClickHandler);
+    wrap._dupHandlerBound = true;
+  }
+
+  const _escAttr = s => String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
   let cardsHtml = dups.map(([key, items]) => {
     const name = items[0].item_name;
@@ -3571,37 +3616,38 @@ async function _showDupCleanup() {
     const unit = items[0].unit || '개';
     const detail = items.map(it => `${Number(it.current_qty)}${it.unit || '개'}`).join(' + ');
     console.log(`[중복정리] "${name}" 단위:`, items.map(it => JSON.stringify(it.unit)), '→ sameUnit:', sameUnit);
+    const keyAttr = _escAttr(key);
     if (!sameUnit) {
       const units = [...new Set(items.map(it => it.unit || '개'))].join('/');
-      return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+      return `<div data-dup-card style="padding:10px 0;border-bottom:1px solid var(--border)">
         <div style="font-size:14px;font-weight:600">${name}</div>
         <div style="font-size:12px;color:var(--red);margin:4px 0">⚠️ 단위 다름 (${units}) — ${detail}</div>
         <div style="font-size:11px;color:var(--dim);margin-bottom:4px">단위를 통일한 후 합쳐주세요</div>
         <div style="display:flex;gap:6px;margin-top:4px">
-          <button style="font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);cursor:pointer;font-family:inherit" onclick="this.parentElement.parentElement.style.display='none'">유지</button>
+          <button type="button" data-dup-action="keep" style="font-size:12px;padding:6px 14px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);cursor:pointer;font-family:inherit">유지</button>
         </div>
       </div>`;
     }
     const totalQty = items.reduce((s, it) => s + Number(it.current_qty), 0);
     const latestQty = items[items.length - 1].current_qty;
-    return `<div style="padding:10px 0;border-bottom:1px solid var(--border)">
+    return `<div data-dup-card style="padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="font-size:14px;font-weight:600">${name}</div>
       <div style="font-size:12px;color:var(--dim);margin:4px 0">${detail} = ${totalQty}${unit}</div>
       <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
-        <button class="dup-btn-merge" style="font-size:13px;padding:10px 14px;width:100%" onclick="_mergeDup('${key}')">더하기 (${totalQty}${unit})</button>
-        <button class="dup-btn-overwrite" style="font-size:13px;padding:10px 14px;width:100%" onclick="_replaceDup('${key}')">바꾸기 (${latestQty}${unit})</button>
-        <button class="dup-btn-replace" style="font-size:13px;padding:10px 14px;width:100%" onclick="this.parentElement.parentElement.style.display='none'">유지</button>
+        <button type="button" class="dup-btn-merge"     data-dup-action="merge"   data-dup-key="${keyAttr}" style="font-size:13px;padding:10px 14px;width:100%">더하기 (${totalQty}${unit})</button>
+        <button type="button" class="dup-btn-overwrite" data-dup-action="replace" data-dup-key="${keyAttr}" style="font-size:13px;padding:10px 14px;width:100%">바꾸기 (${latestQty}${unit})</button>
+        <button type="button" class="dup-btn-replace"   data-dup-action="keep"                              style="font-size:13px;padding:10px 14px;width:100%">유지</button>
       </div>
     </div>`;
   }).join('');
 
   wrap.innerHTML = `
-    <div class="config-card">
-      <button class="card-close-x" onclick="_closeDupCleanup()">✕</button>
+    <div class="config-card" data-dup-root>
+      <button type="button" class="card-close-x" data-dup-action="close">✕</button>
       <div class="config-card-title">중복 품목 정리</div>
       <div style="font-size:12px;color:var(--dim);margin-bottom:8px">같은 이름의 품목을 하나로 합칩니다. 수량은 합산됩니다.</div>
       ${cardsHtml}
-      <button class="rc-btn-primary" style="margin-top:12px;width:100%" onclick="_mergeAllDups()">전체 더하기</button>
+      <button type="button" class="rc-btn-primary" data-dup-action="merge-all" style="margin-top:12px;width:100%">전체 더하기</button>
     </div>`;
   panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
@@ -3609,6 +3655,10 @@ async function _showDupCleanup() {
 function _closeDupCleanup() {
   const panel = document.getElementById('reviewPanel');
   const wrap = panel.querySelector('.result-card-wrap');
+  if (wrap._dupHandlerBound) {
+    wrap.removeEventListener('click', _dupCleanupClickHandler);
+    wrap._dupHandlerBound = false;
+  }
   wrap.innerHTML = _dupOrigHTML;
   panel.style.display = 'none';
 }
