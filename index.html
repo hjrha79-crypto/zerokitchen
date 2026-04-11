@@ -79,27 +79,19 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .undo-btn{background:none;border:1px solid #e74c3c;color:#e74c3c;padding:4px 12px;border-radius:6px;font-size:12px;cursor:pointer;float:right;margin-top:6px;font-family:inherit;transition:opacity .2s}
 .undo-btn:hover{background:rgba(231,76,60,0.08)}
 .undo-btn:disabled{opacity:.3;cursor:default;border-color:#999;color:#999}
-/* 재고 그리드 */
-.inv-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.inv-card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:14px 12px;display:flex;flex-direction:column;gap:2px;cursor:pointer;transition:all .15s;-webkit-user-select:none;user-select:none}
-.inv-card:active{transform:scale(0.98)}
-.inv-card.low{border-left:3px solid var(--warn);background:rgba(192,84,10,.04)}
+/* 재고 그리드 — 한 줄에 이름/수량/단위/거래처/삭제 모두 노출 */
+.inv-grid{display:flex;flex-direction:column;gap:6px}
+.inv-card{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:10px 12px;display:flex;align-items:center;gap:10px;transition:background .1s;-webkit-user-select:none;user-select:none}
 .inv-card.zero{border-left:3px solid var(--red);background:rgba(217,48,37,.04)}
-.inv-card-main{display:flex;justify-content:space-between;align-items:center}
-.inv-card-main .inv-name{font-size:15px;font-weight:600;line-height:1.3;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.inv-card-main .inv-qty-wrap{display:flex;align-items:baseline;gap:3px;flex-shrink:0}
-.inv-card-main .inv-qty{font-size:22px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent)}
-.inv-card-main .inv-qty.low{color:var(--warn)}
-.inv-card-main .inv-qty.zero{color:var(--red)}
-.inv-card-main .inv-unit{font-size:12px;color:var(--dim)}
-.inv-card-detail{display:none;flex-direction:column;gap:6px;margin-top:8px;padding-top:8px;border-top:1px solid var(--border);animation:fadeIn .15s ease}
-.inv-card.expanded .inv-card-detail{display:flex}
-.inv-card-detail-row{display:flex;justify-content:space-between;align-items:center;font-size:12px;color:var(--dim)}
-.inv-card-detail-row span:last-child{font-weight:600;color:var(--text)}
-.inv-card-detail-acts{display:flex;gap:8px;margin-top:4px}
-.inv-card-detail-acts button{flex:1;padding:8px;border-radius:8px;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer}
-.inv-card-detail-acts .inv-act-edit{background:var(--accent-lt);border:1px solid var(--accent);color:var(--accent)}
-.inv-card-detail-acts .inv-act-del{background:var(--surface2);border:1px solid var(--border);color:var(--dim)}
+.inv-card .inv-name{font-size:14px;font-weight:600;line-height:1.3;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.inv-card .inv-qty-wrap{display:flex;align-items:baseline;gap:2px;flex-shrink:0}
+.inv-card .inv-qty{font-size:16px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent)}
+.inv-card .inv-qty.zero{color:var(--red)}
+.inv-card .inv-unit{font-size:11px;color:var(--dim)}
+.inv-card .inv-vendor-sel{flex-shrink:0;max-width:110px;border:1px solid var(--border);background:var(--bg);border-radius:6px;padding:5px 6px;font-size:12px;font-family:inherit;color:var(--text);outline:none}
+.inv-card .inv-vendor-sel:focus{border-color:var(--accent)}
+.inv-card .inv-del-btn{flex-shrink:0;width:26px;height:26px;border:none;background:transparent;color:var(--muted);font-size:14px;cursor:pointer;padding:0;line-height:1}
+.inv-card .inv-del-btn:hover{color:var(--red)}
 @keyframes fadeIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:translateY(0)}}
 .inv-unit{font-size:13px;color:var(--dim)}
 /* 발주 */
@@ -2736,32 +2728,22 @@ function formatResult(result) {
 
 
 function _renderInvCard(it, qty, tgt, cls, vName) {
-  // 카드 기본 표시: 품목명 + 수량 + 단위만.
-  // 탭 시 펼쳐지는 영역에는 거래처 드롭다운(즉시 저장) + 삭제만.
-  // 목표/최소/발주단위/수량 편집은 UI에서 제거. 수량/이름 수정은 홈 탭 자연어 입력으로 처리.
+  // 한 줄 카드: 품목명 + 수량 + 단위 + 거래처 드롭다운 + 삭제. 펼침/접힘 없음.
+  // 예: "위생장갑 1개 [쿠팡 v] 🗑"
   const vOpts = _vendors.map(v =>
     `<option value="${v.vendor_id}" ${v.vendor_id===it.vendor_id?'selected':''}>${v.vendor_name}</option>`
   ).join('');
   const safeName = it.item_name.replace(/'/g,"&#39;");
-  return `<div class="inv-card ${cls}" id="ic_${it.item_id}" onclick="toggleInvEdit(${it.item_id}, event)">
-    <div class="inv-card-main">
-      <div class="inv-name">${it.item_name}</div>
-      <div class="inv-qty-wrap">
-        <span class="inv-qty ${cls}">${qty}</span>
-        <span class="inv-unit">${it.unit||''}</span>
-      </div>
+  return `<div class="inv-card ${cls}" id="ic_${it.item_id}">
+    <div class="inv-name">${it.item_name}</div>
+    <div class="inv-qty-wrap">
+      <span class="inv-qty ${cls}">${qty}</span>
+      <span class="inv-unit">${it.unit||''}</span>
     </div>
-    <div class="inv-edit-form" id="ief_${it.item_id}">
-      <div><div class="inv-edit-label">거래처</div>
-        <select class="inv-edit-inp" id="iev_${it.item_id}" style="width:100%;padding:9px 8px" onclick="event.stopPropagation()" onchange="event.stopPropagation();_saveInvVendor(${it.item_id}, this.value)">
-          <option value="">없음</option>${vOpts}
-        </select>
-      </div>
-      <div style="display:flex;gap:6px;margin-top:6px">
-        <button class="inv-cancel-btn" style="flex:1" onclick="event.stopPropagation();toggleInvEdit(${it.item_id})">닫기</button>
-        <button class="inv-cancel-btn" style="flex:1;color:var(--red);border-color:var(--red)" onclick="event.stopPropagation();deleteInvItem(${it.item_id},'${safeName}')">삭제</button>
-      </div>
-    </div>
+    <select class="inv-vendor-sel" onchange="_saveInvVendor(${it.item_id}, this.value)">
+      <option value="">거래처</option>${vOpts}
+    </select>
+    <button class="inv-del-btn" onclick="deleteInvItem(${it.item_id},'${safeName}')" aria-label="삭제">🗑</button>
   </div>`;
 }
 
@@ -2892,30 +2874,6 @@ function renderInventory() {
   }
 }
 
-// 카드 탭 = 바로 편집창 토글 (기존 toggleInvDetail은 제거되고 이 함수 하나로 통합)
-function toggleInvEdit(id, e) {
-  const form = document.getElementById('ief_' + id);
-  const card = document.getElementById('ic_' + id);
-  if (!form || !card) return;
-  const isOpen = form.style.display === 'flex';
-  if (isOpen) {
-    form.style.display = 'none';
-    card.classList.remove('expanded');
-  } else {
-    // 다른 카드가 열려 있으면 닫고 현재 카드만 열기
-    document.querySelectorAll('.inv-card.expanded').forEach(c => {
-      if (c !== card) {
-        c.classList.remove('expanded');
-        const otherForm = c.querySelector('.inv-edit-form');
-        if (otherForm) otherForm.style.display = 'none';
-      }
-    });
-    form.style.display = 'flex';
-    card.classList.add('expanded');
-  }
-}
-// 구버전 호환: 일부 코드가 toggleInvDetail을 호출할 수 있음
-function toggleInvDetail(id, e) { return toggleInvEdit(id, e); }
 
 
 async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
