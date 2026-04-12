@@ -210,6 +210,15 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ord-vendor-assign{font-size:11px;color:var(--accent);cursor:pointer;border:1px dashed var(--accent);border-radius:6px;padding:2px 8px;background:transparent;font-family:inherit;white-space:nowrap}
 .ord-vendor-assign:hover{background:var(--accent-lt)}
 .ord-vendor-label{font-size:11px;color:var(--muted);white-space:nowrap}
+/* 주문됨 바텀시트 스타일 */
+.ord-ordered-row{padding:12px 14px;border-top:1px solid var(--border);border-left:3px solid #3b82f6;display:flex;flex-direction:column;gap:8px}
+.ord-ordered-top{display:flex;align-items:center;gap:8px}
+.ord-ordered-name{font-size:15px;font-weight:600;word-break:break-word;line-height:1.4}
+.ord-ordered-badge{font-size:11px;color:#3b82f6;font-weight:700;background:rgba(59,130,246,.1);padding:2px 8px;border-radius:6px;white-space:nowrap;flex-shrink:0}
+.ord-ordered-bottom{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.ord-qty-tap{font-size:15px;font-weight:700;cursor:pointer;padding:4px 10px;border-radius:6px;border:1px dashed var(--border);background:var(--surface2)}
+.ord-ordered-actions{display:flex;gap:6px;flex-shrink:0}
+.ord-btn-x{background:#ef4444;min-width:28px;padding:0 6px}
 /* 테스트 패널 */
 .json-inp{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;font-size:13px;font-family:'JetBrains Mono',monospace;color:var(--text);outline:none;resize:vertical;min-height:160px;line-height:1.5}
 .json-inp:focus{border-color:var(--accent)}
@@ -798,6 +807,15 @@ async function init() {
     _storeAliases = aliases || [];
     _lastRawInput = localStorage.getItem('zk_last_input_' + SID) || '';
     _updateLastInputChip();
+    // hash 기반 탭 복원
+    const hashTab = _hashTabMap[(location.hash || '').replace('#','')];
+    if (hashTab && hashTab !== 'input') {
+      const idx = ['input','inventory','order','test','observe'].indexOf(hashTab);
+      const btn = document.querySelectorAll('.nav')[idx];
+      if (btn) switchTab(hashTab, btn);
+    } else {
+      history.replaceState(null, '', '#home');
+    }
   } catch(e) {
     showToast('초기화 실패: ' + e.message);
   }
@@ -2259,6 +2277,11 @@ async function parseWithClaude(text) {
    - "입고", "들어왔어", "받았어", "추가" → inbound
    - "사용", "썼어", "차감" → consume
    - "발주", "주문" → order
+   - 중요: 액션 키워드(추가/차감/발주 등)는 바로 앞 품목에만 적용
+   - 동작 키워드가 없는 품목은 반드시 stock_check
+   - 앞 품목의 액션을 뒤 품목에 절대 전파하지 않음
+   - 예: "토마토 추가 양파 3개" → 토마토 inbound, 양파 stock_check
+   - 예: "마늘 차감 고추 발주" → 마늘 consume, 고추 order
 
 5. confidence
    - 품목명과 수량이 명확하면: high
@@ -3375,25 +3398,28 @@ async function renderOrder() {
       html += `<div class="ord-section">`;
       html += `<div class="ord-section-title"><span class="ord-icon">🚚</span> 주문 완료 · 입고 대기 <span class="ord-pending-badge" style="background:#3b82f6">${_orderedItems.length}</span></div>`;
 
+      // vendor_id 기준 그룹핑 (주문 시점 무관, 같은 거래처 하나로 묶기)
       const grpMap2 = new Map();
       for (const r of _orderedItems) {
-        const vName = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
-        if (!grpMap2.has(vName)) grpMap2.set(vName, []);
-        grpMap2.get(vName).push(r);
+        const vid = r.vendor_id || 0;
+        if (!grpMap2.has(vid)) grpMap2.set(vid, []);
+        grpMap2.get(vid).push(r);
       }
-      for (const [vName, rows] of grpMap2) {
+      for (const [vid, rows] of grpMap2) {
+        const vName = (vid && _vendors.find(v => v.vendor_id === vid)?.vendor_name) || '거래처 미지정';
         html += `<div class="ord-vendor-group">
-          <div class="ord-vendor-hdr"><span class="ord-vendor-name">${vName}</span></div>
+          <div class="ord-vendor-hdr"><span class="ord-vendor-name">${vName}</span> <span style="font-size:12px;color:#94a3b8">${rows.length}건</span></div>
           ${rows.map(r => {
-            return `<div class="ord-item-row" style="border-left:3px solid #3b82f6">
-              <div>
-                <span class="ord-item-name">${r.item_name}</span>
-                <span style="font-size:12px;color:#3b82f6;font-weight:600;margin-left:6px">주문됨</span>
+            return `<div class="ord-ordered-row">
+              <div class="ord-ordered-top">
+                <span class="ord-ordered-name">${r.item_name}</span>
+                <span class="ord-ordered-badge">주문됨</span>
               </div>
-              <div class="ord-item-right">
-                <span style="font-size:14px;font-weight:600">${r.qty}${r.unit}</span>
-                <div class="ord-status-btns">
+              <div class="ord-ordered-bottom">
+                <span class="ord-qty-tap" onclick="_inlineEditOrderQty(this,${r.id},'${r.unit}')">${r.qty}${r.unit}</span>
+                <div class="ord-ordered-actions">
                   <button class="ord-btn-done" style="background:#3b82f6" onclick="markReceived(${r.id})">입고 완료</button>
+                  <button class="ord-btn-done ord-btn-x" onclick="cancelOrder(${r.id})">✕</button>
                 </div>
               </div>
             </div>`;
@@ -4141,6 +4167,36 @@ async function cancelOrder(orderId) {
   _dismissedItemIds.add(row.item_id);
   showToast(`${row.item_name} 발주 취소됨`);
   renderOrder();
+}
+
+// 주문됨 수량 인라인 편집
+function _inlineEditOrderQty(span, orderId, unit) {
+  if (span.querySelector('input')) return; // 이미 편집중
+  const row = _orderRequests.find(r => r.id === orderId);
+  if (!row) return;
+  const oldQty = Number(row.qty);
+  const inp = document.createElement('input');
+  inp.type = 'number'; inp.inputMode = 'decimal'; inp.step = 'any';
+  inp.value = oldQty;
+  inp.style.cssText = 'width:50px;font-size:14px;font-weight:600;text-align:center;border:1px solid #3b82f6;border-radius:4px;padding:2px 4px;outline:none';
+  span.textContent = '';
+  span.appendChild(inp);
+  span.insertAdjacentText('beforeend', unit);
+  inp.focus(); inp.select();
+
+  const commit = async () => {
+    const newQty = parseFloat(inp.value);
+    if (isNaN(newQty) || newQty <= 0) { span.textContent = oldQty + unit; return; }
+    if (newQty === oldQty) { span.textContent = oldQty + unit; return; }
+    await db.from('order_requests')
+      .update({ qty: newQty, updated_at: new Date().toISOString() })
+      .eq('id', orderId);
+    row.qty = newQty;
+    span.textContent = newQty + unit;
+    showToast(`${row.item_name} 수량 → ${newQty}${unit}`);
+  };
+  inp.addEventListener('blur', commit);
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') inp.blur(); if (e.key === 'Escape') { inp.value = oldQty; inp.blur(); } });
 }
 
 // 재고 부족 제안 → 발주 등록
@@ -4919,11 +4975,18 @@ async function deleteVendor(vendorId, name) {
   showToast('🗑 거래처 삭제됨');
 }
 
+// 탭명 ↔ hash 매핑
+const _tabHashMap = { input:'home', inventory:'inventory', order:'order', test:'test', observe:'observe' };
+const _hashTabMap = { home:'input', inventory:'inventory', order:'order', test:'test', observe:'observe' };
+
 async function switchTab(n, btn) {
   document.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
   document.querySelectorAll('.nav').forEach(e=>e.classList.remove('active'));
   document.getElementById('tab-'+n).classList.add('active');
   btn.classList.add('active');
+  // hash 업데이트 (hashchange 이벤트 중복 방지)
+  const newHash = '#' + (_tabHashMap[n] || n);
+  if (location.hash !== newHash) history.replaceState(null, '', newHash);
   // 탭 전환 시 하네스/확인 카드 닫기
   const rp = document.getElementById('reviewPanel');
   if (rp) rp.style.display = 'none';
@@ -4931,6 +4994,15 @@ async function switchTab(n, btn) {
   if (n==='order') { _startOrderSession(); renderOrder(); }
   if (n==='observe') { _loadObservation(); }
 }
+
+// 브라우저 뒤로/앞으로 시 탭 전환
+window.addEventListener('hashchange', () => {
+  const tabName = _hashTabMap[location.hash.replace('#','')];
+  if (!tabName) return;
+  const idx = ['input','inventory','order','test','observe'].indexOf(tabName);
+  const btn = document.querySelectorAll('.nav')[idx];
+  if (btn) switchTab(tabName, btn);
+});
 
 // ── 관찰 탭 ──
 async function _loadObservation() {
