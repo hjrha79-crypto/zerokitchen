@@ -2283,6 +2283,22 @@ async function parseWithClaude(text) {
    - 예: "토마토 추가 양파 3개" → 토마토 inbound, 양파 stock_check
    - 예: "마늘 차감 고추 발주" → 마늘 consume, 고추 order
 
+★★★ 절대 규칙 — 예시 ★★★
+입력: "까르보나라 소스 세 개 추가 토마토 비프 소스 한 개"
+정답:
+  까르보나라 소스 → action: inbound, qty: 3
+  토마토 비프 소스 → action: stock_check, qty: 1
+오답:
+  토마토 비프 소스 → action: inbound (❌ 앞 품목의 "추가"를 전파함)
+
+입력: "양파 다섯 개 차감 당근 세 개"
+정답:
+  양파 → action: consume, qty: 5
+  당근 → action: stock_check, qty: 3
+
+"추가/차감/발주" 키워드가 없는 품목은 무조건 stock_check이다.
+앞 품목의 액션을 절대 이어받지 않는다.
+
 5. confidence
    - 품목명과 수량이 명확하면: high
    - 품목명이 불명확하거나 수량 없으면: low
