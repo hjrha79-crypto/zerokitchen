@@ -2196,19 +2196,9 @@ function ruleEngine(text) {
   const norm = _ruleNormalize(text);
   const segs = _ruleTokenize(norm);
   if (!segs.length) return { results:[], needsFallback:true, confidence:0 };
-  // 문장 끝 동작어 → 전체 적용: 마지막 세그먼트에만 action이 있고 나머지는 없으면, 마지막 action을 전체 fallback으로 사용
-  let fallbackAction = 'stock_check';
-  const segsWithAction = segs.filter(s => s.action);
-  if (segsWithAction.length === 1 && segs[segs.length - 1].action) {
-    // 마지막 세그먼트에만 동작어 → 전체 적용 (예: "치즈 3봉 양파 2kg 우유 4박스 입고")
-    fallbackAction = segs[segs.length - 1].action;
-  } else if (segsWithAction.length === 1 && segs[0].action) {
-    // 첫 번째 세그먼트에만 동작어 → 전체 적용 (예: "입고 치즈 3봉 양파 2kg")
-    fallbackAction = segs[0].action;
-  } else if (segsWithAction.length > 0) {
-    // 여러 세그먼트에 동작어 → 첫 번째 기준 (기존 로직)
-    fallbackAction = segs[0]?.action || 'stock_check';
-  }
+  // 액션 전파 금지: 각 품목에 붙은 동작어만 적용, 없으면 stock_check
+  // "추가/차감/발주" 키워드는 바로 앞 품목에만 적용되며 다음 품목에 이월하지 않음
+  const fallbackAction = 'stock_check';
   const results=[], fails=[];
   let minConf = 1;
   for (const seg of segs) {
