@@ -3355,7 +3355,7 @@ async function renderOrder() {
             const inputId = it.source === 'pending' ? `pqty_${it.order_id}` : `orec_${it.item_id}`;
             const curLabel = `현재 ${it.current_qty}${it.unit}`;
             if (it.source === 'pending') {
-              html += `<div class="ord-item-row">
+              html += `<div class="ord-item-row" data-row-oid="${it.order_id}" data-row-iid="${it.item_id}">
                 <div>
                   <span class="ord-item-name" data-editable data-order-id="${it.order_id}">${it.name}</span>
                 </div>
@@ -3374,7 +3374,7 @@ async function renderOrder() {
                 </div>
               </div>`;
             } else {
-              html += `<div class="ord-item-row">
+              html += `<div class="ord-item-row" data-row-iid="${it.item_id}">
                 <div>
                   <span class="ord-item-name">${it.name}</span>
                 </div>
@@ -3426,7 +3426,7 @@ async function renderOrder() {
         html += `<div class="ord-vendor-group">
           <div class="ord-vendor-hdr"><span class="ord-vendor-name">${vName}</span> <span style="font-size:12px;color:#94a3b8">${rows.length}건</span></div>
           ${rows.map(r => {
-            return `<div class="ord-ordered-row">
+            return `<div class="ord-ordered-row" data-row-oid="${r.id}" data-row-iid="${r.item_id}">
               <div class="ord-ordered-top">
                 <span class="ord-ordered-name">${r.item_name}</span>
                 <span class="ord-ordered-badge">주문됨</span>
@@ -3463,7 +3463,7 @@ async function renderOrder() {
         const statusText = isZero ? '부족' : '임계';
         const cardClass = isZero ? 'status-red' : 'status-orange';
         const recId = 'orec_' + it.item_id;
-        html += `<div class="ord-urgent-card ${cardClass}">
+        html += `<div class="ord-urgent-card ${cardClass}" data-row-iid="${it.item_id}">
           <div>
             <div class="ord-urgent-name">${it.name}${it.isDeferred ? (it.defer_count >= 2 ? ' <span class="ord-defer-blocked">⚠️ 이월 2회</span>' : ' <span class="ord-defer-tag">↩️ 이월</span>') : ''}</div>
             <span class="ord-urgent-status ${statusClass}">${statusText} — 현재 ${it.current_qty}${it.unit}</span>
@@ -3791,10 +3791,41 @@ async function _copyAllMerged() {
   } catch(e) { showToast('복사 실패'); }
 }
 
+// DOM에서 품목 행 제거 + 빈 그룹/섹션 정리 + 배지 카운트 업데이트
+function _removeOrderRow(el) {
+  if (!el) return;
+  const group = el.closest('.ord-vendor-group');
+  const section = el.closest('.ord-section') || el.closest('.ord-urgent-section');
+  el.remove();
+  // 그룹 내 행이 0이면 그룹 제거
+  if (group) {
+    const remaining = group.querySelectorAll('.ord-item-row, .ord-ordered-row, .ord-urgent-card');
+    if (!remaining.length) {
+      group.remove();
+    } else {
+      // 거래처 헤더 건수 업데이트
+      const cntEl = group.querySelector('.ord-vendor-hdr span[style]');
+      if (cntEl) cntEl.textContent = remaining.length + '건';
+    }
+  }
+  // 섹션 내 행이 0이면 섹션 제거
+  if (section) {
+    const rows = section.querySelectorAll('.ord-item-row, .ord-ordered-row, .ord-urgent-card');
+    if (!rows.length) {
+      section.remove();
+    } else {
+      // 섹션 타이틀 배지 업데이트
+      const badge = section.querySelector('.ord-pending-badge');
+      if (badge) badge.textContent = rows.length;
+    }
+  }
+}
+
 function _dismissSuggest(itemId) {
   _dismissedItemIds.add(itemId);
+  // DOM 직접 제거 (스크롤 유지)
+  document.querySelectorAll(`[data-row-iid="${itemId}"]`).forEach(el => _removeOrderRow(el));
   showToast('추천에서 제외됨');
-  _renderOrderKeepScroll();
 }
 
 async function _orderConfirmSuggest(itemId, name, qty, unit) {
@@ -3819,8 +3850,9 @@ async function _orderConfirmSuggest(itemId, name, qty, unit) {
     status: 'confirmed', source: 'manual_confirm'
   });
   _dismissedItemIds.add(itemId);
+  // DOM 직접 제거 (스크롤 유지)
+  document.querySelectorAll(`[data-row-iid="${itemId}"]`).forEach(el => _removeOrderRow(el));
   showToast(`${name} ${finalQty}${unit} 발주 등록됨`);
-  _renderOrderKeepScroll();
 }
 
 function _copyVendorOrder(vendorName, itemIds) {
@@ -4096,8 +4128,10 @@ async function markOrdered(orderId) {
   await db.from('order_requests')
     .update({ status: 'ordered', qty: row.qty, updated_at: new Date().toISOString() })
     .eq('id', orderId);
+  // DOM 직접 제거 (스크롤 유지)
+  const el = document.querySelector(`[data-row-oid="${orderId}"]`);
+  _removeOrderRow(el);
   showToast(`${row.item_name} ${row.qty}${row.unit} 주문 완료`);
-  _renderOrderKeepScroll();
 }
 
 // 입고 완료: ordered → done + 재고 입고
@@ -4122,8 +4156,10 @@ async function markReceived(orderId) {
     });
     item.current_qty = newQty;
   }
+  // DOM 직접 제거 (스크롤 유지)
+  const el = document.querySelector(`[data-row-oid="${orderId}"].ord-ordered-row`);
+  _removeOrderRow(el);
   showToast(`${row.item_name} ${row.qty}${row.unit} 입고 완료`);
-  _renderOrderKeepScroll();
 }
 
 // 기존 done 건 호환: completeOrder는 markOrdered로 리다이렉트
@@ -4138,8 +4174,10 @@ async function cancelOrder(orderId) {
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })
     .eq('id', orderId);
   _dismissedItemIds.add(row.item_id);
+  // DOM 직접 제거 (스크롤 유지)
+  const el = document.querySelector(`[data-row-oid="${orderId}"]`);
+  _removeOrderRow(el);
   showToast(`${row.item_name} 발주 취소됨`);
-  _renderOrderKeepScroll();
 }
 
 // 주문됨 수량 인라인 편집
