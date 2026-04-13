@@ -3298,120 +3298,115 @@ async function renderOrder() {
 
     let html = '';
 
-    // ── 거래처별 텍스트 발주 리스트 (최상단) ──
+    // ── 발주 대기: pending + suggest 통합 (거래처별 그룹) ──
     {
       console.log('[renderOrder] _pendingItems=', _pendingItems.length, '_orderedItems=', _orderedItems.length, 'suggestItems=', suggestItems.length, '_orderedItemIds=', [..._orderedItemIds]);
-      const _textSeenIds = new Set();
-      const _textAllItems = [];
-      // 1) pending order_requests (같은 item_id는 수량 합산)
+      const _mergedSeenIds = new Set();
+      const _mergedItems = [];
+      // 1) pending order_requests (같은 item_id 수량 합산)
       for (const r of _pendingItems) {
-        if (_textSeenIds.has(r.item_id)) {
-          const existing = _textAllItems.find(x => x.item_id === r.item_id);
+        if (_mergedSeenIds.has(r.item_id)) {
+          const existing = _mergedItems.find(x => x.item_id === r.item_id);
           if (existing) existing.qty += Number(r.qty);
           continue;
         }
-        _textSeenIds.add(r.item_id);
+        _mergedSeenIds.add(r.item_id);
         const it = _items.find(x => x.item_id === r.item_id);
         const unitVal = it?.unit || it?.order_unit_name || r.unit || '개';
         const vendorId = r.vendor_id || it?.vendor_id || null;
         const vendorName = vendorId ? (_vendors.find(v => v.vendor_id === vendorId)?.vendor_name || null) : null;
-        _textAllItems.push({ source: 'pending', order_id: r.id, item_id: r.item_id, name: r.item_name, qty: Number(r.qty), unit: unitVal, vendor: vendorName, vendor_id: vendorId });
+        _mergedItems.push({ source: 'pending', order_id: r.id, item_id: r.item_id, name: r.item_name, qty: Number(r.qty), unit: unitVal, vendor: vendorName, vendor_id: vendorId, current_qty: it ? Number(it.current_qty) : 0 });
       }
       // 2) suggestItems (pending/ordered에 이미 있는 item_id 제외)
       for (const s of suggestItems) {
-        if (_textSeenIds.has(s.item_id)) continue;
-        if (_orderedItemIds.has(s.item_id)) {
-          console.log('[renderOrder] suggest 제외 (이미 ordered):', s.item_id, s.name);
-          continue;
-        }
-        _textSeenIds.add(s.item_id);
+        if (_mergedSeenIds.has(s.item_id)) continue;
+        if (_orderedItemIds.has(s.item_id)) continue;
+        _mergedSeenIds.add(s.item_id);
         const it = _items.find(x => x.item_id === s.item_id);
         const unitVal = it?.order_unit_name || s.unit || '개';
         const sVendorId = s.vendor_id || it?.vendor_id || null;
-        _textAllItems.push({ source: 'suggest', order_id: null, item_id: s.item_id, name: s.name, qty: s.suggested_qty, unit: unitVal, vendor: s.vendor || null, vendor_id: sVendorId });
+        _mergedItems.push({ source: 'suggest', order_id: null, item_id: s.item_id, name: s.name, qty: s.suggested_qty, unit: unitVal, vendor: s.vendor || null, vendor_id: sVendorId, current_qty: s.current_qty });
       }
-      // 복사 핸들러에서 참조할 캐시
-      window._textOrderCache = _textAllItems;
-      if (!_textAllItems.length) {
-        html += `<div style="font-size:14px;color:#999;padding:12px 0">발주 필요 품목 없음</div>`;
-      } else {
-        const _textGroups = new Map();
-        for (const it of _textAllItems) {
-          const key = it.vendor || '미분류';
-          if (!_textGroups.has(key)) _textGroups.set(key, []);
-          _textGroups.get(key).push(it);
+      window._textOrderCache = _mergedItems;
+
+      if (_mergedItems.length) {
+        // 거래처별 그룹핑
+        const _mergedGroups = new Map();
+        for (const it of _mergedItems) {
+          const key = it.vendor || '거래처 미지정';
+          if (!_mergedGroups.has(key)) _mergedGroups.set(key, []);
+          _mergedGroups.get(key).push(it);
         }
-        const _textSorted = [..._textGroups.entries()].sort((a, b) => {
-          if (a[0] === '미분류') return 1;
-          if (b[0] === '미분류') return -1;
+        const _mergedSorted = [..._mergedGroups.entries()].sort((a, b) => {
+          if (a[0] === '거래처 미지정') return 1;
+          if (b[0] === '거래처 미지정') return -1;
           return a[0] < b[0] ? -1 : 1;
         });
-        html += `<div style="font-size:18px;font-weight:700;margin-bottom:12px">📋 발주 리스트</div>`;
-        for (const [vName, items] of _textSorted) {
-          html += `<div style="font-size:14px;font-weight:600;color:#666;margin-top:16px">[${vName}]</div>`;
+
+        html += `<div class="ord-section">`;
+        html += `<div class="ord-section-title"><span class="ord-icon">📋</span> 발주 대기 <span class="ord-pending-badge">${_mergedItems.length}</span></div>`;
+        for (const [vName, items] of _mergedSorted) {
+          html += `<div class="ord-vendor-group">
+            <div class="ord-vendor-hdr">
+              <span class="ord-vendor-name">${vName}</span>
+              <span style="font-size:12px;color:var(--muted)">${items.length}건</span>
+            </div>`;
           for (const it of items) {
-            html += `<div style="font-size:16px;padding:6px 0" data-textorder-vendor="${vName}">${it.name} ${it.qty}${it.unit}</div>`;
+            const inputId = it.source === 'pending' ? `pqty_${it.order_id}` : `orec_${it.item_id}`;
+            const curLabel = `현재 ${it.current_qty}${it.unit}`;
+            if (it.source === 'pending') {
+              html += `<div class="ord-item-row">
+                <div>
+                  <span class="ord-item-name" data-editable data-order-id="${it.order_id}">${it.name}</span>
+                </div>
+                <div class="ord-item-right">
+                  <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                    <span style="font-size:12px;color:var(--dim)">${curLabel} /</span>
+                    <button class="ord-stepper-btn" onclick="_updatePendingQty(${it.order_id},-1)">−</button>
+                    <input class="ord-stepper-val" id="${inputId}" type="number" value="${it.qty}" style="width:40px" data-item-id="${it.item_id}" data-name="${it.name}" data-unit="${it.unit}" data-vendor-id="${it.vendor_id || ''}" onchange="_savePendingQty(${it.order_id})">
+                    <button class="ord-stepper-btn" onclick="_updatePendingQty(${it.order_id},1)">+</button>
+                    <span style="font-size:12px;color:var(--dim)">${it.unit}</span>
+                  </div>
+                  <div class="ord-status-btns">
+                    <button class="ord-btn-done" onclick="markOrdered(${it.order_id})">주문 완료</button>
+                    <button class="ord-btn-cancel" onclick="cancelOrder(${it.order_id})">✕</button>
+                  </div>
+                </div>
+              </div>`;
+            } else {
+              html += `<div class="ord-item-row">
+                <div>
+                  <span class="ord-item-name">${it.name}</span>
+                </div>
+                <div class="ord-item-right">
+                  <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
+                    <span style="font-size:12px;color:var(--dim)">${curLabel} /</span>
+                    <button class="ord-stepper-btn" onclick="_ordStep('${inputId}',-1)">−</button>
+                    <input class="ord-stepper-val" id="${inputId}" type="number" value="${it.qty}" style="width:40px" data-item-id="${it.item_id}" data-name="${it.name}" data-unit="${it.unit}" data-vendor-id="${it.vendor_id || ''}" data-source="target_based">
+                    <button class="ord-stepper-btn" onclick="_ordStep('${inputId}',1)">+</button>
+                    <span style="font-size:12px;color:var(--dim)">${it.unit}</span>
+                  </div>
+                  <div class="ord-status-btns">
+                    <button class="ord-btn-done" onclick="_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.qty},'${it.unit}')">발주완료</button>
+                    <button class="ord-btn-cancel" onclick="_dismissSuggest(${it.item_id})">✕</button>
+                  </div>
+                </div>
+              </div>`;
+            }
           }
-          html += `<button style="width:100%;padding:12px;background:#222;color:#fff;border:none;border-radius:8px;font-size:14px;margin-top:8px;cursor:pointer;font-family:inherit" onclick="_copyOrderText(this,'${vName.replace(/'/g,"\\'")}')">📋 ${vName} 복사</button>`;
+          html += `<div style="padding:8px 12px">
+            <button class="ord-btn-kakao" style="width:100%;padding:10px;border-radius:8px;font-size:13px" onclick="_copyVendorMerged('${vName.replace(/'/g,"\\'")}')">📋 ${vName} 복사</button>
+          </div>`;
+          html += `</div>`;
         }
-        html += `<button style="width:100%;padding:12px;background:#222;color:#fff;border:none;border-radius:8px;font-size:14px;margin-top:16px;cursor:pointer;font-family:inherit" onclick="_copyOrderTextAll()">📋 전체 복사</button>`;
+        html += `<div style="padding:8px 12px">
+          <button style="width:100%;padding:12px;background:#222;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit" onclick="_copyAllMerged()">📋 전체 복사</button>
+        </div>`;
+        html += `</div>`;
+      } else if (!_orderedItems.length) {
+        html += `<div style="font-size:14px;color:#999;padding:12px 0">발주 필요 품목 없음</div>`;
       }
       html += `<div style="font-size:13px;color:#999;text-align:center;margin-top:16px">제로키친은 사용할수록 정확한 발주를 도와드립니다</div>`;
-      html += `<div style="border-bottom:1px solid #ddd;margin:24px 0"></div>`;
-    }
-
-    // ── Section A: 발주 대기 (pending) ──
-    if (_pendingItems.length) {
-      html += `<div class="ord-section">`;
-      html += `<div class="ord-section-title"><span class="ord-icon">📋</span> 발주 대기 <span class="ord-pending-badge">${_pendingItems.length}</span></div>`;
-
-      const grpMap = new Map();
-      for (const r of _pendingItems) {
-        const vName = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
-        if (!grpMap.has(vName)) grpMap.set(vName, []);
-        grpMap.get(vName).push(r);
-      }
-
-      for (const [vName, rows] of grpMap) {
-        html += `
-        <div class="ord-vendor-group">
-          <div class="ord-vendor-hdr">
-            <span class="ord-vendor-name">${vName}</span>
-          </div>
-          ${rows.map(r => {
-            const item = _items.find(it => it.item_id === r.item_id);
-            const curQty = item ? Number(item.current_qty) : '?';
-            const rVendor = _vendors.find(v => v.vendor_id === r.vendor_id);
-            const vendorDisplay = rVendor
-              ? `<button class="ord-vendor-assign" data-vendor-change="${r.id}" data-item-name="${r.item_name}" data-current-vendor="${rVendor.vendor_name}">${rVendor.vendor_name}</button>`
-              : `<button class="ord-vendor-assign" data-vendor-assign="${r.id}">거래처 지정</button>`;
-            return `
-          <div class="ord-item-row">
-            <div>
-              <span class="ord-item-name" data-editable data-order-id="${r.id}">${r.item_name}</span>
-              ${vendorDisplay}
-            </div>
-            <div class="ord-item-right">
-              <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
-                <span style="font-size:12px;color:var(--dim)">현재 ${curQty}${r.unit} / 발주</span>
-                <button class="ord-stepper-btn" onclick="_updatePendingQty(${r.id},-1)">−</button>
-                <input class="ord-stepper-val" id="pqty_${r.id}" type="number" value="${r.qty}" style="width:40px" onchange="_savePendingQty(${r.id})">
-                <button class="ord-stepper-btn" onclick="_updatePendingQty(${r.id},1)">+</button>
-                <span style="font-size:12px;color:var(--dim)">${r.unit}</span>
-              </div>
-              <div class="ord-status-btns">
-                <button class="ord-btn-done" onclick="markOrdered(${r.id})">주문 완료</button>
-                <button class="ord-btn-cancel" onclick="cancelOrder(${r.id})">취소</button>
-              </div>
-            </div>
-          </div>`;
-          }).join('')}
-          <div style="padding:8px 12px">
-            <button class="ord-btn-kakao" style="width:100%;padding:10px;border-radius:8px;font-size:13px" onclick="_copyPendingOrder('${vName.replace(/'/g,"\\'")}')">📋 ${vName} 발주 복사</button>
-          </div>
-        </div>`;
-      }
-      html += `</div>`;
     }
 
     // ── Section A2: 주문 완료 (ordered — 입고 대기) ──
@@ -3450,19 +3445,14 @@ async function renderOrder() {
       html += `</div>`;
     }
 
-    // ── Section B: 오늘의 발주 추천 ──
+    // ── Section B: TOP N 긴급 발주 ──
     if (suggestItems.length) {
-      // 긴급(재고 0) 최상단 정렬
       suggestItems.sort((a, b) => {
         if (a.current_qty <= 0 && b.current_qty > 0) return -1;
         if (a.current_qty > 0 && b.current_qty <= 0) return 1;
         return a.name < b.name ? -1 : 1;
       });
-
       const top5 = suggestItems.slice(0, 5);
-      const restItems = suggestItems.slice(5);
-
-      // ── Section B1: TOP 5 긴급 발주 ──
       html += `<div class="ord-urgent-section">`;
       html += `<div class="ord-urgent-title">🚨 TOP ${top5.length} 긴급 발주</div>`;
       for (const it of top5) {
@@ -3488,65 +3478,6 @@ async function renderOrder() {
         </div>`;
       }
       html += `</div>`;
-
-
-
-      // ── Section B2: 전체 보기 (항상 표시, 접힘 토글) ──
-      const top5Ids = new Set(top5.map(t => t.item_id));
-      html += `<div class="ord-section">`;
-      html += `<div class="ord-toggle-row" onclick="_toggleSuggestAll()">
-        <span class="ord-toggle-label">📋 전체 보기 (${suggestItems.length}개)</span>
-        <span class="ord-toggle-arrow" id="suggestAllArrow">▼</span>
-      </div>`;
-      html += `<div class="ord-suggest-collapse" id="suggestAllBody">`;
-
-      const suggestGrp = new Map();
-      for (const it of suggestItems) {
-        const key = it.vendor || '거래처 미지정';
-        if (!suggestGrp.has(key)) suggestGrp.set(key, []);
-        suggestGrp.get(key).push(it);
-      }
-
-      for (const [vName, items] of suggestGrp) {
-        html += `<div class="ord-vendor-group ord-suggest-group">
-          <div class="ord-vendor-hdr">
-            <span class="ord-vendor-name">${vName}</span>
-            <span style="font-size:12px;color:var(--muted)">${items.length}개</span>
-          </div>`;
-        for (const it of items) {
-          const isUrgent = it.current_qty <= 0;
-          const inTop5 = top5Ids.has(it.item_id);
-          const recId = inTop5 ? ('oall_' + it.item_id) : ('orec_' + it.item_id);
-          html += `<div class="ord-recommend-card${isUrgent ? ' urgent' : ''}">
-            <div class="ord-rec-left">
-              <div class="ord-rec-name">${isUrgent ? '🔴 ' : ''}${it.name}${it.isDeferred ? (it.defer_count >= 2 ? ' <span class="ord-defer-blocked">⚠️ 이월 2회</span>' : ' <span class="ord-defer-tag">↩️ 이월</span>') : ''}</div>
-              <div class="ord-rec-info">현재 ${it.current_qty}${it.unit}</div>
-              <div class="ord-rec-source">(${it.source === 'consumption_based' ? '일평균 ' + it.avg + it.unit : it.source === 'stockout' ? '재고 없음 — 수량 직접 입력' : '목표재고 기준'})</div>
-            </div>
-            <div class="ord-rec-right">
-              <button class="ord-stepper-btn" onclick="_ordStep('${recId}',-1)">−</button>
-              <input class="ord-stepper-val${inTop5 ? ' ord-dup' : ''}" id="${recId}" type="number" value="${it.suggested_qty}" data-item-id="${it.item_id}" data-name="${it.name}" data-unit="${it.unit}" data-vendor-id="${it.vendor_id || ''}" data-source="${it.source || 'target_based'}">
-              <button class="ord-stepper-btn" onclick="_ordStep('${recId}',1)">+</button>
-              <span class="ord-rec-unit">${it.unit}${it.unitLabel ? ' <span style="color:var(--muted);font-size:11px">' + it.unitLabel + '</span>' : ''}</span>
-            </div>
-            <div style="display:flex;gap:6px;margin-top:6px">
-              <button style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--dim);font-size:11px;cursor:pointer;font-family:inherit" onclick="_dismissSuggest(${it.item_id})">제외</button>
-              <button style="flex:1;padding:6px;border:1px solid var(--accent);border-radius:6px;background:var(--accent-lt);color:var(--accent);font-size:11px;cursor:pointer;font-family:inherit" onclick="_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.suggested_qty},'${it.unit}')">발주완료</button>
-            </div>
-          </div>`;
-        }
-        const vendorItemIds = items.map(it => it.item_id);
-        html += `<div style="padding:8px 12px">
-          <button class="ord-btn-kakao" style="width:100%;padding:10px;border-radius:8px;font-size:13px" onclick="_copyVendorOrder('${vName.replace(/'/g,"\\'")}', [${vendorItemIds.join(',')}])">📋 ${vName} 발주 복사</button>
-        </div>`;
-        html += `</div>`;
-      }
-
-      html += `<div class="ord-today-actions">
-        <button class="ord-btn-confirm-all" onclick="_confirmAllOrders()">전체 발주 확인</button>
-        <button style="background:var(--surface2);border:1px solid var(--border);color:var(--dim)" onclick="_deferAllOrders()">내일로 이월</button>
-      </div>`;
-      html += `</div></div>`;
     }
 
     list.innerHTML = html;
@@ -3813,34 +3744,49 @@ async function _savePendingQty(orderId) {
   if (r) r.qty = qty;
 }
 
-async function _copyPendingOrder(vendorName) {
-  const items = _orderRequests.filter(r => {
-    const vn = _vendors.find(v => v.vendor_id === r.vendor_id)?.vendor_name || '거래처 미지정';
-    return vn === vendorName && r.status === 'pending';
-  });
-  if (!items.length) { showToast('발주 품목이 없습니다'); return; }
+// 거래처별 복사 (텍스트만, 상태 변경 없음)
+async function _copyVendorMerged(vendorName) {
+  const cache = window._textOrderCache || [];
+  const items = cache.filter(x => (x.vendor || '거래처 미지정') === vendorName);
   const lines = [];
-  const idsToOrder = [];
-  for (const r of items) {
-    const inp = document.getElementById('pqty_' + r.id);
-    const qty = inp ? parseInt(inp.value) || 0 : Number(r.qty);
+  for (const it of items) {
+    const inp = document.getElementById(it.source === 'pending' ? `pqty_${it.order_id}` : `orec_${it.item_id}`);
+    const qty = inp ? (parseInt(inp.value) || 0) : it.qty;
     if (qty <= 0) continue;
-    lines.push(`${r.item_name} ${qty}${r.unit}`);
-    idsToOrder.push(r.id);
+    lines.push(`${it.name} ${qty}${it.unit}`);
   }
-  if (!lines.length) { showToast('발주 품목이 없습니다'); return; }
-  const text = `[발주]\n${lines.join('\n')}`;
+  if (!lines.length) { showToast('복사할 품목이 없습니다'); return; }
   try {
-    await navigator.clipboard.writeText(text);
-  } catch(e) { showToast('복사 실패'); return; }
-  // pending → ordered 자동 전환
-  if (idsToOrder.length) {
-    await db.from('order_requests')
-      .update({ status: 'ordered', updated_at: new Date().toISOString() })
-      .in('id', idsToOrder);
+    await navigator.clipboard.writeText(lines.join('\n'));
+    showToast('📋 복사 완료', 2000);
+  } catch(e) { showToast('복사 실패'); }
+}
+
+// 전체 복사 (텍스트만, 상태 변경 없음)
+async function _copyAllMerged() {
+  const cache = window._textOrderCache || [];
+  const groups = new Map();
+  for (const it of cache) {
+    const key = it.vendor || '거래처 미지정';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
   }
-  showToast(`📋 복사 완료 · ${idsToOrder.length}건 주문 완료 처리됨`, 3000);
-  _renderOrderKeepScroll();
+  const parts = [];
+  for (const [vendor, items] of groups) {
+    const lines = [];
+    for (const it of items) {
+      const inp = document.getElementById(it.source === 'pending' ? `pqty_${it.order_id}` : `orec_${it.item_id}`);
+      const qty = inp ? (parseInt(inp.value) || 0) : it.qty;
+      if (qty <= 0) continue;
+      lines.push(`${it.name} ${qty}${it.unit}`);
+    }
+    if (lines.length) parts.push(`[${vendor}]\n${lines.join('\n')}`);
+  }
+  if (!parts.length) { showToast('복사할 품목이 없습니다'); return; }
+  try {
+    await navigator.clipboard.writeText(parts.join('\n\n'));
+    showToast('📋 전체 복사 완료', 2000);
+  } catch(e) { showToast('복사 실패'); }
 }
 
 function _dismissSuggest(itemId) {
