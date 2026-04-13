@@ -3445,14 +3445,16 @@ async function renderOrder() {
       html += `</div>`;
     }
 
-    // ── Section B: TOP N 긴급 발주 ──
-    if (suggestItems.length) {
-      suggestItems.sort((a, b) => {
+    // ── Section B: TOP N 긴급 발주 (발주 대기에 이미 있는 pending 품목 제외) ──
+    const _pendingIds = new Set(_pendingItems.map(r => r.item_id));
+    const _topCandidates = suggestItems.filter(s => !_pendingIds.has(s.item_id));
+    if (_topCandidates.length) {
+      _topCandidates.sort((a, b) => {
         if (a.current_qty <= 0 && b.current_qty > 0) return -1;
         if (a.current_qty > 0 && b.current_qty <= 0) return 1;
         return a.name < b.name ? -1 : 1;
       });
-      const top5 = suggestItems.slice(0, 5);
+      const top5 = _topCandidates.slice(0, 5);
       html += `<div class="ord-urgent-section">`;
       html += `<div class="ord-urgent-title">🚨 TOP ${top5.length} 긴급 발주</div>`;
       for (const it of top5) {
