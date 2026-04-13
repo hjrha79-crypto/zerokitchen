@@ -3188,7 +3188,8 @@ function _calcOrderQty(currentQty, targetQty, consumption, orderUnitQty) {
 async function _renderOrderKeepScroll() {
   const sy = window.scrollY;
   await renderOrder();
-  requestAnimationFrame(() => window.scrollTo(0, sy));
+  // double-rAF: 레이아웃 완료 후 복원
+  requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, sy)));
 }
 
 async function renderOrder() {
