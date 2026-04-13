@@ -4,11 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
 <meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#ffffff">
 <title>ZeroKitchen</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 <style>
 :root {
-  --bg:#f0f4f1; --surface:#fff; --surface2:#e8ede9; --border:#d4ddd6;
+  --bg:#ffffff; --surface:#fff; --surface2:#e8ede9; --border:#d4ddd6;
   --text:#1a2b1e; --dim:#4a6650; --muted:#8aa090;
   --accent:#1a7a4a; --accent-lt:#e6f4ec; --accent-dim:rgba(26,122,74,.1);
   --warn:#c0540a; --warn-dim:rgba(192,84,10,.1); --red:#d93025;
@@ -764,6 +765,7 @@ let _stores = [];      // 전체 매장 목록
 let _currentSessionId = null;
 let _sessionStartedAt = null;
 let _dismissedItemIds = new Set();  // 이번 세션에서 취소/이월한 품목
+let _orderedItemIds = new Set();    // pending/ordered 상태인 품목 (중복 발주 방지)
 let _storeAliases = [];  // 매장별 alias 캐시
 
 /*  order_requests 테이블 (Supabase SQL Editor에서 실행):
@@ -802,6 +804,10 @@ async function init() {
 
     _renderStoreTabs();
     await refreshItems();
+    // pending/ordered 품목 ID 초기 로드 (중복 발주 방지)
+    const { data: _initOrders } = await db.from('order_requests')
+      .select('item_id').eq('store_id', SID).in('status', ['pending', 'ordered']);
+    _orderedItemIds = new Set((_initOrders || []).map(r => r.item_id));
     // store_aliases 로드
     const { data: aliases } = await db.from('store_aliases').select('*').eq('store_id', SID);
     _storeAliases = aliases || [];
@@ -853,6 +859,7 @@ async function _switchStore(storeId) {
   _vendors = [];
   _orderRequests = [];
   _dismissedItemIds = new Set();
+  _orderedItemIds = new Set();
   await refreshItems();
     const { data: aliases } = await db.from('store_aliases').select('*').eq('store_id', SID);
     _storeAliases = aliases || [];
@@ -3177,6 +3184,13 @@ function _calcOrderQty(currentQty, targetQty, consumption, orderUnitQty) {
   return { qty, rawQty, source, avg };
 }
 
+// 스크롤 위치 보존 renderOrder 래퍼
+async function _renderOrderKeepScroll() {
+  const sy = window.scrollY;
+  await renderOrder();
+  requestAnimationFrame(() => window.scrollTo(0, sy));
+}
+
 async function renderOrder() {
   const list = document.getElementById('orderList');
   list.innerHTML = '<div class="no-item"><span class="spin" style="border-color:var(--border);border-top-color:var(--accent)"></span></div>';
@@ -3188,6 +3202,8 @@ async function renderOrder() {
       .order('created_at', { ascending: false });
     if (oErr) throw oErr;
     _orderRequests = (pendingRows || []).filter(r => Number(r.qty) > 0);
+    // 전역 _orderedItemIds 갱신 (pending + ordered 품목)
+    _orderedItemIds = new Set(_orderRequests.map(r => r.item_id));
     const _pendingItems = _orderRequests.filter(r => r.status === 'pending');
     const _orderedItems = _orderRequests.filter(r => r.status === 'ordered');
 
@@ -3204,10 +3220,9 @@ async function renderOrder() {
 
     // 2) 재고 부족 품목 (자동 제안용) — 추천 기준: current_qty <= 0 만
     await refreshItems();
-    const pendingItemIds = new Set(_pendingItems.map(r => r.item_id).concat(_orderedItems.map(r => r.item_id)));
     const needItems = _items.filter(it =>
       Number(it.current_qty) <= 0 &&
-      !pendingItemIds.has(it.item_id) &&
+      !_orderedItemIds.has(it.item_id) &&
       !_dismissedItemIds.has(it.item_id)
     );
     const suggestItems = [];
@@ -3238,7 +3253,7 @@ async function renderOrder() {
     // 이월 품목 합치기 (중복 제거 + dismissed 체크 + 이미 pending/ordered인 건 제외)
     for (const def of _deferredItems) {
       if (_dismissedItemIds.has(def.item_id)) continue; // 제외/발주완료한 이월 품목 skip
-      if (pendingItemIds.has(def.item_id)) continue; // 이미 pending/ordered 상태면 skip
+      if (_orderedItemIds.has(def.item_id)) continue; // 이미 pending/ordered 상태면 skip
       const existing = suggestItems.find(s => s.item_id === def.item_id);
       if (existing) {
         // 재고 변동 반영하여 수량 재계산
@@ -3284,7 +3299,6 @@ async function renderOrder() {
 
     // ── 거래처별 텍스트 발주 리스트 (최상단) ──
     {
-      const _orderedItemIds = new Set(_orderedItems.map(r => r.item_id));
       console.log('[renderOrder] _pendingItems=', _pendingItems.length, '_orderedItems=', _orderedItems.length, 'suggestItems=', suggestItems.length, '_orderedItemIds=', [..._orderedItemIds]);
       const _textSeenIds = new Set();
       const _textAllItems = [];
@@ -3825,13 +3839,13 @@ async function _copyPendingOrder(vendorName) {
       .in('id', idsToOrder);
   }
   showToast(`📋 복사 완료 · ${idsToOrder.length}건 주문 완료 처리됨`, 3000);
-  renderOrder();
+  _renderOrderKeepScroll();
 }
 
 function _dismissSuggest(itemId) {
   _dismissedItemIds.add(itemId);
   showToast('추천에서 제외됨');
-  renderOrder();
+  _renderOrderKeepScroll();
 }
 
 async function _orderConfirmSuggest(itemId, name, qty, unit) {
@@ -3846,6 +3860,7 @@ async function _orderConfirmSuggest(itemId, name, qty, unit) {
     qty: finalQty, unit: unit, vendor_id: vendorId, status: 'pending'
   });
   if (skipped) { showToast(`${name} 이미 발주 중`); return; }
+  _orderedItemIds.add(itemId);
   const today = new Date().toISOString().slice(0, 10);
   await db.from('daily_orders').insert({
     store_id: SID, order_date: today,
@@ -3856,7 +3871,7 @@ async function _orderConfirmSuggest(itemId, name, qty, unit) {
   });
   _dismissedItemIds.add(itemId);
   showToast(`${name} ${finalQty}${unit} 발주 등록됨`);
-  renderOrder();
+  _renderOrderKeepScroll();
 }
 
 function _copyVendorOrder(vendorName, itemIds) {
@@ -3919,6 +3934,8 @@ async function _markTextItemsAsOrdered(items) {
     status: 'ordered'
   }));
   console.log('[copyOrder] UPDATE ids=', updateIds, 'INSERT rows=', insertRows);
+  // 즉시 _orderedItemIds에 추가 (중복 제안 방지)
+  for (const x of items) _orderedItemIds.add(x.item_id);
 
   let updated = 0, inserted = 0;
   if (updateIds.length) {
@@ -3965,7 +3982,7 @@ async function _copyOrderText(btn, vendorName) {
   const n = await _markTextItemsAsOrdered(items);
   showToast(n > 0 ? `복사 완료 · ${n}건 주문 완료` : '복사 완료', 2000);
   console.log('[copyOrder] renderOrder() 호출 직전');
-  await renderOrder();
+  await _renderOrderKeepScroll();
   console.log('[copyOrder] renderOrder() 완료');
 }
 
@@ -3987,7 +4004,7 @@ async function _copyOrderTextAll() {
   const allItems = window._textOrderCache || [];
   const total = await _markTextItemsAsOrdered(allItems);
   showToast(total > 0 ? `복사 완료 · ${total}건 주문 완료` : '복사 완료', 2000);
-  await renderOrder();
+  await _renderOrderKeepScroll();
 }
 
 async function _confirmAllOrders() {
@@ -4012,6 +4029,7 @@ async function _confirmAllOrders() {
       qty: qty, unit: unit, vendor_id: vendorId, status: 'pending'
     });
     if (_dup) continue;
+    _orderedItemIds.add(itemId);
 
     // daily_orders에 기록
     const editCount = Math.abs((parseInt(inp.defaultValue) || 0) - qty);
@@ -4037,7 +4055,7 @@ async function _confirmAllOrders() {
   await _endOrderSession();
   if (count) {
     showToast(`${count}개 품목 발주 등록됨`);
-    renderOrder();
+    _renderOrderKeepScroll();
   } else {
     showToast('발주할 품목이 없습니다');
   }
@@ -4102,7 +4120,7 @@ async function _deferAllOrders() {
   }
   if (!msg) msg = '이월할 품목이 없습니다';
   showToast(msg, 3000);
-  renderOrder();
+  _renderOrderKeepScroll();
 }
 
 // 중복 발주 방지: 같은 store_id+item_id로 pending/ordered 건이 있으면 INSERT 스킵
@@ -4130,7 +4148,7 @@ async function markOrdered(orderId) {
     .update({ status: 'ordered', qty: row.qty, updated_at: new Date().toISOString() })
     .eq('id', orderId);
   showToast(`${row.item_name} ${row.qty}${row.unit} 주문 완료`);
-  renderOrder();
+  _renderOrderKeepScroll();
 }
 
 // 입고 완료: ordered → done + 재고 입고
@@ -4156,7 +4174,7 @@ async function markReceived(orderId) {
     item.current_qty = newQty;
   }
   showToast(`${row.item_name} ${row.qty}${row.unit} 입고 완료`);
-  renderOrder();
+  _renderOrderKeepScroll();
 }
 
 // 기존 done 건 호환: completeOrder는 markOrdered로 리다이렉트
@@ -4172,7 +4190,7 @@ async function cancelOrder(orderId) {
     .eq('id', orderId);
   _dismissedItemIds.add(row.item_id);
   showToast(`${row.item_name} 발주 취소됨`);
-  renderOrder();
+  _renderOrderKeepScroll();
 }
 
 // 주문됨 수량 인라인 편집
@@ -4212,9 +4230,10 @@ async function createOrderFromSuggest(itemId, itemName, qty, unit, vendorId) {
     store_id: SID, item_id: itemId, item_name: itemName,
     qty: qty, unit: unit, vendor_id: vendorId, status: 'pending'
   });
-  if (skipped) { showToast(`${itemName} 이미 발주 중`); renderOrder(); return; }
+  if (skipped) { showToast(`${itemName} 이미 발주 중`); _renderOrderKeepScroll(); return; }
+  _orderedItemIds.add(itemId);
   showToast(`${itemName} ${qty}${unit} 발주 등록됨`);
-  renderOrder();
+  _renderOrderKeepScroll();
 }
 
 // 이벤트 위임: orderList 컨테이너에서 클릭 처리 (재렌더링 후에도 동작)
@@ -4246,7 +4265,7 @@ document.addEventListener('click', function(e) {
         await db.from('order_requests').update({ item_name: newName, updated_at: new Date().toISOString() }).eq('id', orderId);
         showToast('품목명 수정됨');
       }
-      renderOrder();
+      _renderOrderKeepScroll();
     }
     input.addEventListener('blur', save);
     input.addEventListener('keydown', function(ev) {
@@ -4275,10 +4294,10 @@ document.addEventListener('click', function(e) {
         await db.from('order_requests').update({ vendor_id: vid, updated_at: new Date().toISOString() }).eq('id', orderId);
         showToast('거래처 지정됨');
       }
-      renderOrder();
+      _renderOrderKeepScroll();
     }
     sel.addEventListener('change', pick);
-    sel.addEventListener('blur', function() { if (!picked) renderOrder(); });
+    sel.addEventListener('blur', function() { if (!picked) _renderOrderKeepScroll(); });
     return;
   }
 
@@ -4308,7 +4327,7 @@ document.addEventListener('click', function(e) {
         const vid = parseInt(btn.dataset.vid);
         await db.from('order_requests').update({ vendor_id: vid, updated_at: new Date().toISOString() }).eq('id', orderId);
         showToast('거래처 변경됨');
-        renderOrder();
+        _renderOrderKeepScroll();
       };
     });
     return;
@@ -4348,7 +4367,7 @@ async function saveOrderMethod(vendorId, method, vendorName) {
   }
   const badge = document.getElementById('mbadge_' + (vendorId || vendorName));
   if (badge) badge.textContent = m.icon + ' ' + m.label;
-  renderOrder();
+  _renderOrderKeepScroll();
   showToast('발주 방식 저장됨');
 }
 
