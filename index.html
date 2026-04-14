@@ -3081,18 +3081,21 @@ async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
   renderInventory();
 }
 
-// 품목 삭제 공통: items DELETE + order_requests 정리 + 메모리 제거
+// 품목 삭제 공통: order_requests 먼저 삭제 → items DELETE → 메모리 제거
 async function _deleteItemAndCleanup(itemId) {
-  console.log('[DELETE] items.delete() 요청 item_id=', itemId);
-  const { data: delData, error: delErr } = await db.from('items').delete().eq('item_id', itemId).select();
-  console.log('[DELETE] items 응답:', delErr ? `ERROR: ${delErr.message}` : `삭제됨 ${delData?.length || 0}건`, delData);
-  if (delErr) throw new Error(`items 삭제 실패: ${delErr.message}`);
+  console.log('[DELETE] 요청 item_id=', itemId);
 
-  const { error: orErr } = await db.from('order_requests')
-    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-    .eq('store_id', SID).eq('item_id', itemId)
-    .in('status', ['pending', 'ordered']);
-  if (orErr) console.warn('[DELETE] order_requests 정리 실패:', orErr.message);
+  // 1) order_requests 먼저 삭제 (items FK 참조 전에 정리)
+  const { data: orData, error: orErr } = await db.from('order_requests')
+    .delete().eq('store_id', SID).eq('item_id', itemId)
+    .in('status', ['pending', 'ordered']).select();
+  console.log('[DELETE] order_requests:', orErr ? `ERROR: ${orErr.message}` : `삭제 ${orData?.length || 0}건`);
+  if (orErr) console.warn('[DELETE] order_requests 삭제 실패:', orErr.message);
+
+  // 2) items 삭제
+  const { data: delData, error: delErr } = await db.from('items').delete().eq('item_id', itemId).select();
+  console.log('[DELETE] items:', delErr ? `ERROR: ${delErr.message}` : `삭제 ${delData?.length || 0}건`, delData);
+  if (delErr) throw new Error(`items 삭제 실패: ${delErr.message}`);
 
   _items = _items.filter(x => x.item_id !== itemId);
 }
