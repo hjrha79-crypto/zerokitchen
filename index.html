@@ -42,7 +42,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 /* 입력탭: 채팅 구조 */
 #tab-input{display:none;flex-direction:column;padding:0 14px 14px;padding-bottom:80px}
 #tab-input.active{display:flex}
-#tab-input .chat-area{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:14px 0}
+#tab-input .chat-area{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:14px 0;scroll-padding-bottom:72px}
 .chat-bubble{max-width:85%;padding:11px 14px;border-radius:14px;font-size:14px;line-height:1.5;word-break:break-word}
 .chat-bubble.system{align-self:flex-start;background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:4px}
 .chat-bubble.user{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
@@ -210,6 +210,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ord-inline-input{background:var(--surface2);border:1px solid var(--accent);border-radius:6px;padding:3px 8px;font-size:13px;font-family:inherit;color:var(--text);outline:none;width:auto;min-width:60px;max-width:140px}
 .ord-vendor-assign{font-size:11px;color:var(--accent);cursor:pointer;border:1px dashed var(--accent);border-radius:6px;padding:2px 8px;background:transparent;font-family:inherit;white-space:nowrap}
 .ord-vendor-assign:hover{background:var(--accent-lt)}
+.ord-vendor-sel{font-size:11px;color:var(--accent);border:1px dashed var(--accent);border-radius:6px;padding:2px 6px;background:var(--surface);font-family:inherit;margin-top:2px;cursor:pointer}
 .ord-vendor-label{font-size:11px;color:var(--muted);white-space:nowrap}
 /* 주문됨 바텀시트 스타일 */
 .ord-ordered-row{padding:12px 14px;border-top:1px solid var(--border);border-left:3px solid #3b82f6;display:flex;flex-direction:column;gap:8px}
@@ -617,7 +618,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
         </select>
       </label>
       <label style="font-size:14px;display:flex;align-items:center;gap:8px">
-        <span>발주 완료 여부</span>
+        <span>주문 완료 여부</span>
         <select id="obsOrder" style="font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">
           <option value="">선택</option><option value="true">예</option><option value="false">아니오</option>
         </select>
@@ -1053,10 +1054,14 @@ async function processRequest(json) {
 
             // 발주면 order_requests에도 기록 (중복 방지)
             if (newAction === 'order') {
-              await _insertOrderIfNotDup({
+              const { data: orData, skipped: orSkip } = await _insertOrderIfNotDup({
                 store_id: SID, item_id: newItem.item_id, item_name: name,
                 qty: qty, unit: unit || '개', vendor_id: null, status: 'pending'
               });
+              if (!orSkip && orData?.length) {
+                _orderRequests.push(orData[0]);
+                _orderedItemIds.add(newItem.item_id);
+              }
             }
 
             const { data: _insNew, error: _insNewErr } = await db.from('kitchen_operations').insert({
@@ -1243,6 +1248,11 @@ async function processRequest(json) {
         if (!item) return { status:'warn', response_type:'delete_result', message:`"${name}" 품목을 찾을 수 없습니다.` };
         if (!confirm(`"${item.item_name}"을 삭제할까요?`)) return { status:'warn', response_type:'delete_result', message:'취소됨' };
         await db.from('items').delete().eq('item_id', item.item_id);
+        // 관련 order_requests(pending/ordered) cancelled 처리
+        await db.from('order_requests')
+          .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+          .eq('store_id', SID).eq('item_id', item.item_id)
+          .in('status', ['pending', 'ordered']);
         _items = _items.filter(x => x.item_id !== item.item_id);
         return { status:'success', response_type:'delete_result', message:`"${item.item_name}" 삭제 완료`, timestamp: new Date().toISOString() };
       }
@@ -3080,6 +3090,11 @@ async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
 async function deleteInvItem(id, name) {
   if (!confirm('"' + name + '"을 삭제할까요?')) return;
   await db.from('items').delete().eq('item_id', id);
+  // 관련 order_requests(pending/ordered) cancelled 처리
+  await db.from('order_requests')
+    .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+    .eq('store_id', SID).eq('item_id', id)
+    .in('status', ['pending', 'ordered']);
   _items = _items.filter(x => x.item_id !== id);
   renderInventory();
   showToast('🗑 삭제됨');
@@ -3208,6 +3223,13 @@ async function renderOrder() {
     const _pendingItems = _orderRequests.filter(r => r.status === 'pending');
     const _orderedItems = _orderRequests.filter(r => r.status === 'ordered');
 
+    // 1.2) 24시간 이내 cancelled 품목 로드 → 발주 대기에서 제외
+    const _24hAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const { data: cancelledRows } = await db.from('order_requests')
+      .select('item_id').eq('store_id', SID).eq('status', 'cancelled')
+      .gte('updated_at', _24hAgo);
+    const _cancelledItemIds = new Set((cancelledRows || []).map(r => r.item_id));
+
     // 1.5) 이월된 발주 로드 (어제 이전 deferred)
     const today = new Date().toISOString().slice(0, 10);
     const { data: deferredRows } = await db.from('daily_orders')
@@ -3224,7 +3246,8 @@ async function renderOrder() {
     const needItems = _items.filter(it =>
       Number(it.current_qty) <= 0 &&
       !_orderedItemIds.has(it.item_id) &&
-      !_dismissedItemIds.has(it.item_id)
+      !_dismissedItemIds.has(it.item_id) &&
+      !_cancelledItemIds.has(it.item_id)
     );
     const suggestItems = [];
     for (const it of needItems) {
@@ -3253,8 +3276,9 @@ async function renderOrder() {
 
     // 이월 품목 합치기 (중복 제거 + dismissed 체크 + 이미 pending/ordered인 건 제외)
     for (const def of _deferredItems) {
-      if (_dismissedItemIds.has(def.item_id)) continue; // 제외/발주완료한 이월 품목 skip
+      if (_dismissedItemIds.has(def.item_id)) continue; // 제외/주문 완료한 이월 품목 skip
       if (_orderedItemIds.has(def.item_id)) continue; // 이미 pending/ordered 상태면 skip
+      if (_cancelledItemIds.has(def.item_id)) continue; // 24시간 이내 취소 품목 skip
       const existing = suggestItems.find(s => s.item_id === def.item_id);
       if (existing) {
         // 재고 변동 반영하여 수량 재계산
@@ -3297,11 +3321,11 @@ async function renderOrder() {
     }
 
     let html = '';
+    const _mergedSeenIds = new Set();
 
     // ── 발주 대기: pending + suggest 통합 (거래처별 그룹) ──
     {
       console.log('[renderOrder] _pendingItems=', _pendingItems.length, '_orderedItems=', _orderedItems.length, 'suggestItems=', suggestItems.length, '_orderedItemIds=', [..._orderedItemIds]);
-      const _mergedSeenIds = new Set();
       const _mergedItems = [];
       // 1) pending order_requests (같은 item_id 수량 합산)
       for (const r of _pendingItems) {
@@ -3354,10 +3378,13 @@ async function renderOrder() {
           for (const it of items) {
             const inputId = it.source === 'pending' ? `pqty_${it.order_id}` : `orec_${it.item_id}`;
             const curLabel = `현재 ${it.current_qty}${it.unit}`;
+            const vendorOpts = _vendors.map(v => `<option value="${v.vendor_id}"${v.vendor_id === it.vendor_id ? ' selected' : ''}>${v.vendor_name}</option>`).join('');
+            const vendorSelect = `<select class="ord-vendor-sel" data-item-id="${it.item_id}" ${it.source === 'pending' ? `data-order-id="${it.order_id}"` : ''} onchange="_assignVendorFromRow(this)"><option value="">거래처 선택</option>${vendorOpts}</select>`;
             if (it.source === 'pending') {
               html += `<div class="ord-item-row" data-row-oid="${it.order_id}" data-row-iid="${it.item_id}">
                 <div>
                   <span class="ord-item-name" data-editable data-order-id="${it.order_id}">${it.name}</span>
+                  ${vendorSelect}
                 </div>
                 <div class="ord-item-right">
                   <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
@@ -3377,6 +3404,7 @@ async function renderOrder() {
               html += `<div class="ord-item-row" data-row-iid="${it.item_id}">
                 <div>
                   <span class="ord-item-name">${it.name}</span>
+                  ${vendorSelect}
                 </div>
                 <div class="ord-item-right">
                   <div style="display:flex;align-items:center;gap:4px;justify-content:flex-end">
@@ -3387,7 +3415,7 @@ async function renderOrder() {
                     <span style="font-size:12px;color:var(--dim)">${it.unit}</span>
                   </div>
                   <div class="ord-status-btns">
-                    <button class="ord-btn-done" onclick="_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.qty},'${it.unit}')">발주완료</button>
+                    <button class="ord-btn-done" onclick="_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.qty},'${it.unit}')">주문 완료</button>
                     <button class="ord-btn-cancel" onclick="_dismissSuggest(${it.item_id})">✕</button>
                   </div>
                 </div>
@@ -3445,9 +3473,8 @@ async function renderOrder() {
       html += `</div>`;
     }
 
-    // ── Section B: TOP N 긴급 발주 (발주 대기에 이미 있는 pending 품목 제외) ──
-    const _pendingIds = new Set(_pendingItems.map(r => r.item_id));
-    const _topCandidates = suggestItems.filter(s => !_pendingIds.has(s.item_id));
+    // ── Section B: TOP N 긴급 발주 (발주 대기에 이미 있는 품목 제외) ──
+    const _topCandidates = suggestItems.filter(s => !_mergedSeenIds.has(s.item_id));
     if (_topCandidates.length) {
       _topCandidates.sort((a, b) => {
         if (a.current_qty <= 0 && b.current_qty > 0) return -1;
@@ -3475,7 +3502,7 @@ async function renderOrder() {
               <button class="ord-stepper-btn" onclick="_ordStep('${recId}',1)">+</button>
               <span class="ord-rec-unit" style="font-size:14px">${it.unit}</span>
             </div>
-            <button class="ord-urgent-done" onclick="_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.suggested_qty},'${it.unit}')">발주완료</button>
+            <button class="ord-urgent-done" onclick="_orderConfirmSuggest(${it.item_id},'${it.name.replace(/'/g,"&#39;")}',${it.suggested_qty},'${it.unit}')">주문 완료</button>
           </div>
         </div>`;
       }
@@ -3821,11 +3848,19 @@ function _removeOrderRow(el) {
   }
 }
 
-function _dismissSuggest(itemId) {
+async function _dismissSuggest(itemId) {
   _dismissedItemIds.add(itemId);
+  // cancelled 레코드 INSERT (24시간 후 자동 리셋)
+  const item = _items.find(it => it.item_id === itemId);
+  await db.from('order_requests').insert({
+    store_id: SID, item_id: itemId,
+    item_name: item?.item_name || '', qty: 0,
+    unit: item?.unit || '개', vendor_id: item?.vendor_id || null,
+    status: 'cancelled'
+  });
   // DOM 직접 제거 (스크롤 유지)
   document.querySelectorAll(`[data-row-iid="${itemId}"]`).forEach(el => _removeOrderRow(el));
-  showToast('추천에서 제외됨');
+  showToast('추천에서 제외됨 (24시간 후 복귀)');
 }
 
 async function _orderConfirmSuggest(itemId, name, qty, unit) {
@@ -4321,6 +4356,25 @@ document.addEventListener('click', function(e) {
   }
 });
 
+// 미지정 품목 거래처 선택 → items.vendor_id + order_requests.vendor_id 업데이트 후 그룹 이동
+async function _assignVendorFromRow(sel) {
+  const vid = parseInt(sel.value);
+  if (!vid) return;
+  const itemId = parseInt(sel.dataset.itemId);
+  const orderId = sel.dataset.orderId ? parseInt(sel.dataset.orderId) : null;
+  // items 테이블 업데이트
+  await db.from('items').update({ vendor_id: vid, updated_at: new Date().toISOString() }).eq('item_id', itemId);
+  const item = _items.find(it => it.item_id === itemId);
+  if (item) item.vendor_id = vid;
+  // pending이면 order_requests도 업데이트
+  if (orderId) {
+    await db.from('order_requests').update({ vendor_id: vid, updated_at: new Date().toISOString() }).eq('id', orderId);
+  }
+  const vName = _vendors.find(v => v.vendor_id === vid)?.vendor_name || '';
+  showToast(`${item?.item_name || ''} → ${vName}`);
+  _renderOrderKeepScroll();
+}
+
 async function changeItemVendor(itemId, vendorId, sel) {
   // 이번만 사용 or 기본값으로 저장 선택
   const setDefault = confirm('기본 거래처로 저장할까요?\n(취소: 이번만 사용)');
@@ -4626,12 +4680,15 @@ function _askNextComplexQty() {
     bubble.style.borderLeftWidth = '3px';
     bubble.innerHTML = `🛒 <strong>${it.name}</strong> 몇 ${it.unit || '개'} 발주할까요?<span class="chat-time">${now}</span>`;
     list.appendChild(bubble);
-    const chatArea = document.getElementById('chatArea');
-    if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+    bubble.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }
-  // 입력창 포커스 + placeholder 힌트
+  // 입력창 포커스 + placeholder 힌트 + 키보드 올라온 뒤 재스크롤
   const inp = document.getElementById('nlInput');
-  if (inp) { inp.placeholder = `${it.name} 수량 입력 (예: 3${it.unit || '개'})`; inp.focus(); }
+  if (inp) {
+    inp.placeholder = `${it.name} 수량 입력 (예: 3${it.unit || '개'})`;
+    inp.focus();
+    setTimeout(() => { const b = document.querySelector('#resList .chat-bubble:last-child'); if (b) b.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300);
+  }
 }
 
 function _handleComplexQtyAnswer(raw) {
@@ -4660,9 +4717,9 @@ function _handleComplexQtyAnswer(raw) {
       errBubble.style.borderLeftWidth = '3px';
       errBubble.innerHTML = `숫자로 입력해 주세요. (예: 3${it.unit || '개'}, 다섯 봉지)<span class="chat-time">${now}</span>`;
       list.appendChild(errBubble);
+      errBubble.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-    const chatArea = document.getElementById('chatArea');
-    if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+    setTimeout(() => { const b = document.querySelector('#resList .chat-bubble:last-child'); if (b) b.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 300);
     return;
   }
 
