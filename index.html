@@ -3083,19 +3083,30 @@ async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
 
 // 품목 삭제 공통: items DELETE + order_requests 정리 + 메모리 제거
 async function _deleteItemAndCleanup(itemId) {
-  await db.from('items').delete().eq('item_id', itemId);
-  await db.from('order_requests')
+  console.log('[DELETE] items.delete() 요청 item_id=', itemId);
+  const { data: delData, error: delErr } = await db.from('items').delete().eq('item_id', itemId).select();
+  console.log('[DELETE] items 응답:', delErr ? `ERROR: ${delErr.message}` : `삭제됨 ${delData?.length || 0}건`, delData);
+  if (delErr) throw new Error(`items 삭제 실패: ${delErr.message}`);
+
+  const { error: orErr } = await db.from('order_requests')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })
     .eq('store_id', SID).eq('item_id', itemId)
     .in('status', ['pending', 'ordered']);
+  if (orErr) console.warn('[DELETE] order_requests 정리 실패:', orErr.message);
+
   _items = _items.filter(x => x.item_id !== itemId);
 }
 
 async function deleteInvItem(id, name) {
   if (!confirm('"' + name + '"을 삭제할까요?')) return;
-  await _deleteItemAndCleanup(id);
-  renderInventory();
-  showToast('🗑 삭제됨');
+  try {
+    await _deleteItemAndCleanup(id);
+    renderInventory();
+    showToast('🗑 삭제됨');
+  } catch (e) {
+    console.error('[DELETE] 삭제 실패:', e);
+    showToast('❌ 삭제 실패: ' + e.message);
+  }
 }
 
 const ORDER_METHOD_LABEL = {
