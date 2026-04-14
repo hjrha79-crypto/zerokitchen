@@ -1247,13 +1247,7 @@ async function processRequest(json) {
         const item = _items.find(it => it.item_name === name || it.item_name.includes(name));
         if (!item) return { status:'warn', response_type:'delete_result', message:`"${name}" 품목을 찾을 수 없습니다.` };
         if (!confirm(`"${item.item_name}"을 삭제할까요?`)) return { status:'warn', response_type:'delete_result', message:'취소됨' };
-        await db.from('items').delete().eq('item_id', item.item_id);
-        // 관련 order_requests(pending/ordered) cancelled 처리
-        await db.from('order_requests')
-          .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-          .eq('store_id', SID).eq('item_id', item.item_id)
-          .in('status', ['pending', 'ordered']);
-        _items = _items.filter(x => x.item_id !== item.item_id);
+        await _deleteItemAndCleanup(item.item_id);
         return { status:'success', response_type:'delete_result', message:`"${item.item_name}" 삭제 완료`, timestamp: new Date().toISOString() };
       }
 
@@ -3087,15 +3081,19 @@ async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
   renderInventory();
 }
 
-async function deleteInvItem(id, name) {
-  if (!confirm('"' + name + '"을 삭제할까요?')) return;
-  await db.from('items').delete().eq('item_id', id);
-  // 관련 order_requests(pending/ordered) cancelled 처리
+// 품목 삭제 공통: items DELETE + order_requests 정리 + 메모리 제거
+async function _deleteItemAndCleanup(itemId) {
+  await db.from('items').delete().eq('item_id', itemId);
   await db.from('order_requests')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-    .eq('store_id', SID).eq('item_id', id)
+    .eq('store_id', SID).eq('item_id', itemId)
     .in('status', ['pending', 'ordered']);
-  _items = _items.filter(x => x.item_id !== id);
+  _items = _items.filter(x => x.item_id !== itemId);
+}
+
+async function deleteInvItem(id, name) {
+  if (!confirm('"' + name + '"을 삭제할까요?')) return;
+  await _deleteItemAndCleanup(id);
   renderInventory();
   showToast('🗑 삭제됨');
 }
@@ -3668,8 +3666,7 @@ async function _mergeDup(nameKey) {
     if (items[i].item_name !== primary.item_name) {
       _saveAlias(items[i].item_name, primary.item_name);
     }
-    await db.from('items').delete().eq('item_id', items[i].item_id);
-    _items = _items.filter(x => x.item_id !== items[i].item_id);
+    await _deleteItemAndCleanup(items[i].item_id);
   }
 
   showToast(`${primary.item_name} 합침 → ${totalQty}${primary.unit || ''}`);
@@ -3698,8 +3695,7 @@ async function _replaceDup(nameKey) {
     if (items[i].item_name !== primary.item_name) {
       _saveAlias(items[i].item_name, primary.item_name);
     }
-    await db.from('items').delete().eq('item_id', items[i].item_id);
-    _items = _items.filter(x => x.item_id !== items[i].item_id);
+    await _deleteItemAndCleanup(items[i].item_id);
   }
   showToast(`${primary.item_name} 바꾸기 → ${latestQty}${primary.unit || ''}`);
   renderInventory();
@@ -3728,8 +3724,7 @@ async function _mergeAllDups() {
       if (items[i].item_name !== primary.item_name) {
         _saveAlias(items[i].item_name, primary.item_name);
       }
-      await db.from('items').delete().eq('item_id', items[i].item_id);
-      _items = _items.filter(x => x.item_id !== items[i].item_id);
+      await _deleteItemAndCleanup(items[i].item_id);
     }
     count++;
   }
