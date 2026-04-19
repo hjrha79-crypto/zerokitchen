@@ -4235,13 +4235,18 @@ async function completeOrder(orderId) { return markOrdered(orderId); }
 // _cancelOrderResolve: Promise resolve를 ���역에 저장 (인라인 onclick에서 호출)
 let _cancelOrderResolve = null;
 let _cancelOrderEl = null;
-let _cancelOrderOrigHTML = '';
 function _coPick(choice) {
-  if (_cancelOrderEl) _cancelOrderEl.innerHTML = _cancelOrderOrigHTML;
-  if (_cancelOrderResolve) _cancelOrderResolve(choice);
+  const el = _cancelOrderEl;
+  const resolve = _cancelOrderResolve;
   _cancelOrderResolve = null;
   _cancelOrderEl = null;
-  _cancelOrderOrigHTML = '';
+  if (!resolve) return;
+  if (choice === 'close' && el) {
+    el.innerHTML = el._origHTML || '';
+  } else if (el) {
+    el.innerHTML = '<div style="padding:10px 12px;color:var(--muted);font-size:12px">처리 중...</div>';
+  }
+  resolve(choice);
 }
 async function cancelOrder(orderId) {
   const row = _orderRequests.find(r => r.id === orderId);
@@ -4252,7 +4257,7 @@ async function cancelOrder(orderId) {
     if (!el) { resolve('cancel'); return; }
     _cancelOrderResolve = resolve;
     _cancelOrderEl = el;
-    _cancelOrderOrigHTML = el.innerHTML;
+    el._origHTML = el.innerHTML;
     el.innerHTML = `
       <div style="padding:10px 12px">
         <div style="font-size:13px;font-weight:600;margin-bottom:8px">${row.item_name} — 어떻게 처리할까요?</div>
