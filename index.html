@@ -4232,6 +4232,17 @@ async function markReceived(orderId) {
 async function completeOrder(orderId) { return markOrdered(orderId); }
 
 // 발주 취소 (+ 오타 품목 삭제 옵션)
+// _cancelOrderResolve: Promise resolve를 ���역에 저장 (인라인 onclick에서 호출)
+let _cancelOrderResolve = null;
+let _cancelOrderEl = null;
+let _cancelOrderOrigHTML = '';
+function _coPick(choice) {
+  if (_cancelOrderEl) _cancelOrderEl.innerHTML = _cancelOrderOrigHTML;
+  if (_cancelOrderResolve) _cancelOrderResolve(choice);
+  _cancelOrderResolve = null;
+  _cancelOrderEl = null;
+  _cancelOrderOrigHTML = '';
+}
 async function cancelOrder(orderId) {
   const row = _orderRequests.find(r => r.id === orderId);
   if (!row) return;
@@ -4239,19 +4250,18 @@ async function cancelOrder(orderId) {
   const choice = await new Promise(resolve => {
     const el = document.querySelector(`[data-row-oid="${orderId}"]`) || document.querySelector(`[data-row-iid="${row.item_id}"]`);
     if (!el) { resolve('cancel'); return; }
-    const origHTML = el.innerHTML;
+    _cancelOrderResolve = resolve;
+    _cancelOrderEl = el;
+    _cancelOrderOrigHTML = el.innerHTML;
     el.innerHTML = `
       <div style="padding:10px 12px">
         <div style="font-size:13px;font-weight:600;margin-bottom:8px">${row.item_name} — 어떻게 처리할까요?</div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button id="_co_cancel" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);cursor:pointer;font-size:12px;font-family:inherit">발주만 취소</button>
-          <button id="_co_delete" style="flex:1;padding:8px;border:1px solid #ef4444;border-radius:6px;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit">품목도 삭제</button>
-          <button id="_co_close" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px;font-family:inherit">닫기</button>
+          <button onclick="_coPick('cancel')" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);cursor:pointer;font-size:12px;font-family:inherit">발주만 취소</button>
+          <button onclick="_coPick('delete')" style="flex:1;padding:8px;border:1px solid #ef4444;border-radius:6px;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit">품목도 삭제</button>
+          <button onclick="_coPick('close')" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px;font-family:inherit">닫기</button>
         </div>
       </div>`;
-    document.getElementById('_co_cancel').onclick = () => { el.innerHTML = origHTML; resolve('cancel'); };
-    document.getElementById('_co_delete').onclick = () => { el.innerHTML = origHTML; resolve('delete'); };
-    document.getElementById('_co_close').onclick  = () => { el.innerHTML = origHTML; resolve('close'); };
   });
   if (choice === 'close') return;
 
@@ -4270,8 +4280,8 @@ async function cancelOrder(orderId) {
     showToast(`${row.item_name} 발주 취소됨`);
   }
   // DOM 직접 제거 (스크롤 유지)
-  const el = document.querySelector(`[data-row-oid="${orderId}"]`);
-  _removeOrderRow(el);
+  const targetEl = document.querySelector(`[data-row-oid="${orderId}"]`) || document.querySelector(`[data-row-iid="${row.item_id}"]`);
+  _removeOrderRow(targetEl);
 }
 
 // 주문됨 수량 인라인 편집
