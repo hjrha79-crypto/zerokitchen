@@ -1742,6 +1742,8 @@ async function handleNaturalInput() {
 
     // Fast-path: 확실한 파싱은 확인 카드 생략하고 바로 처리
     const _canSkipReview = _draftItems.length > 0 && _draftItems.every(it => {
+      // alias 매칭으로 처리된 항목은 이미 검증된 매핑 → 확인 불필요
+      if (it._aliasApplied && it.qtyParsed && it.quantity < 20) return true;
       const exactMatch = _items.find(ex =>
         ex.item_name === it.item_name ||
         ex.item_name.replace(/\s/g,'') === it.item_name.replace(/\s/g,'')
@@ -2150,11 +2152,21 @@ function _ruleTokenize(s) {
   return expanded;
 }
 
-async function _saveAlias(rawExpr, correctedName) {
+async function _saveAlias(rawExpr, correctedName, confidence) {
   if (!SID || !rawExpr || !correctedName) return;
   const raw = rawExpr.replace(/\s/g,'').toLowerCase();
   const corrected = correctedName.trim();
   if (raw === corrected.replace(/\s/g,'').toLowerCase()) return;
+
+  // 순환 매핑 방지: 역방향 alias가 이미 존재하면 저장 안 함
+  const reverseKey = corrected.replace(/\s/g,'').toLowerCase();
+  if (_storeAliases.find(a => a.raw_expression === reverseKey && a.corrected_name.replace(/\s/g,'').toLowerCase() === raw)) return;
+
+  // confidence 낮은 파싱 결과는 alias 저장 안 함
+  if (typeof confidence === 'number' && confidence < 0.5) return;
+
+  // 2개 이상 품목이 합쳐진 노이즈 필터: 길이 10자 이상 + 숫자 포함
+  if (raw.length >= 10 && /\d/.test(raw)) return;
 
   const existing = _storeAliases.find(a => a.raw_expression === raw);
   if (existing) {
@@ -2183,11 +2195,11 @@ function _applyAlias(name) {
 function _ruleMapItem(raw) {
   const name=raw.trim(); if(!name) return null;
   // 1. 하드코딩 alias — 완전 일치 (store alias보다 우선, 보호 항목 포함)
-  if (_ALIAS[name]) return _ALIAS[name];
+  if (_ALIAS[name]) return { name: _ALIAS[name], aliased: true };
   // 2. store alias (학습된 매장별 보정) — 완전 일치
   const aliased = _applyAlias(name);
-  if (aliased !== name) return aliased;
-  return name;
+  if (aliased !== name) return { name: aliased, aliased: true };
+  return { name, aliased: false };
 }
 
 // 아이템별 confidence 점수 계산
@@ -2213,7 +2225,8 @@ function ruleEngine(text) {
   const results=[], fails=[];
   let minConf = 1;
   for (const seg of segs) {
-    const name=_ruleMapItem(seg.rawName);
+    const mapped=_ruleMapItem(seg.rawName);
+    const name = mapped?.name;
     if (!name||!name.trim()) { fails.push(seg); continue; }
     // 단위명만으로 된 품목명 skip (파싱 잔재)
     if (_UNITS.includes(name.replace(/\s/g,''))) { fails.push(seg); continue; }
@@ -2223,7 +2236,7 @@ function ruleEngine(text) {
     const conf = _itemConfidence(name, confSeg);
     if (conf < minConf) minConf = conf;
     const defaultApplied = !seg.action && fallbackAction === 'stock_check';
-    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:action, confidence:conf >= 0.8 ? 'high' : 'low', _score:conf, _defaultApplied:defaultApplied, qtyParsed:seg.qtyParsed });
+    results.push({ item_name:name, quantity:seg.qty, unit:_UNIT_MAP[seg.unit]||seg.unit||'개', action:action, confidence:conf >= 0.8 ? 'high' : 'low', _score:conf, _defaultApplied:defaultApplied, qtyParsed:seg.qtyParsed, _aliasApplied:!!mapped.aliased });
   }
   // 아이템 중 하나라도 confidence < 0.8 이면 전체 LLM fallback
   const needsFallback = !results.length || minConf < 0.8;
@@ -3298,9 +3311,19 @@ async function renderOrder() {
         existing.isDeferred = true;
         existing.defer_count = def.defer_count;
         existing.daily_order_id = def.id;
+        // vendor 보강: deferred 또는 items에서 참조
+        if (!existing.vendor_id) {
+          const item = _items.find(it => it.item_id === def.item_id);
+          const vid = def.vendor_id || item?.vendor_id || null;
+          if (vid) {
+            existing.vendor_id = vid;
+            existing.vendor = _vendors.find(v => v.vendor_id === vid)?.vendor_name || null;
+          }
+        }
       } else {
         const item = _items.find(it => it.item_id === def.item_id);
         if (item) {
+          const defVendorId = def.vendor_id || item.vendor_id || null;
           suggestItems.push({
             item_id: def.item_id,
             name: def.item_name,
@@ -3308,8 +3331,8 @@ async function renderOrder() {
             target_qty: Number(item.target_qty || def.recommended_qty),
             suggested_qty: Math.max(0, Number(def.recommended_qty)),
             unit: def.unit || '',
-            vendor_id: def.vendor_id || null,
-            vendor: _vendors.find(v => v.vendor_id === def.vendor_id)?.vendor_name || null,
+            vendor_id: defVendorId,
+            vendor: defVendorId ? (_vendors.find(v => v.vendor_id === defVendorId)?.vendor_name || null) : null,
             isDeferred: true,
             defer_count: def.defer_count,
             daily_order_id: def.id
@@ -4182,7 +4205,6 @@ async function markOrdered(orderId) {
 async function markReceived(orderId) {
   const row = _orderRequests.find(r => r.id === orderId);
   if (!row) return;
-  if (!confirm(`${row.item_name} ${row.qty}${row.unit} 입고 완료하시겠습니까?`)) return;
   await db.from('order_requests')
     .update({ status: 'done', updated_at: new Date().toISOString() })
     .eq('id', orderId);
@@ -4209,19 +4231,47 @@ async function markReceived(orderId) {
 // 기존 done 건 호환: completeOrder는 markOrdered로 리다이렉트
 async function completeOrder(orderId) { return markOrdered(orderId); }
 
-// 발주 취소
+// 발주 취소 (+ 오타 품목 삭제 옵션)
 async function cancelOrder(orderId) {
   const row = _orderRequests.find(r => r.id === orderId);
   if (!row) return;
-  if (!confirm(`${row.item_name} ${row.qty}${row.unit} 발주를 취소하시겠습니까?`)) return;
+  // 선택지: 발주만 취소 / 품목도 삭제 / 닫기
+  const choice = await new Promise(resolve => {
+    const el = document.querySelector(`[data-row-oid="${orderId}"]`) || document.querySelector(`[data-row-iid="${row.item_id}"]`);
+    if (!el) { resolve('cancel'); return; }
+    const origHTML = el.innerHTML;
+    el.innerHTML = `
+      <div style="padding:10px 12px">
+        <div style="font-size:13px;font-weight:600;margin-bottom:8px">${row.item_name} — 어떻게 처리할까요?</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button id="_co_cancel" style="flex:1;padding:8px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);cursor:pointer;font-size:12px;font-family:inherit">발주만 취소</button>
+          <button id="_co_delete" style="flex:1;padding:8px;border:1px solid #ef4444;border-radius:6px;background:#fef2f2;color:#dc2626;cursor:pointer;font-size:12px;font-weight:600;font-family:inherit">품목도 삭제</button>
+          <button id="_co_close" style="padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer;font-size:12px;font-family:inherit">닫기</button>
+        </div>
+      </div>`;
+    document.getElementById('_co_cancel').onclick = () => { el.innerHTML = origHTML; resolve('cancel'); };
+    document.getElementById('_co_delete').onclick = () => { el.innerHTML = origHTML; resolve('delete'); };
+    document.getElementById('_co_close').onclick  = () => { el.innerHTML = origHTML; resolve('close'); };
+  });
+  if (choice === 'close') return;
+
+  // 발주 취소
   await db.from('order_requests')
     .update({ status: 'cancelled', updated_at: new Date().toISOString() })
     .eq('id', orderId);
   _dismissedItemIds.add(row.item_id);
+
+  if (choice === 'delete') {
+    // 품목도 삭제
+    await _deleteItemAndCleanup(row.item_id);
+    _items = _items.filter(it => it.item_id !== row.item_id);
+    showToast(`${row.item_name} 품목 삭제됨`);
+  } else {
+    showToast(`${row.item_name} 발주 취소됨`);
+  }
   // DOM 직접 제거 (스크롤 유지)
   const el = document.querySelector(`[data-row-oid="${orderId}"]`);
   _removeOrderRow(el);
-  showToast(`${row.item_name} 발주 취소됨`);
 }
 
 // 주문됨 수량 인라인 편집
