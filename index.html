@@ -3098,16 +3098,29 @@ async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
 async function _deleteItemAndCleanup(itemId) {
   console.log('[DELETE] 요청 item_id=', itemId);
 
-  // 1) order_requests 먼저 삭제 (items FK 참조 전에 정리)
+  // 1) order_requests — 모든 status 삭제 (FK constraint 방지)
   const { data: orData, error: orErr } = await db.from('order_requests')
-    .delete().eq('store_id', SID).eq('item_id', itemId)
-    .in('status', ['pending', 'ordered']).select();
+    .delete().eq('store_id', SID).eq('item_id', itemId).select();
   console.log('[DELETE] order_requests:', orErr ? `ERROR: ${orErr.message}` : `삭제 ${orData?.length || 0}건`);
-  if (orErr) console.warn('[DELETE] order_requests 삭제 실패:', orErr.message);
 
-  // 2) items 삭제
+  // 2) daily_orders 삭제
+  const { error: doErr } = await db.from('daily_orders')
+    .delete().eq('store_id', SID).eq('item_id', itemId);
+  if (doErr) console.warn('[DELETE] daily_orders:', doErr.message);
+
+  // 3) item_vendor_map 삭제
+  const { error: vmErr } = await db.from('item_vendor_map')
+    .delete().eq('item_id', itemId);
+  if (vmErr) console.warn('[DELETE] item_vendor_map:', vmErr.message);
+
+  // 4) kitchen_operations — item_id null 처리 (로그 보존)
+  const { error: koErr } = await db.from('kitchen_operations')
+    .update({ item_id: null }).eq('item_id', itemId);
+  if (koErr) console.warn('[DELETE] kitchen_operations nullify:', koErr.message);
+
+  // 5) items 삭제
   const { data: delData, error: delErr } = await db.from('items').delete().eq('item_id', itemId).select();
-  console.log('[DELETE] items:', delErr ? `ERROR: ${delErr.message}` : `삭제 ${delData?.length || 0}건`, delData);
+  console.log('[DELETE] items:', delErr ? `ERROR: ${delErr.message}` : `삭제 ${delData?.length || 0}건`);
   if (delErr) throw new Error(`items 삭제 실패: ${delErr.message}`);
 
   _items = _items.filter(x => x.item_id !== itemId);
