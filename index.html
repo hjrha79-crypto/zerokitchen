@@ -1918,6 +1918,9 @@ const _ALIAS = {
 
 function _ruleNormalize(text) {
   let s = text.trim();
+  // 0. 단위 오인식 보정 (음성인식 오류: km→kg)
+  s = s.replace(/(\d)\s*[kK][mM]\b/g, '$1kg');
+
   // 0. 전처리: 문장부호·콤마·위치격·시간어 제거
   s = s.replace(/[!?~。！？]/g, '');
   s = s.replace(/\.(?!\d)/g, '');
