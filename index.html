@@ -39,10 +39,9 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .tab-wrap{flex:1;overflow:hidden}
 .tab{display:none;height:calc(100dvh - 52px - 62px);overflow-y:auto;padding:14px 14px 80px;flex-direction:column;gap:12px}
 .tab.active{display:flex}
-/* 입력탭: 채팅 구조 */
-#tab-input{display:none;flex-direction:column;padding:0 14px 14px;padding-bottom:80px}
+/* 홈탭: 발주 체크리스트 + 입력 */
+#tab-input{display:none;flex-direction:column;padding:14px 14px 80px}
 #tab-input.active{display:flex}
-#tab-input .chat-area{flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:10px;padding:14px 0;scroll-padding-bottom:72px}
 .chat-bubble{max-width:85%;padding:11px 14px;border-radius:14px;font-size:14px;line-height:1.5;word-break:break-word}
 .chat-bubble.system{align-self:flex-start;background:var(--surface);border:1px solid var(--border);border-bottom-left-radius:4px}
 .chat-bubble.user{align-self:flex-end;background:var(--accent);color:#fff;border-bottom-right-radius:4px}
@@ -461,9 +460,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
     <span class="home-clock" id="homeClock"></span>
     <button class="nav active" onclick="switchTab('input',this)">홈</button>
     <button class="nav" onclick="switchTab('inventory',this)">재고</button>
-    <button class="nav" onclick="switchTab('order',this)">발주</button>
-    <button class="nav" id="testTabBtn" onclick="switchTab('test',this)" style="display:none">테스트</button>
-    <button class="nav" id="obsTabBtn" onclick="switchTab('observe',this)" style="display:none">관찰</button>
+    <button class="nav" onclick="switchTab('settings',this)">설정</button>
   </div>
 </div>
 
@@ -481,20 +478,27 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 
 <div class="tab-wrap">
 
-<!-- 입력탭 (채팅 구조) -->
+<!-- 홈탭 (발주 체크리스트 + 입력) -->
 <div id="tab-input" class="tab active">
-  <div class="chat-area" id="chatArea">
-    <!-- 가이드 메시지 -->
-    <div id="justTalk" class="chat-bubble system chat-guide">
-      <div style="font-weight:700;margin-bottom:6px">재고 확인과 발주를 말로 빠르게 처리합니다</div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:6px">따라해 보세요</div>
-      <div style="display:flex;flex-direction:column;gap:4px">
-        <span class="just-talk-item" onclick="fillExample(this)">치즈 몇 봉 남았지?</span>
-        <span class="just-talk-item" onclick="fillExample(this)">오늘 발주 뭐 해야 돼?</span>
-        <span class="just-talk-item" onclick="fillExample(this)">토마토소스 3봉 추가</span>
-      </div>
-    </div>
+  <!-- 오늘의 발주 -->
+  <div id="homeOrderSection">
+    <div id="orderList"><div class="no-item">로딩 중...</div></div>
+  </div>
+
+  <!-- 최근 입력 결과 (1건만) -->
+  <div id="homeResList" style="margin-top:8px">
     <div id="resList"></div>
+  </div>
+
+  <!-- 가이드 (첫 사용 시만) -->
+  <div id="justTalk" class="chat-bubble system chat-guide" style="margin-top:8px">
+    <div style="font-weight:700;margin-bottom:6px">재고 확인과 발주를 말로 빠르게 처리합니다</div>
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">따라해 보세요</div>
+    <div style="display:flex;flex-direction:column;gap:4px">
+      <span class="just-talk-item" onclick="fillExample(this)">치즈 몇 봉 남았지?</span>
+      <span class="just-talk-item" onclick="fillExample(this)">오늘 발주 뭐 해야 돼?</span>
+      <span class="just-talk-item" onclick="fillExample(this)">토마토소스 3봉 추가</span>
+    </div>
   </div>
 </div>
 
@@ -539,14 +543,49 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
   </div>
 </div>
 
-<!-- 발주탭 -->
+<!-- [v2→v3 주석처리] 발주탭: 홈으로 통합됨
 <div id="tab-order" class="tab">
   <div id="orderList"><div class="no-item">로딩 중...</div></div>
 </div>
+-->
 
-<!-- 테스트 패널 -->
-<div id="tab-test" class="tab">
+<!-- 설정탭 (테스트 + 관찰 통합) -->
+<div id="tab-settings" class="tab">
+  <!-- 일일 현장 관찰 -->
   <div class="card">
+    <div class="card-title">일일 현장 관찰</div>
+    <div id="obsDateLabel" style="font-size:13px;color:var(--dim);margin-bottom:12px"></div>
+    <div id="obsForm" style="display:flex;flex-direction:column;gap:14px">
+      <label style="font-size:14px;display:flex;align-items:center;gap:8px">
+        <span>음성 사용 여부</span>
+        <select id="obsVoice" style="font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">
+          <option value="">선택</option><option value="true">예</option><option value="false">아니오</option>
+        </select>
+      </label>
+      <label style="font-size:14px;display:flex;align-items:center;gap:8px">
+        <span>종이 병행 여부</span>
+        <select id="obsPaper" style="font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">
+          <option value="">선택</option><option value="true">예</option><option value="false">아니오</option>
+        </select>
+      </label>
+      <label style="font-size:14px;display:flex;align-items:center;gap:8px">
+        <span>주문 완료 여부</span>
+        <select id="obsOrder" style="font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">
+          <option value="">선택</option><option value="true">예</option><option value="false">아니오</option>
+        </select>
+      </label>
+    </div>
+    <button class="btn-run" style="margin-top:14px;width:100%" onclick="_saveObservation()" id="obsSaveBtn">기록</button>
+    <div id="obsResult" style="margin-top:10px;font-size:13px"></div>
+  </div>
+  <!-- 개발자 도구 -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <span class="card-title" style="margin:0">개발자 도구</span>
+      <button onclick="_toggleDevTools()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--dim);cursor:pointer" id="devToolsToggle">펼치기</button>
+    </div>
+    <div id="devToolsBody" style="display:none">
+  <div class="card" style="border:1px solid var(--border)">
     <div class="card-title">파싱 자동 테스트</div>
     <button class="btn-run" onclick="_runParseTest()" id="parseTestBtn">▶ 1000개 테스트 실행</button>
     <button class="btn-run" style="margin-left:8px;background:var(--accent)" onclick="_runExpectTest()" id="expectTestBtn">▶ 기대값 검증 (1000개)</button>
@@ -597,37 +636,9 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
     <div class="card-title">결과</div>
     <div class="json-result" id="jsonResult">결과가 여기에 표시됩니다.</div>
   </div>
-</div>
-
-<!-- 관찰 패널 -->
-<div id="tab-observe" class="tab">
-  <div class="card">
-    <div class="card-title">일일 현장 관찰</div>
-    <div id="obsDateLabel" style="font-size:13px;color:var(--dim);margin-bottom:12px"></div>
-    <div id="obsForm" style="display:flex;flex-direction:column;gap:14px">
-      <label style="font-size:14px;display:flex;align-items:center;gap:8px">
-        <span>음성 사용 여부</span>
-        <select id="obsVoice" style="font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">
-          <option value="">선택</option><option value="true">예</option><option value="false">아니오</option>
-        </select>
-      </label>
-      <label style="font-size:14px;display:flex;align-items:center;gap:8px">
-        <span>종이 병행 여부</span>
-        <select id="obsPaper" style="font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">
-          <option value="">선택</option><option value="true">예</option><option value="false">아니오</option>
-        </select>
-      </label>
-      <label style="font-size:14px;display:flex;align-items:center;gap:8px">
-        <span>주문 완료 여부</span>
-        <select id="obsOrder" style="font-size:14px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)">
-          <option value="">선택</option><option value="true">예</option><option value="false">아니오</option>
-        </select>
-      </label>
-    </div>
-    <button class="btn-run" style="margin-top:14px;width:100%" onclick="_saveObservation()" id="obsSaveBtn">기록</button>
-    <div id="obsResult" style="margin-top:10px;font-size:13px"></div>
-  </div>
-</div>
+    </div><!-- /devToolsBody -->
+  </div><!-- /개발자 도구 card -->
+</div><!-- /tab-settings -->
 
 </div><!-- /tab-wrap -->
 
@@ -817,11 +828,13 @@ async function init() {
     // hash 기반 탭 복원
     const hashTab = _hashTabMap[(location.hash || '').replace('#','')];
     if (hashTab && hashTab !== 'input') {
-      const idx = ['input','inventory','order','test','observe'].indexOf(hashTab);
+      const idx = ['input','inventory','settings'].indexOf(hashTab);
       const btn = document.querySelectorAll('.nav')[idx];
       if (btn) switchTab(hashTab, btn);
     } else {
       history.replaceState(null, '', '#home');
+      // 홈 = 발주 체크리스트��므로 초기 로드
+      _startOrderSession(); renderOrder();
     }
   } catch(e) {
     showToast('초기화 실패: ' + e.message);
@@ -868,7 +881,7 @@ async function _switchStore(storeId) {
   // 현재 탭 재렌더링
   const activeTab = document.querySelector('.tab.active');
   if (activeTab?.id === 'tab-inventory') renderInventory();
-  else if (activeTab?.id === 'tab-order') renderOrder();
+  else if (activeTab?.id === 'tab-input') renderOrder();
 
   // 채팅 영역 초기화
   const resList = document.getElementById('resList');
@@ -1542,12 +1555,15 @@ async function handleNaturalInput() {
 
       // 탭 이동 명령
       if (cmd.request_type === '_switch_tab') {
+        const tabMap = { order: 'input', inventory: 'inventory' };
+        const nameMap = { order: '홈', inventory: '재고' };
+        const targetTab = tabMap[cmd.tab] || cmd.tab;
         const tabBtn = [...document.querySelectorAll('.nav')].find(b => {
-          const map = { order: '발주', inventory: '재고' };
-          return b.textContent.trim() === map[cmd.tab];
+          const btnMap = { input: '홈', inventory: '재고', settings: '설정' };
+          return b.textContent.trim() === btnMap[targetTab];
         });
-        if (tabBtn) switchTab(cmd.tab, tabBtn);
-        addResult(raw, `📋 ${cmd.tab === 'order' ? '발주' : '재고'} 탭으로 이동합니다.`, 'ok');
+        if (tabBtn) switchTab(targetTab, tabBtn);
+        addResult(raw, `📋 ${nameMap[cmd.tab] || cmd.tab} 탭으로 이동합니다.`, 'ok');
         return;
       }
 
@@ -1622,7 +1638,7 @@ async function handleNaturalInput() {
           btnRow.className = 'order-action-inline';
           btnRow.innerHTML = `
             <button class="oai-create" onclick="_createOrderFromSuggestion()">발주 생성</button>
-            <button class="oai-edit" onclick="switchTab('order', document.querySelectorAll('.nav')[2])">수정</button>
+            <button class="oai-edit" onclick="switchTab('input', document.querySelectorAll('.nav')[0]); document.getElementById('homeOrderSection')?.scrollIntoView()">수정</button>
             <button class="oai-cancel" onclick="this.parentElement.remove()">취소</button>`;
           firstCard.appendChild(btnRow);
           // 발주 제안 데이터 임시 저장
@@ -1634,7 +1650,7 @@ async function handleNaturalInput() {
       addResult(raw, formatResult(result), result.status === 'success' ? 'ok' : 'warn');
       if (!_onInputTab) {
         if (document.getElementById('tab-inventory').classList.contains('active')) renderInventory();
-        if (document.getElementById('tab-order').classList.contains('active')) renderOrder();
+        if (document.getElementById('tab-input').classList.contains('active')) renderOrder();
       }
       return;
     }
@@ -1777,7 +1793,7 @@ async function handleNaturalInput() {
       const opIds = result.operation_ids || [];
       addResult(raw, formatResult(result), result.status === 'success' ? 'ok' : 'warn', opIds);
       renderInventory();
-      if (document.getElementById('tab-order')?.classList.contains('active')) renderOrder();
+      if (document.getElementById('tab-input')?.classList.contains('active')) renderOrder();
       _draftItems = [];
       return;
     }
@@ -2745,7 +2761,7 @@ async function confirmReview() {
     const opIds = result.operation_ids || [];
     addResult(rawText, formatResult(result), result.status === 'success' ? 'ok' : 'warn', opIds);
     renderInventory();
-    if (document.getElementById('tab-order')?.classList.contains('active')) renderOrder();
+    if (document.getElementById('tab-input')?.classList.contains('active')) renderOrder();
   } catch(e) {
     // 실행 실패 시에도 로그 기록
     const rawText = document.getElementById('reviewPanel').dataset.rawText || '';
@@ -5049,7 +5065,7 @@ async function _autoConfirmComplexItems(rawText, items) {
     const opIds = result.operation_ids || [];
     addResult(rawText, formatResult(result), result.status === 'success' ? 'ok' : 'warn', opIds);
     renderInventory();
-    if (document.getElementById('tab-order')?.classList.contains('active')) renderOrder();
+    if (document.getElementById('tab-input')?.classList.contains('active')) renderOrder();
   } catch(e) {
     addResult(rawText, '❌ 저장 실패: ' + e.message, 'err');
   } finally {
@@ -5265,8 +5281,8 @@ async function deleteVendor(vendorId, name) {
 }
 
 // 탭명 ↔ hash 매핑
-const _tabHashMap = { input:'home', inventory:'inventory', order:'order', test:'test', observe:'observe' };
-const _hashTabMap = { home:'input', inventory:'inventory', order:'order', test:'test', observe:'observe' };
+const _tabHashMap = { input:'home', inventory:'inventory', settings:'settings' };
+const _hashTabMap = { home:'input', inventory:'inventory', settings:'settings' };
 
 async function switchTab(n, btn) {
   document.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
@@ -5279,21 +5295,30 @@ async function switchTab(n, btn) {
   // 탭 전환 시 하네스/확인 카드 닫기
   const rp = document.getElementById('reviewPanel');
   if (rp) rp.style.display = 'none';
+  if (n==='input') { _startOrderSession(); renderOrder(); }
   if (n==='inventory') { if (!_items.length) await refreshItems(); renderInventory(); }
-  if (n==='order') { _startOrderSession(); renderOrder(); }
-  if (n==='observe') { _loadObservation(); }
+  if (n==='settings') { _loadObservation(); }
 }
 
 // 브라우저 뒤로/앞으로 시 탭 전환
 window.addEventListener('hashchange', () => {
   const tabName = _hashTabMap[location.hash.replace('#','')];
   if (!tabName) return;
-  const idx = ['input','inventory','order','test','observe'].indexOf(tabName);
+  const idx = ['input','inventory','settings'].indexOf(tabName);
   const btn = document.querySelectorAll('.nav')[idx];
   if (btn) switchTab(tabName, btn);
 });
 
-// ── 관찰 탭 ──
+// ── 설정 탭: 관찰 + 개발자 도구 ──
+function _toggleDevTools() {
+  const body = document.getElementById('devToolsBody');
+  const btn = document.getElementById('devToolsToggle');
+  if (!body) return;
+  const show = body.style.display === 'none';
+  body.style.display = show ? 'block' : 'none';
+  if (btn) btn.textContent = show ? '접기' : '펼치기';
+}
+
 async function _loadObservation() {
   const today = new Date().toISOString().slice(0, 10);
   const label = document.getElementById('obsDateLabel');
@@ -5439,7 +5464,7 @@ function _showFloatResult(msg, type) {
   _floatResultTimer = setTimeout(() => _hideFloatResult(), 6000);
   // 현재 탭 데이터 갱신
   if (document.getElementById('tab-inventory')?.classList.contains('active')) renderInventory();
-  if (document.getElementById('tab-order')?.classList.contains('active')) renderOrder();
+  if (document.getElementById('tab-input')?.classList.contains('active')) renderOrder();
 }
 function _hideFloatResult() {
   const el = document.getElementById('floatResult');
@@ -6137,10 +6162,10 @@ let _devTapTimer = null;
 let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
 (function initDevMode() {
   if (_devMode) {
-    const tb = document.getElementById('testTabBtn');
-    if (tb) tb.style.display = '';
-    const ob = document.getElementById('obsTabBtn');
-    if (ob) ob.style.display = '';
+    const dt = document.getElementById('devToolsBody');
+    if (dt) dt.style.display = 'block';
+    const dtBtn = document.getElementById('devToolsToggle');
+    if (dtBtn) dtBtn.textContent = '접기';
   }
   const logo = document.getElementById('logoBtn');
   if (!logo) return;
@@ -6160,10 +6185,10 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
       _devTapCount = 0;
       _devMode = !_devMode;
       localStorage.setItem('zk_dev_mode', _devMode);
-      const tb = document.getElementById('testTabBtn');
-      if (tb) tb.style.display = _devMode ? '' : 'none';
-      const ob = document.getElementById('obsTabBtn');
-      if (ob) ob.style.display = _devMode ? '' : 'none';
+      const dt = document.getElementById('devToolsBody');
+      const dtBtn = document.getElementById('devToolsToggle');
+      if (dt) dt.style.display = _devMode ? 'block' : 'none';
+      if (dtBtn) dtBtn.textContent = _devMode ? '접기' : '펼치기';
       showToast(_devMode ? '🔧 개발자 모드 ON' : '개발자 모드 OFF');
     }
     _devTapTimer = setTimeout(() => { _devTapCount = 0; }, 1500);
