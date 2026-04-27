@@ -214,22 +214,31 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ot-copy{font-size:11px;color:var(--accent);background:none;border:1px solid var(--accent);border-radius:5px;padding:3px 10px;cursor:pointer;font-weight:600;font-family:inherit}
 .ot-copy:active{background:var(--accent-lt)}
 .ot{width:100%;border-collapse:collapse;font-size:12px}
-.ot th{text-align:left;font-size:10px;font-weight:700;color:var(--muted);padding:2px 4px;border-bottom:1.5px solid var(--border)}
-.ot td{padding:4px;border-bottom:1px solid var(--surface2);vertical-align:middle}
-.ot-name{font-size:13px;font-weight:600;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-th.ot-stock,td.ot-stock{width:32px;text-align:center;color:var(--dim);font-size:12px}
-th.ot-order,td.ot-order{width:50px;text-align:center;font-size:13px;font-weight:700;color:var(--accent);cursor:pointer;white-space:nowrap}
+.ot th{text-align:left;font-size:10px;font-weight:800;color:var(--muted);padding:4px 6px;border-bottom:2px solid var(--border);background:var(--surface2);text-transform:uppercase;letter-spacing:.03em}
+.ot td{padding:4px 6px;vertical-align:middle}
+.ot-name{font-size:13px;font-weight:600;width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+th.ot-stock,td.ot-stock{width:15%;text-align:center;color:var(--dim);font-size:12px}
+th.ot-order,td.ot-order{width:25%;text-align:center;font-size:13px;font-weight:700;color:var(--accent);cursor:pointer;white-space:nowrap}
 .ot-u{font-size:10px;color:var(--dim);font-weight:400}
 td.ot-order:active{background:var(--accent-lt);border-radius:3px}
-th.ot-chk,td.ot-chk{width:32px;text-align:center;padding:2px}
+th.ot-chk,td.ot-chk{width:20%;text-align:center;padding:2px 6px}
+/* 줄무늬 + 행 구분 */
+.ot tbody tr:nth-child(odd){background:#fff}
+.ot tbody tr:nth-child(even){background:#f8f8f5}
+/* 발주 대기 행: 초록 보더 */
+.ot tbody tr:not(.ot-done){border-left:3px solid #1a7a4a}
+/* 입고 대기 행: 파란 보더 + 연한 배경 */
+tr.ot-done{opacity:1;border-left:3px solid #3b82f6;background:rgba(59,130,246,.04) !important}
+tr.ot-done td{padding:3px 6px}
+tr.ot-done .ot-name{text-decoration:line-through;color:var(--dim);font-size:12px}
+tr.ot-done .ot-stock,tr.ot-done .ot-order{color:var(--dim);opacity:.5}
+/* 발주/입고 구분선 */
+tr.ot-sep td{padding:0;height:2px;background:var(--border);border:none}
 .ot-box{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-radius:4px;cursor:pointer;vertical-align:middle;transition:all .15s}
 .ot-box.on{background:var(--accent);border-color:var(--accent)}
 .ot-box.on::after{content:'✓';color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;height:100%}
 .ot-rcv{font-size:10px;color:#3b82f6;font-weight:700;cursor:pointer;padding:1px 5px;border:1px solid #3b82f6;border-radius:4px}
 .ot-rcv:active{background:rgba(59,130,246,.1)}
-tr.ot-done{opacity:.35}
-tr.ot-done td{padding:3px 4px}
-tr.ot-done .ot-name{text-decoration:line-through;color:var(--dim);font-size:12px}
 .ot-qty-edit{width:36px;height:22px;border:1px solid var(--accent);border-radius:3px;background:var(--surface);font-size:13px;font-weight:700;text-align:center;color:var(--accent);outline:none;font-family:inherit}
 .ord-empty{text-align:center;padding:24px;color:var(--muted);font-size:13px}
 .ord-item-name[data-editable]{cursor:pointer;border-bottom:1px dashed var(--border)}
@@ -3533,8 +3542,13 @@ async function renderOrder() {
     if (_allRows.length) {
       html += `<div class="ot-hdr"><span>📋 오늘의 발주</span><button class="ot-copy" onclick="_copyAllMerged()">전체 복사</button></div>`;
       html += `<table class="ot"><thead><tr><th class="ot-name">품목</th><th class="ot-stock">재고</th><th class="ot-order">발주</th><th class="ot-chk">✓</th></tr></thead><tbody>`;
+      let _sepInserted = false;
       for (const r of _allRows) {
         const isOrdered = r.status === 'ordered';
+        if (isOrdered && !_sepInserted) {
+          html += `<tr class="ot-sep"><td colspan="4"></td></tr>`;
+          _sepInserted = true;
+        }
         const rowCls = isOrdered ? ' class="ot-done"' : '';
         const chkCell = isOrdered
           ? `<td class="ot-chk"><span class="ot-rcv" onclick="_tblReceive(${r.order_id})">입고</span></td>`
