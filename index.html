@@ -157,13 +157,17 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ord-name{font-size:15px;font-weight:600}
 .ord-detail{font-size:13px;color:var(--dim);margin-top:3px;font-family:'JetBrains Mono',monospace}
 .ord-section{margin-bottom:20px}
-.ord-section-title{font-size:14px;font-weight:800;padding:14px 2px 10px;display:flex;align-items:center;gap:8px}
-.ord-section-title .ord-icon{font-size:16px}
-.ord-pending-badge{font-size:11px;background:var(--accent);color:#fff;border-radius:10px;padding:2px 10px;font-weight:700}
+.ord-section-title{font-size:14px;font-weight:800;padding:8px 2px 6px;display:flex;align-items:center;gap:6px}
+.ord-section-title .ord-icon{font-size:14px}
+.ord-section-title .ord-copy-all{margin-left:auto;font-size:11px;color:var(--accent);background:none;border:1px solid var(--accent);border-radius:6px;padding:3px 10px;cursor:pointer;font-weight:600;font-family:inherit;white-space:nowrap}
+.ord-section-title .ord-copy-all:active{background:var(--accent-lt)}
+.ord-pending-badge{font-size:11px;background:var(--accent);color:#fff;border-radius:10px;padding:1px 8px;font-weight:700}
 .ord-suggest-badge{font-size:11px;background:var(--surface2);color:var(--dim);border-radius:10px;padding:2px 10px;font-weight:600;border:1px solid var(--border)}
-.ord-vendor-group{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:10px}
-.ord-vendor-hdr{padding:11px 14px;display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border)}
-.ord-vendor-name{font-size:14px;font-weight:700}
+.ord-vendor-group{background:var(--surface);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:6px}
+.ord-vendor-hdr{padding:6px 12px;display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--surface2);font-size:13px}
+.ord-vendor-name{font-weight:700;font-size:13px}
+.ord-vendor-copy{font-size:11px;color:var(--accent);background:none;border:none;cursor:pointer;font-weight:600;font-family:inherit;margin-left:auto;padding:2px 6px;white-space:nowrap}
+.ord-vendor-copy:active{opacity:.6}
 .ord-vendor-method{font-size:11px;color:var(--muted);margin-left:4px}
 .ord-method-badge{font-size:12px;color:var(--dim);margin-left:6px}
 .ord-method-sel{background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px;font-family:inherit;color:var(--text);outline:none;cursor:pointer}
@@ -204,27 +208,30 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ord-suggest-collapse{display:none}
 .ord-suggest-collapse.open{display:block}
 /* v3 체크리스트 UI */
-.chk-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-top:1px solid var(--surface2);transition:opacity .2s}
-.chk-row.checked{opacity:.45}
+.chk-row{display:flex;align-items:center;gap:8px;padding:6px 12px;border-top:1px solid var(--surface2);transition:opacity .2s}
+.chk-row.checked{opacity:.4}
 .chk-row.checked .chk-name{text-decoration:line-through;color:var(--dim)}
-.chk-box{width:22px;height:22px;border:2px solid var(--border);border-radius:6px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:14px;transition:all .15s}
+.chk-box{width:18px;height:18px;border:2px solid var(--border);border-radius:5px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;font-size:11px;transition:all .15s}
 .chk-box.on{background:var(--accent);border-color:var(--accent);color:#fff}
-.chk-name{font-size:14px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.chk-qty{font-size:14px;font-weight:700;color:var(--accent);min-width:24px;text-align:right;cursor:pointer;padding:2px 4px;border-radius:4px}
+.chk-name{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chk-qty{font-size:13px;font-weight:700;color:var(--accent);min-width:20px;text-align:right;cursor:pointer;padding:1px 3px;border-radius:4px}
 .chk-qty:active{background:var(--accent-lt)}
-.chk-unit{font-size:12px;color:var(--dim);white-space:nowrap}
-.chk-x{width:28px;height:28px;border:none;background:none;color:var(--dim);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:6px;flex-shrink:0}
+.chk-unit{font-size:11px;color:var(--dim);white-space:nowrap}
+.chk-x{width:24px;height:24px;border:none;background:none;color:var(--dim);font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;border-radius:5px;flex-shrink:0}
 .chk-x:active{background:var(--surface2)}
 .chk-dep{font-size:10px;color:var(--warn);font-weight:600;white-space:nowrap}
-.chk-detail{display:none;padding:6px 14px 10px 46px;font-size:12px;color:var(--dim);flex-direction:column;gap:4px;border-top:1px dashed var(--surface2)}
+.chk-detail{display:none;padding:4px 12px 8px 38px;font-size:11px;color:var(--dim);flex-direction:column;gap:3px;border-top:1px dashed var(--surface2)}
 .chk-detail.open{display:flex}
-.chk-qty-edit{width:48px;height:28px;border:1px solid var(--accent);border-radius:6px;background:var(--surface);font-size:14px;font-weight:700;text-align:center;color:var(--accent);outline:none;font-family:inherit}
+.chk-qty-edit{width:44px;height:24px;border:1px solid var(--accent);border-radius:5px;background:var(--surface);font-size:13px;font-weight:700;text-align:center;color:var(--accent);outline:none;font-family:inherit}
 /* 입고 대기 컴팩트 */
-.rcv-row{display:flex;align-items:center;gap:10px;padding:8px 14px;border-top:1px solid var(--surface2)}
-.rcv-name{font-size:14px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.rcv-qty{font-size:13px;color:var(--dim)}
-.rcv-btn{padding:6px 14px;border-radius:8px;border:none;font-size:12px;font-weight:700;cursor:pointer;background:#3b82f6;color:#fff;white-space:nowrap}
+.rcv-row{display:flex;align-items:center;gap:8px;padding:6px 12px;border-top:1px solid var(--surface2)}
+.rcv-name{font-size:13px;font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rcv-qty{font-size:12px;color:var(--dim)}
+.rcv-btn{padding:4px 12px;border-radius:6px;border:none;font-size:11px;font-weight:700;cursor:pointer;background:#3b82f6;color:#fff;white-space:nowrap}
 .rcv-btn:active{opacity:.7}
+/* 입고 접기/펼치기 */
+.rcv-collapse{display:none}
+.rcv-collapse.open{display:block}
 .ord-empty{text-align:center;padding:24px;color:var(--muted);font-size:13px}
 .ord-item-name[data-editable]{cursor:pointer;border-bottom:1px dashed var(--border)}
 .ord-item-name[data-editable]:hover{color:var(--accent)}
@@ -507,10 +514,8 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
     <div id="orderList"><div class="no-item">로딩 중...</div></div>
   </div>
 
-  <!-- 최근 입력 결과 (1건만) -->
-  <div id="homeResList" style="margin-top:8px">
-    <div id="resList"></div>
-  </div>
+  <!-- 입력 결과 (비표시, DOM 유지) -->
+  <div id="resList" style="display:none"></div>
 
 </div>
 
@@ -3576,13 +3581,14 @@ async function renderOrder() {
         });
 
         html += `<div class="ord-section">`;
-        html += `<div class="ord-section-title"><span class="ord-icon">📋</span> 오늘의 발주 <span class="ord-pending-badge">${_mergedItems.length}</span></div>`;
+        html += `<div class="ord-section-title"><span class="ord-icon">📋</span> 오늘의 발주 <span class="ord-pending-badge">${_mergedItems.length}</span><button class="ord-copy-all" onclick="_copyAllMerged()">전체 복사</button></div>`;
         for (const [vName, items] of _mergedSorted) {
           const vKey = vName.replace(/'/g,"\\'");
           html += `<div class="ord-vendor-group">
             <div class="ord-vendor-hdr">
               <span class="ord-vendor-name">${vName}</span>
-              <span style="font-size:12px;color:var(--muted)">${items.length}건</span>
+              <span style="font-size:11px;color:var(--muted)">·${items.length}건</span>
+              <button class="ord-vendor-copy" onclick="_copyVendorAndCheck('${vKey}')">복사</button>
             </div>`;
           for (const it of items) {
             const rowId = it.source === 'pending' ? `chk_p_${it.order_id}` : `chk_s_${it.item_id}`;
@@ -3608,25 +3614,19 @@ async function renderOrder() {
             </div>
             ${detailHtml}`;
           }
-          html += `<div style="padding:8px 12px">
-            <button class="ord-btn-kakao" style="width:100%;padding:10px;border-radius:8px;font-size:13px" onclick="_copyVendorAndCheck('${vKey}')">📋 ${vName} 복사</button>
-          </div>`;
           html += `</div>`;
         }
-        html += `<div style="padding:8px 12px">
-          <button style="width:100%;padding:12px;background:#222;color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-family:inherit" onclick="_copyAllMerged()">📋 전체 복사</button>
-        </div>`;
         html += `</div>`;
       } else if (!_orderedItems.length) {
         html += `<div style="font-size:14px;color:#999;padding:12px 0">발주 필요 품목 없음</div>`;
       }
     }
 
-    // ── 입고 대기 (ordered) ──
+    // ── 입고 대기 (ordered, 접기/펼치기) ──
     if (_orderedItems.length) {
       html += `<div class="ord-section">`;
-      html += `<div class="ord-section-title"><span class="ord-icon">🚚</span> 입고 대기 <span class="ord-pending-badge" style="background:#3b82f6">${_orderedItems.length}</span></div>`;
-      html += `<div class="ord-vendor-group">`;
+      html += `<div class="ord-section-title" style="cursor:pointer" onclick="_toggleRcv()"><span class="ord-icon">📦</span> 입고 대기 <span class="ord-pending-badge" style="background:#3b82f6">${_orderedItems.length}</span><span id="rcvToggleArrow" style="margin-left:auto;font-size:11px;color:var(--muted)">펼치기 ▾</span></div>`;
+      html += `<div class="rcv-collapse" id="rcvCollapseBody"><div class="ord-vendor-group">`;
       for (const r of _orderedItems) {
         html += `<div class="rcv-row" data-row-oid="${r.id}" data-row-iid="${r.item_id}">
           <span class="rcv-name">${r.item_name}</span>
@@ -3634,7 +3634,7 @@ async function renderOrder() {
           <button class="rcv-btn" onclick="markReceived(${r.id})">입고</button>
         </div>`;
       }
-      html += `</div></div>`;
+      html += `</div></div></div>`;
     }
 
     list.innerHTML = html;
@@ -3677,6 +3677,16 @@ async function _copyVendorAndCheck(vendorName) {
       }
     }
   }
+}
+
+// 입고 대기 접기/펼치기
+function _toggleRcv() {
+  const body = document.getElementById('rcvCollapseBody');
+  const arrow = document.getElementById('rcvToggleArrow');
+  if (!body) return;
+  const show = !body.classList.contains('open');
+  body.classList.toggle('open', show);
+  if (arrow) arrow.textContent = show ? '접기 ▴' : '펼치기 ▾';
 }
 
 // 상세 펼침/접기
