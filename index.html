@@ -208,35 +208,32 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ord-suggest-collapse{display:none}
 .ord-suggest-collapse.open{display:block}
 /* v3 발주 표 */
+/* v3 추천 칩 */
+.ot-chips{padding:4px 0 8px;display:flex;flex-wrap:wrap;gap:6px}
+.ot-chips-title{font-size:12px;font-weight:700;color:var(--muted);padding:2px 0 4px}
+.ot-chip{display:inline-flex;align-items:center;gap:3px;padding:4px 10px;border-radius:16px;border:1px solid var(--border);background:var(--surface);font-size:12px;font-weight:600;color:var(--text);cursor:pointer;white-space:nowrap;transition:all .15s}
+.ot-chip:active{background:var(--accent-lt);border-color:var(--accent)}
+.ot-chip .chip-x{font-size:10px;color:var(--dim);margin-left:2px;cursor:pointer}
+.ot-chip .chip-x:hover{color:var(--red)}
 /* v3 발주 표 */
 .ot-hdr{display:flex;align-items:center;justify-content:space-between;padding:4px 0}
 .ot-hdr>span{font-size:14px;font-weight:800}
 .ot-copy{font-size:11px;color:var(--accent);background:none;border:1px solid var(--accent);border-radius:5px;padding:3px 10px;cursor:pointer;font-weight:600;font-family:inherit}
 .ot-copy:active{background:var(--accent-lt)}
-.ot{width:100%;border-collapse:collapse;font-size:12px}
-.ot th{text-align:left;font-size:10px;font-weight:800;color:var(--muted);padding:4px 6px;border-bottom:2px solid var(--border);background:var(--surface2);text-transform:uppercase;letter-spacing:.03em}
-.ot td{padding:4px 6px;vertical-align:middle}
-.ot-name{font-size:13px;font-weight:600;width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-th.ot-stock,td.ot-stock{width:15%;text-align:center;color:var(--dim);font-size:12px}
-th.ot-order,td.ot-order{width:25%;text-align:center;font-size:13px;font-weight:700;color:var(--accent);cursor:pointer;white-space:nowrap}
-.ot-u{font-size:10px;color:var(--dim);font-weight:400}
-td.ot-order:active{background:var(--accent-lt);border-radius:3px}
-th.ot-chk,td.ot-chk{width:20%;text-align:center;padding:2px 6px}
-/* 줄무늬 + 행 구분 */
+.ot{width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed}
+.ot th{text-align:center;font-size:10px;font-weight:800;color:var(--muted);padding:3px 2px;border-bottom:2px solid var(--border);background:var(--surface2)}
+.ot td{padding:4px 2px;vertical-align:middle;border-bottom:1px solid var(--surface2);text-align:center}
+th.ot-name,td.ot-name{text-align:left;padding-left:6px}
+.ot-name{font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ot-num{font-size:13px;font-weight:700;cursor:pointer;color:var(--text)}
+.ot-num:active{background:var(--accent-lt);border-radius:3px}
+.ot-num.accent{color:var(--accent)}
+.ot-num.empty{color:var(--border);font-weight:400}
+.ot-u{font-size:9px;color:var(--dim);font-weight:400}
 .ot tbody tr:nth-child(odd){background:#fff}
 .ot tbody tr:nth-child(even){background:#f8f8f5}
-/* 발주 대기 행: 초록 보더 */
-.ot tbody tr:not(.ot-done){border-left:3px solid #1a7a4a}
-/* 입고 대기 행: 파란 보더 + 연한 배경 */
-tr.ot-done{opacity:1;border-left:3px solid #3b82f6;background:rgba(59,130,246,.04) !important}
-tr.ot-done td{padding:3px 6px}
-tr.ot-done .ot-name{text-decoration:line-through;color:var(--dim);font-size:12px}
-tr.ot-done .ot-stock,tr.ot-done .ot-order{color:var(--dim);opacity:.5}
-/* 발주/입고 구분선 */
-tr.ot-sep td{padding:0;height:2px;background:var(--border);border:none}
-.ot-box{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-radius:4px;cursor:pointer;vertical-align:middle;transition:all .15s}
-.ot-box.on{background:var(--accent);border-color:var(--accent)}
-.ot-box.on::after{content:'✓';color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;height:100%}
+tr.ot-done{background:rgba(59,130,246,.04) !important}
+tr.ot-done .ot-name{text-decoration:line-through;color:var(--dim)}
 .ot-rcv{font-size:10px;color:#3b82f6;font-weight:700;cursor:pointer;padding:1px 5px;border:1px solid #3b82f6;border-radius:4px}
 .ot-rcv:active{background:rgba(59,130,246,.1)}
 .ot-qty-edit{width:36px;height:22px;border:1px solid var(--accent);border-radius:3px;background:var(--surface);font-size:13px;font-weight:700;text-align:center;color:var(--accent);outline:none;font-family:inherit}
@@ -3495,74 +3492,71 @@ async function renderOrder() {
       }
     }
 
-    // ── 통합 표 렌더링 (소진 예측은 백그라운드) ──
+    // ── 3단 구조 렌더링 ──
     console.log('[renderOrder] pending=', _pendingItems.length, 'ordered=', _orderedItems.length, 'suggest=', suggestItems.length);
-    const _allRows = [];
+    const _tableRows = []; // 표에 이미 있는 행
+    const _chipItems = []; // 추천 칩용
     const _seenIds = new Set();
 
-    // 1) pending → 발주 대기 행
+    // 1) pending/ordered → 표에 즉시 표시
     for (const r of _pendingItems) {
-      if (_seenIds.has(r.item_id)) {
-        const ex = _allRows.find(x => x.item_id === r.item_id);
-        if (ex) ex.orderQty += Number(r.qty);
-        continue;
-      }
+      if (_seenIds.has(r.item_id)) continue;
       _seenIds.add(r.item_id);
       const it = _items.find(x => x.item_id === r.item_id);
-      _allRows.push({ status: 'pending', order_id: r.id, item_id: r.item_id, name: r.item_name,
-        stockQty: it ? Number(it.current_qty) : 0, orderQty: Number(r.qty),
+      _tableRows.push({ status: 'pending', order_id: r.id, item_id: r.item_id, name: r.item_name,
+        stockQty: it ? Number(it.current_qty) : 0, orderQty: Number(r.qty), deductQty: 0,
         unit: it?.unit || r.unit || '개', vendor_id: r.vendor_id || it?.vendor_id || null,
         vendor: (r.vendor_id || it?.vendor_id) ? (_vendors.find(v => v.vendor_id === (r.vendor_id || it?.vendor_id))?.vendor_name || '') : '' });
     }
-    // 2) suggest → 발주 대기 행
-    for (const s of suggestItems) {
-      if (_seenIds.has(s.item_id) || _orderedItemIds.has(s.item_id)) continue;
-      _seenIds.add(s.item_id);
-      const it = _items.find(x => x.item_id === s.item_id);
-      _allRows.push({ status: 'suggest', order_id: null, item_id: s.item_id, name: s.name,
-        stockQty: s.current_qty, orderQty: s.suggested_qty,
-        unit: it?.order_unit_name || s.unit || '개', vendor_id: s.vendor_id || it?.vendor_id || null,
-        vendor: s.vendor || '' });
-    }
-    // 3) ordered → 입고 대기 행
     for (const r of _orderedItems) {
       if (_seenIds.has(r.item_id)) continue;
       _seenIds.add(r.item_id);
       const it = _items.find(x => x.item_id === r.item_id);
-      _allRows.push({ status: 'ordered', order_id: r.id, item_id: r.item_id, name: r.item_name,
-        stockQty: it ? Number(it.current_qty) : 0, orderQty: Number(r.qty),
-        unit: it?.unit || r.unit || '개', vendor_id: r.vendor_id || it?.vendor_id || null,
-        vendor: '' });
+      _tableRows.push({ status: 'ordered', order_id: r.id, item_id: r.item_id, name: r.item_name,
+        stockQty: it ? Number(it.current_qty) : 0, orderQty: Number(r.qty), deductQty: 0,
+        unit: it?.unit || r.unit || '개', vendor_id: r.vendor_id || it?.vendor_id || null, vendor: '' });
     }
-    window._textOrderCache = _allRows.filter(r => r.status !== 'ordered').map(r => ({
+
+    // 2) suggestItems → 칩으로 (표에는 아직 안 넣음)
+    for (const s of suggestItems) {
+      if (_seenIds.has(s.item_id) || _orderedItemIds.has(s.item_id)) continue;
+      const it = _items.find(x => x.item_id === s.item_id);
+      _chipItems.push({ item_id: s.item_id, name: s.name,
+        stockQty: s.current_qty, orderQty: s.suggested_qty,
+        unit: it?.order_unit_name || s.unit || '개', vendor_id: s.vendor_id || it?.vendor_id || null,
+        vendor: s.vendor || '' });
+    }
+
+    // 표 캐시 (전체 복사용)
+    window._textOrderCache = _tableRows.filter(r => r.status !== 'ordered').map(r => ({
       item_id: r.item_id, name: r.name, qty: r.orderQty, unit: r.unit, vendor: r.vendor, vendor_id: r.vendor_id
     }));
 
     let html = '';
-    if (_allRows.length) {
-      html += `<div class="ot-hdr"><span>📋 오늘의 발주</span><button class="ot-copy" onclick="_copyAllMerged()">전체 복사</button></div>`;
-      html += `<table class="ot"><thead><tr><th class="ot-name">품목</th><th class="ot-stock">재고</th><th class="ot-order">발주</th><th class="ot-chk">✓</th></tr></thead><tbody>`;
-      let _sepInserted = false;
-      for (const r of _allRows) {
-        const isOrdered = r.status === 'ordered';
-        if (isOrdered && !_sepInserted) {
-          html += `<tr class="ot-sep"><td colspan="4"></td></tr>`;
-          _sepInserted = true;
-        }
-        const rowCls = isOrdered ? ' class="ot-done"' : '';
-        const chkCell = isOrdered
-          ? `<td class="ot-chk"><span class="ot-rcv" onclick="_tblReceive(${r.order_id})">입고</span></td>`
-          : `<td class="ot-chk"><span class="ot-box" onclick="_tblCheck(this,${r.item_id},${r.order_id || 'null'},'${r.status}','${r.name.replace(/'/g,"\\'")}',${r.orderQty},'${r.unit}')"></span></td>`;
-        html += `<tr${rowCls} data-iid="${r.item_id}" ${r.order_id ? `data-oid="${r.order_id}"` : ''}>
-          <td class="ot-name" onclick="_tblLongPress(event,${r.item_id},${r.order_id || 'null'},'${r.status}')">${r.name}</td>
-          <td class="ot-stock">${r.stockQty}</td>
-          <td class="ot-order" onclick="_tblEditQty(this,${r.item_id},${r.order_id || 'null'},'${r.status}')">${r.orderQty}<span class="ot-u">${r.unit}</span></td>
-          ${chkCell}
-        </tr>`;
+
+    // [상단] 추천 칩
+    if (_chipItems.length) {
+      html += `<div class="ot-chips-title">오늘의 발주 추천</div><div class="ot-chips" id="otChips">`;
+      for (const c of _chipItems) {
+        html += `<span class="ot-chip" data-iid="${c.item_id}" onclick="_chipAdd(${c.item_id})">
+          ${c.name}<span class="chip-x" onclick="event.stopPropagation();_chipDismiss(${c.item_id},this.parentElement)">✕</span></span>`;
       }
-      html += `</tbody></table>`;
-    } else {
-      html += `<div class="ord-empty-good">
+      html += `</div>`;
+    }
+
+    // [중단] 표
+    html += `<div class="ot-hdr"><span>📋 오늘의 발주</span><button class="ot-copy" onclick="_copyAllMerged()">전체 복사</button></div>`;
+    html += `<table class="ot">
+    <colgroup><col style="width:35%"><col style="width:14%"><col style="width:17%"><col style="width:17%"><col style="width:17%"></colgroup>
+    <thead><tr>
+      <th class="ot-name">품목</th><th>재고</th><th>발주</th><th>차감</th><th>입고</th>
+    </tr></thead><tbody id="otBody">`;
+    for (const r of _tableRows) {
+      html += _renderTableRow(r);
+    }
+    html += `</tbody></table>`;
+    if (!_tableRows.length && !_chipItems.length) {
+      html = `<div class="ord-empty-good">
         <div class="ord-empty-icon">✅</div>
         <div class="ord-empty-title">모든 재고가 충분합니다</div>
       </div>`;
@@ -3570,7 +3564,10 @@ async function renderOrder() {
 
     list.innerHTML = html;
 
-    // 소진 예측: 백그라운드 (표 렌더 후 비동기)
+    // 칩 데이터 전역 저장
+    window._chipData = _chipItems;
+
+    // 소진 예측: 백그라운드 → 추가 칩 생성
     _loadDepletionAsync(_seenIds, _cancelledItemIds);
   } catch(e) {
     list.innerHTML = `<div class="no-item">오류: ${e.message}</div>`;
@@ -3606,17 +3603,17 @@ async function _loadDepletionAsync(existingIds, cancelledIds) {
       console.log('[소진예측] 결과 캐시 저장:', alerts.length, '건');
     }
 
-    // 이미 표에 있는 품목/취소 품목 제외 후 행 추가
-    const tbody = document.querySelector('.ot tbody');
-    if (!tbody) return;
+    // 소진 임박 → 추천 칩에 추가
+    const chipsEl = document.getElementById('otChips');
     let added = 0;
     for (const a of alerts) {
-      const it = a.item || a; // 캐시 vs 라이브
+      const it = a.item || a;
       const itemId = it.item_id;
       if (existingIds.has(itemId)) continue;
       if (cancelledIds.has(itemId)) continue;
       if (_dismissedItemIds.has(itemId)) continue;
-      if (tbody.querySelector(`tr[data-iid="${itemId}"]`)) continue;
+      if (document.querySelector(`.ot-chip[data-iid="${itemId}"]`)) continue;
+      if (document.querySelector(`tr[data-iid="${itemId}"]`)) continue;
       const dep = a.depletion || it.depletion;
       const ouq = parseInt(it.order_unit_qty) || 1;
       let recQty = a.lastOrderQty > 0 ? a.lastOrderQty : Math.ceil(dep.dailyAvg * 7);
@@ -3624,21 +3621,21 @@ async function _loadDepletionAsync(existingIds, cancelledIds) {
       const unit = it.unit || '개';
       const name = it.item_name || it.name;
       const stockQty = it.current_qty ?? 0;
-      const tr = document.createElement('tr');
-      tr.dataset.iid = itemId;
-      tr.innerHTML = `
-        <td class="ot-name">${name}</td>
-        <td class="ot-stock">${stockQty}</td>
-        <td class="ot-order" onclick="_tblEditQty(this,${itemId},null,'suggest')">${recQty}<span class="ot-u">${unit}</span></td>
-        <td class="ot-chk"><span class="ot-box" onclick="_tblCheck(this,${itemId},null,'suggest','${name.replace(/'/g,"\\'")}',${recQty},'${unit}')"></span></td>`;
-      tbody.appendChild(tr);
-      // _textOrderCache에도 추가
-      if (window._textOrderCache) {
-        window._textOrderCache.push({ item_id: itemId, name, qty: recQty, unit, vendor: '', vendor_id: it.vendor_id || null });
+      // 칩 데이터 추가
+      if (!window._chipData) window._chipData = [];
+      window._chipData.push({ item_id: itemId, name, stockQty, orderQty: recQty, unit, vendor_id: it.vendor_id || null, vendor: '' });
+      // 칩 DOM 추가
+      if (chipsEl) {
+        const span = document.createElement('span');
+        span.className = 'ot-chip';
+        span.dataset.iid = itemId;
+        span.onclick = () => _chipAdd(itemId);
+        span.innerHTML = `${name}<span class="chip-x" onclick="event.stopPropagation();_chipDismiss(${itemId},this.parentElement)">✕</span>`;
+        chipsEl.appendChild(span);
       }
       added++;
     }
-    if (added) console.log('[소진예측] 표에', added, '행 추가');
+    if (added) console.log('[소진예측] 칩', added, '개 추가');
   } catch(e) {
     console.warn('[소진예측] 백그라운드 오류:', e.message);
   }
@@ -3649,60 +3646,110 @@ function _invalidateDepletionCache() {
   sessionStorage.removeItem(`zk_depletion_${SID}`);
 }
 
-// ── v3 표 인터랙션 ──
+// ── v3 표 행 렌더링 헬퍼 ──
+function _renderTableRow(r) {
+  const isOrdered = r.status === 'ordered';
+  const cls = isOrdered ? ' class="ot-done"' : '';
+  const rcvCell = isOrdered
+    ? `<td><span class="ot-rcv" onclick="_tblReceive(${r.order_id})">입고</span></td>`
+    : `<td class="ot-num empty" data-col="rcv">-</td>`;
+  const orderCls = r.orderQty > 0 ? 'ot-num accent' : 'ot-num empty';
+  const deductCls = r.deductQty > 0 ? 'ot-num' : 'ot-num empty';
+  return `<tr${cls} data-iid="${r.item_id}" ${r.order_id ? `data-oid="${r.order_id}"` : ''} data-unit="${r.unit}" data-vid="${r.vendor_id || ''}" data-vendor="${r.vendor || ''}">
+    <td class="ot-name">${r.name}</td>
+    <td class="ot-num" data-col="stock" onclick="_tblEdit(this,${r.item_id},'stock')">${r.stockQty}</td>
+    <td class="${orderCls}" data-col="order" onclick="_tblEdit(this,${r.item_id},'order')">${r.orderQty || '-'}</td>
+    <td class="${deductCls}" data-col="deduct" onclick="_tblEdit(this,${r.item_id},'deduct')">${r.deductQty || '-'}</td>
+    ${rcvCell}
+  </tr>`;
+}
 
-// 체크박스 → ordered 전환
-async function _tblCheck(box, itemId, orderId, status, name, qty, unit) {
-  const tr = box.closest('tr');
-  if (!tr) return;
-  box.classList.add('on');
-  tr.classList.add('ot-done');
-  if (status === 'pending') {
-    await markOrdered(orderId);
-  } else {
-    await _orderConfirmSuggest(itemId, name, qty, unit);
+// ── 칩 인터랙션 ──
+
+// 칩 탭 → 표에 행 추가
+function _chipAdd(itemId) {
+  const chips = window._chipData || [];
+  const chip = chips.find(c => c.item_id === itemId);
+  if (!chip) return;
+  // 이미 표에 있으면 무시
+  if (document.querySelector(`tr[data-iid="${itemId}"]`)) {
+    showToast(`${chip.name} 이미 추가됨`);
+    return;
   }
+  const tbody = document.getElementById('otBody');
+  if (!tbody) return;
+  const row = { status: 'suggest', order_id: null, item_id: chip.item_id, name: chip.name,
+    stockQty: chip.stockQty, orderQty: chip.orderQty, deductQty: 0,
+    unit: chip.unit, vendor_id: chip.vendor_id, vendor: chip.vendor };
+  tbody.insertAdjacentHTML('beforeend', _renderTableRow(row));
+  // _textOrderCache에 추가
+  if (window._textOrderCache) {
+    window._textOrderCache.push({ item_id: chip.item_id, name: chip.name, qty: chip.orderQty, unit: chip.unit, vendor: chip.vendor, vendor_id: chip.vendor_id });
+  }
+  // 칩 시각적 비활성화
+  const chipEl = document.querySelector(`.ot-chip[data-iid="${itemId}"]`);
+  if (chipEl) { chipEl.style.opacity = '.3'; chipEl.style.pointerEvents = 'none'; }
+  showToast(`${chip.name} 추가`);
 }
 
-// 입고 처리 → 행 제거
-async function _tblReceive(orderId) {
-  await markReceived(orderId);
+// 칩 ✕ → 추천에서 제거
+function _chipDismiss(itemId, chipEl) {
+  _dismissedItemIds.add(itemId);
+  if (chipEl) chipEl.remove();
 }
 
-// 발주 수량 인라인 편집
-function _tblEditQty(td, itemId, orderId, status) {
-  if (status === 'ordered') return;
+// ── 표 인터랙션 ──
+
+// 셀 인라인 편집
+function _tblEdit(td, itemId, col) {
   const current = parseInt(td.textContent) || 0;
   const input = document.createElement('input');
   input.type = 'number';
   input.className = 'ot-qty-edit';
-  input.value = current;
+  input.value = current || '';
   td.textContent = '';
   td.appendChild(input);
   input.focus();
   input.select();
   const save = async () => {
-    const newQty = parseInt(input.value) || current;
-    td.textContent = newQty;
-    td.onclick = () => _tblEditQty(td, itemId, orderId, status);
-    if (status === 'pending' && orderId) {
-      await db.from('order_requests').update({ qty: newQty }).eq('id', orderId);
-    }
-    if (window._textOrderCache) {
-      const c = window._textOrderCache.find(x => x.item_id === itemId);
-      if (c) c.qty = newQty;
+    const val = parseInt(input.value) || 0;
+    td.textContent = val || '-';
+    td.className = val > 0 ? (col === 'order' ? 'ot-num accent' : 'ot-num') : 'ot-num empty';
+    td.onclick = () => _tblEdit(td, itemId, col);
+    // DB 반영
+    if (col === 'stock') {
+      const item = _items.find(x => x.item_id === itemId);
+      if (item) {
+        const oldQty = Number(item.current_qty);
+        await db.from('items').update({ current_qty: val, updated_at: new Date().toISOString() }).eq('item_id', itemId);
+        item.current_qty = val;
+        _invalidateDepletionCache();
+        await db.from('kitchen_operations').insert({
+          store_id: SID, item_id: itemId, item_name: item.item_name,
+          action_type: 'stock_check', quantity: val, unit: item.unit || '개',
+          qty_before: oldQty, qty_after: val, input_method: 'table_edit'
+        });
+      }
+    } else if (col === 'order') {
+      const tr = td.closest('tr');
+      const orderId = tr?.dataset.oid ? parseInt(tr.dataset.oid) : null;
+      if (orderId) await db.from('order_requests').update({ qty: val }).eq('id', orderId);
+      if (window._textOrderCache) {
+        const c = window._textOrderCache.find(x => x.item_id === itemId);
+        if (c) c.qty = val;
+      }
     }
   };
   input.onblur = save;
   input.onkeydown = (e) => { if (e.key === 'Enter') input.blur(); };
 }
 
-// 길게 누름 → 삭제
-let _longPressTimer = null;
-function _tblLongPress(e, itemId, orderId, status) {
-  // 모바일: touchstart 이벤트 대신 click 길게누름 시뮬레이션
-  // 여기서는 더블탭으로 대체
+// 입고 처리
+async function _tblReceive(orderId) {
+  await markReceived(orderId);
 }
+
+// 행 삭제 (더블탭)
 document.addEventListener('dblclick', function(e) {
   const td = e.target.closest('.ot-name');
   if (!td) return;
@@ -3712,11 +3759,8 @@ document.addEventListener('dblclick', function(e) {
   const orderId = tr.dataset.oid ? parseInt(tr.dataset.oid) : null;
   const name = td.textContent.trim();
   if (confirm(`"${name}" 삭제?`)) {
-    if (orderId) {
-      cancelOrder(orderId);
-    } else {
-      _dismissSuggest(itemId);
-    }
+    if (orderId) cancelOrder(orderId);
+    else _dismissSuggest(itemId);
     tr.remove();
   }
 });
