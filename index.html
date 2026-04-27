@@ -3330,7 +3330,9 @@ async function _getDepletionAlerts() {
     }
   }
 
-  return alerts.sort((a, b) => a.depletion.daysLeft - b.depletion.daysLeft);
+  const sorted = alerts.sort((a, b) => a.depletion.daysLeft - b.depletion.daysLeft);
+  console.log('[소진예측] 결과:', sorted.length, '건', sorted);
+  return sorted;
 }
 
 // 스크롤 위치 보존 renderOrder 래퍼
@@ -3451,6 +3453,7 @@ async function renderOrder() {
     }
 
     // 3) 소진 임박 품목 추가 (재고 > 0이지만 3일 이내 소진 예측)
+    console.log('[소진예측] 호출 시작');
     const depletionAlerts = await _getDepletionAlerts();
     for (const alert of depletionAlerts) {
       const it = alert.item;
