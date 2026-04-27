@@ -208,27 +208,29 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 .ord-suggest-collapse{display:none}
 .ord-suggest-collapse.open{display:block}
 /* v3 발주 표 */
-.ot-hdr{display:flex;align-items:center;justify-content:space-between;padding:6px 0}
-.ot-hdr>span{font-size:15px;font-weight:800}
-.ot-copy{font-size:12px;color:var(--accent);background:none;border:1px solid var(--accent);border-radius:6px;padding:4px 12px;cursor:pointer;font-weight:600;font-family:inherit}
+/* v3 발주 표 */
+.ot-hdr{display:flex;align-items:center;justify-content:space-between;padding:4px 0}
+.ot-hdr>span{font-size:14px;font-weight:800}
+.ot-copy{font-size:11px;color:var(--accent);background:none;border:1px solid var(--accent);border-radius:5px;padding:3px 10px;cursor:pointer;font-weight:600;font-family:inherit}
 .ot-copy:active{background:var(--accent-lt)}
-.ot{width:100%;border-collapse:collapse;font-size:13px}
-.ot th{text-align:left;font-size:11px;font-weight:700;color:var(--muted);padding:4px 6px;border-bottom:2px solid var(--border)}
-.ot td{padding:7px 6px;border-bottom:1px solid var(--surface2);vertical-align:middle}
-.ot-name{font-weight:600;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.ot-unit{font-size:10px;color:var(--dim);margin-left:3px;font-weight:400}
-th.ot-stock,td.ot-stock{width:40px;text-align:center;color:var(--dim);font-size:12px}
-th.ot-order,td.ot-order{width:44px;text-align:center;font-weight:700;color:var(--accent);cursor:pointer}
-td.ot-order:active{background:var(--accent-lt);border-radius:4px}
-th.ot-chk,td.ot-chk{width:36px;text-align:center}
-.ot-box{display:inline-block;width:18px;height:18px;border:2px solid var(--border);border-radius:5px;cursor:pointer;vertical-align:middle;transition:all .15s}
+.ot{width:100%;border-collapse:collapse;font-size:12px}
+.ot th{text-align:left;font-size:10px;font-weight:700;color:var(--muted);padding:2px 4px;border-bottom:1.5px solid var(--border)}
+.ot td{padding:4px;border-bottom:1px solid var(--surface2);vertical-align:middle}
+.ot-name{font-size:13px;font-weight:600;max-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+th.ot-stock,td.ot-stock{width:32px;text-align:center;color:var(--dim);font-size:12px}
+th.ot-order,td.ot-order{width:50px;text-align:center;font-size:13px;font-weight:700;color:var(--accent);cursor:pointer;white-space:nowrap}
+.ot-u{font-size:10px;color:var(--dim);font-weight:400}
+td.ot-order:active{background:var(--accent-lt);border-radius:3px}
+th.ot-chk,td.ot-chk{width:32px;text-align:center;padding:2px}
+.ot-box{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-radius:4px;cursor:pointer;vertical-align:middle;transition:all .15s}
 .ot-box.on{background:var(--accent);border-color:var(--accent)}
-.ot-box.on::after{content:'✓';color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;height:100%}
-.ot-rcv{font-size:11px;color:#3b82f6;font-weight:700;cursor:pointer;padding:2px 6px;border:1px solid #3b82f6;border-radius:5px}
+.ot-box.on::after{content:'✓';color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center;height:100%}
+.ot-rcv{font-size:10px;color:#3b82f6;font-weight:700;cursor:pointer;padding:1px 5px;border:1px solid #3b82f6;border-radius:4px}
 .ot-rcv:active{background:rgba(59,130,246,.1)}
-tr.ot-done{opacity:.4}
-tr.ot-done .ot-name{text-decoration:line-through;color:var(--dim)}
-.ot-qty-edit{width:40px;height:24px;border:1px solid var(--accent);border-radius:4px;background:var(--surface);font-size:13px;font-weight:700;text-align:center;color:var(--accent);outline:none;font-family:inherit}
+tr.ot-done{opacity:.35}
+tr.ot-done td{padding:3px 4px}
+tr.ot-done .ot-name{text-decoration:line-through;color:var(--dim);font-size:12px}
+.ot-qty-edit{width:36px;height:22px;border:1px solid var(--accent);border-radius:3px;background:var(--surface);font-size:13px;font-weight:700;text-align:center;color:var(--accent);outline:none;font-family:inherit}
 .ord-empty{text-align:center;padding:24px;color:var(--muted);font-size:13px}
 .ord-item-name[data-editable]{cursor:pointer;border-bottom:1px dashed var(--border)}
 .ord-item-name[data-editable]:hover{color:var(--accent)}
@@ -3570,9 +3572,9 @@ async function renderOrder() {
           ? `<td class="ot-chk"><span class="ot-rcv" onclick="_tblReceive(${r.order_id})">입고</span></td>`
           : `<td class="ot-chk"><span class="ot-box" onclick="_tblCheck(this,${r.item_id},${r.order_id || 'null'},'${r.status}','${r.name.replace(/'/g,"\\'")}',${r.orderQty},'${r.unit}')"></span></td>`;
         html += `<tr${rowCls} data-iid="${r.item_id}" ${r.order_id ? `data-oid="${r.order_id}"` : ''}>
-          <td class="ot-name" onclick="_tblLongPress(event,${r.item_id},${r.order_id || 'null'},'${r.status}')">${r.name}<span class="ot-unit">${r.unit}</span></td>
+          <td class="ot-name" onclick="_tblLongPress(event,${r.item_id},${r.order_id || 'null'},'${r.status}')">${r.name}</td>
           <td class="ot-stock">${r.stockQty}</td>
-          <td class="ot-order" onclick="_tblEditQty(this,${r.item_id},${r.order_id || 'null'},'${r.status}')">${r.orderQty}</td>
+          <td class="ot-order" onclick="_tblEditQty(this,${r.item_id},${r.order_id || 'null'},'${r.status}')">${r.orderQty}<span class="ot-u">${r.unit}</span></td>
           ${chkCell}
         </tr>`;
       }
