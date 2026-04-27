@@ -1067,6 +1067,7 @@ async function processRequest(json) {
             // 캐시 업데이트
             item.current_qty = newQty;
             if (unit) item.unit = unit;
+            _invalidateDepletionCache();
             updated.push({ name: item.item_name, quantity: newQty, inputQty: qty, unit: item.unit, action, item_id: item.item_id, qty_before: qtyBefore });
 
           } else {
@@ -2971,6 +2972,7 @@ async function _saveInvQty(id, el) {
   const oldQty = Number(item.current_qty);
   await db.from('items').update({ current_qty: newQty, updated_at: new Date().toISOString() }).eq('item_id', id);
   item.current_qty = newQty;
+  _invalidateDepletionCache();
   el.defaultValue = newQty;
   // 재고 0 클래스 상태 갱신
   el.classList.toggle('zero', newQty <= 0);
@@ -3484,41 +3486,7 @@ async function renderOrder() {
       }
     }
 
-    // 3) 소진 임박 품목 추가 (재고 > 0이지만 3일 이내 소진 예측)
-    console.log('[소진예측] 호출 시작');
-    const depletionAlerts = await _getDepletionAlerts();
-    for (const alert of depletionAlerts) {
-      const it = alert.item;
-      if (suggestItems.some(s => s.item_id === it.item_id)) continue; // 이미 재고부족 제안에 있으면 skip
-      if (_pendingItems.some(p => p.item_id === it.item_id)) continue; // 이미 발주 대���에 있으면 skip
-      if (_cancelledItemIds.has(it.item_id)) continue;
-      const dep = alert.depletion;
-      // 추천 수량: 직전 발주 수량 우선, 없으면 일평균 × 7일분
-      const ouq = parseInt(it.order_unit_qty) || 1;
-      let recQty;
-      const lastOrd = alert.lastOrderQty;
-      if (lastOrd && lastOrd > 0) {
-        recQty = lastOrd;
-      } else {
-        recQty = Math.ceil(dep.dailyAvg * 7);
-      }
-      if (ouq > 1 && recQty > 0) recQty = Math.ceil(recQty / ouq) * ouq;
-      const unitLabel = (ouq > 1 && it.order_unit_name) ? `(${Math.ceil(recQty / ouq)}${it.order_unit_name})` : '';
-      suggestItems.push({
-        item_id: it.item_id, name: it.item_name,
-        current_qty: Number(it.current_qty), target_qty: Number(it.target_qty),
-        suggested_qty: recQty,
-        unit: it.unit || '', vendor_id: it.vendor_id || null,
-        vendor: _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || null,
-        source: 'depletion_forecast',
-        avg: dep.dailyAvg,
-        daysLeft: dep.daysLeft,
-        unitLabel: unitLabel
-      });
-    }
-    if (depletionAlerts.length) console.log('[renderOrder] 소진 임박:', depletionAlerts.map(a => `${a.item.item_name}(${a.depletion.daysLeft}일)`).join(', '));
-
-    // ── 통합 표 렌더링 ──
+    // ── 통합 표 렌더링 (소진 예측은 백그라운드) ──
     console.log('[renderOrder] pending=', _pendingItems.length, 'ordered=', _orderedItems.length, 'suggest=', suggestItems.length);
     const _allRows = [];
     const _seenIds = new Set();
@@ -3587,9 +3555,84 @@ async function renderOrder() {
     }
 
     list.innerHTML = html;
+
+    // 소진 예측: 백그라운드 (표 렌더 후 비동기)
+    _loadDepletionAsync(_seenIds, _cancelledItemIds);
   } catch(e) {
     list.innerHTML = `<div class="no-item">오류: ${e.message}</div>`;
   }
+}
+
+// 소진 예측 백그라운드 로드 + 캐시
+async function _loadDepletionAsync(existingIds, cancelledIds) {
+  try {
+    const cacheKey = `zk_depletion_${SID}`;
+    const cached = sessionStorage.getItem(cacheKey);
+    let alerts;
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        // 5분 이내 캐시만 사용
+        if (Date.now() - parsed.ts < 5 * 60 * 1000) {
+          alerts = parsed.alerts;
+          console.log('[소진예측] 캐시 사용:', alerts.length, '건');
+        }
+      } catch(e) { /* 캐시 파싱 실패 무시 */ }
+    }
+
+    if (!alerts) {
+      console.log('[소진예측] 계산 시작');
+      alerts = await _getDepletionAlerts();
+      sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), alerts: alerts.map(a => ({
+        item_id: a.item.item_id, item_name: a.item.item_name, current_qty: Number(a.item.current_qty),
+        unit: a.item.unit || '', vendor_id: a.item.vendor_id || null,
+        order_unit_qty: a.item.order_unit_qty, order_unit_name: a.item.order_unit_name,
+        depletion: a.depletion, lastOrderQty: a.lastOrderQty
+      })) }));
+      console.log('[소진예측] 결과 캐시 저장:', alerts.length, '건');
+    }
+
+    // 이미 표에 있는 품목/취소 품목 제외 후 행 추가
+    const tbody = document.querySelector('.ot tbody');
+    if (!tbody) return;
+    let added = 0;
+    for (const a of alerts) {
+      const it = a.item || a; // 캐시 vs 라이브
+      const itemId = it.item_id;
+      if (existingIds.has(itemId)) continue;
+      if (cancelledIds.has(itemId)) continue;
+      if (_dismissedItemIds.has(itemId)) continue;
+      if (tbody.querySelector(`tr[data-iid="${itemId}"]`)) continue;
+      const dep = a.depletion || it.depletion;
+      const ouq = parseInt(it.order_unit_qty) || 1;
+      let recQty = a.lastOrderQty > 0 ? a.lastOrderQty : Math.ceil(dep.dailyAvg * 7);
+      if (ouq > 1 && recQty > 0) recQty = Math.ceil(recQty / ouq) * ouq;
+      const unit = it.unit || '개';
+      const name = it.item_name || it.name;
+      const stockQty = it.current_qty ?? 0;
+      const tr = document.createElement('tr');
+      tr.dataset.iid = itemId;
+      tr.innerHTML = `
+        <td class="ot-name">${name}</td>
+        <td class="ot-stock">${stockQty}</td>
+        <td class="ot-order" onclick="_tblEditQty(this,${itemId},null,'suggest')">${recQty}<span class="ot-u">${unit}</span></td>
+        <td class="ot-chk"><span class="ot-box" onclick="_tblCheck(this,${itemId},null,'suggest','${name.replace(/'/g,"\\'")}',${recQty},'${unit}')"></span></td>`;
+      tbody.appendChild(tr);
+      // _textOrderCache에도 추가
+      if (window._textOrderCache) {
+        window._textOrderCache.push({ item_id: itemId, name, qty: recQty, unit, vendor: '', vendor_id: it.vendor_id || null });
+      }
+      added++;
+    }
+    if (added) console.log('[소진예측] 표에', added, '행 추가');
+  } catch(e) {
+    console.warn('[소진예측] 백그라운드 오류:', e.message);
+  }
+}
+
+// 소진 예측 캐시 무효화 (재고 변경 시 호출)
+function _invalidateDepletionCache() {
+  sessionStorage.removeItem(`zk_depletion_${SID}`);
 }
 
 // ── v3 표 인터랙션 ──
