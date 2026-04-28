@@ -500,8 +500,11 @@ tr.ot-done .ot-name{text-decoration:line-through;color:var(--dim)}
 
 /* ── v4 표 카드 ── */
 .v4-card{background:#fff;border-radius:16px;padding:0;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px}
-.v4-card-hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px}
+.v4-card-hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;cursor:pointer;user-select:none}
 .v4-card-hdr span{font-size:15px;font-weight:800;color:var(--text)}
+.v4-card-hdr .v4-fold-arrow{font-size:11px;color:var(--muted);margin-left:6px;transition:transform .2s;display:inline-block}
+.v4-card-hdr .v4-fold-arrow.up{transform:rotate(180deg)}
+.v4-card-body.collapsed{display:none}
 .v4-copy-btn{font-size:12px;color:var(--order-green);background:#e8f7ec;border:1px solid #c3e6cd;border-radius:8px;padding:5px 14px;cursor:pointer;font-weight:700;font-family:inherit}
 .v4-copy-btn:active{background:#c3e6cd}
 
@@ -3643,8 +3646,8 @@ async function renderOrder() {
     let html = '';
     if (_pendingRows.length || _chipItems.length) {
       html += `<div class="v4-card">
-        <div class="v4-card-hdr"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span></span><button class="v4-copy-btn" onclick="_copyAllMerged()">전체 복사</button></div>
-        <table class="v4-table">
+        <div class="v4-card-hdr" onclick="_toggleOrderFold(this)"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span><span class="v4-fold-arrow">▼</span></span><button class="v4-copy-btn" onclick="event.stopPropagation();_copyAllMerged()">전체 복사</button></div>
+        <div class="v4-card-body" id="orderCardBody"><table class="v4-table">
         <colgroup><col style="width:38%"><col style="width:18%"><col style="width:26%"><col style="width:18%"></colgroup>
         <thead><tr>
           <th class="v4-name">품목</th><th>재고</th><th>발주</th><th>✓</th>
@@ -3671,6 +3674,7 @@ async function renderOrder() {
         }
         html += `</div>`;
       }
+      html += `</div>`; // .v4-card-body 닫기
       html += `</div>`; // .v4-card 닫기
     } else if (!_orderedRows.length) {
       html = `<div class="v4-card"><div class="v4-all-good">
@@ -3680,8 +3684,8 @@ async function renderOrder() {
     } else {
       // pending 없고 ordered만 있는 경우
       html += `<div class="v4-card">
-        <div class="v4-card-hdr"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span></span><button class="v4-copy-btn" onclick="_copyAllMerged()">전체 복사</button></div>
-        <div class="v4-empty-hint">추천을 탭하거나 아래에서 입력하세요</div>`;
+        <div class="v4-card-hdr" onclick="_toggleOrderFold(this)"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span><span class="v4-fold-arrow">▼</span></span><button class="v4-copy-btn" onclick="event.stopPropagation();_copyAllMerged()">전체 복사</button></div>
+        <div class="v4-card-body" id="orderCardBody"><div class="v4-empty-hint">추천을 탭하거나 아래에서 입력하세요</div>`;
       html += `<div class="v4-receive-bar" onclick="this.querySelector('.arrow').classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
         <span>📦 입고 대기 (${_orderedRows.length})</span><span class="arrow">▾</span>
       </div>
@@ -3693,7 +3697,7 @@ async function renderOrder() {
           <button class="v4-receive-btn" onclick="_tblReceive(${r.order_id})">입고</button>
         </div>`;
       }
-      html += `</div></div>`;
+      html += `</div></div></div>`;
     }
 
     list.innerHTML = html;
@@ -3864,6 +3868,18 @@ function _chipDismiss(itemId, chipEl) {
 }
 
 // ── 표 인터랙션 ──
+
+// v4 표 접기/펼치기
+function _toggleOrderFold(hdrEl) {
+  const body = hdrEl.nextElementSibling;
+  if (!body) return;
+  const arrow = hdrEl.querySelector('.v4-fold-arrow');
+  body.classList.toggle('collapsed');
+  if (arrow) {
+    const folded = body.classList.contains('collapsed');
+    arrow.classList.toggle('up', folded);
+  }
+}
 
 // v4 행 탭 → 체크 토글 (input/편집 셀 제외)
 function _tblRowTap(e, tr) {
@@ -6166,7 +6182,10 @@ function toggleMic() {
   localStorage.setItem('zk_mic_used', 'true');
   const hint = document.getElementById('micHint');
   if (hint) hint.remove();
-  // 마이크 버튼은 음성 녹음 전용 — 입력창 포커스하지 않음
+  // 입력창 포커스 + 음성 입력 안내
+  const inp = document.getElementById('nlInput');
+  inp.focus();
+  showToast('🎤 음성으로 입력하세요');
 }
 
 function _toggleMicLegacy() {
