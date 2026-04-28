@@ -16,7 +16,7 @@
   --chat-bg:#b2c7d9; --suggest-bar:#3a7bd5; --order-green:#2d8a4e;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text);min-height:100dvh;display:flex;flex-direction:column}
+body{font-family:'Noto Sans KR',sans-serif;background:#dce8f0;color:var(--text);min-height:100dvh;display:flex;flex-direction:column}
 /* 헤더 */
 .hdr{background:var(--surface);border-bottom:1px solid var(--border);padding:0 14px;display:flex;align-items:center;gap:8px;height:52px;flex-shrink:0;position:sticky;top:0;z-index:10}
 @media (max-width:400px){
@@ -509,6 +509,7 @@ tr.ot-done .ot-name{text-decoration:line-through;color:var(--dim)}
 .v4-table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
 .v4-table th{text-align:center;font-size:11px;font-weight:700;color:var(--muted);padding:6px 4px;border-bottom:2px solid #e8ede9;background:#fafaf8}
 .v4-table td{padding:8px 4px;vertical-align:middle;border-bottom:1px solid #f0f0ec;text-align:center}
+.v4-table tbody tr[data-iid]{cursor:pointer}
 th.v4-name,td.v4-name{text-align:left;padding-left:12px}
 .v4-table tbody tr:nth-child(even){background:#fafaf8}
 .v4-table tbody tr:nth-child(odd){background:#fff}
@@ -542,7 +543,7 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 .v4-receive-btn:active{background:rgba(59,130,246,.2)}
 
 /* ── v4 채팅 영역 (카톡 스타일) ── */
-.v4-chat-area{display:flex;flex-direction:column;gap:8px;padding:10px 0;min-height:0}
+.v4-chat-area{display:flex;flex-direction:column;gap:8px;padding:10px 0;min-height:120px;flex:1;overflow-y:auto}
 .v4-chat-row{display:flex;gap:8px;align-items:flex-start}
 .v4-chat-row.user{justify-content:flex-end}
 .v4-avatar{width:32px;height:32px;border-radius:10px;background:var(--suggest-bar);color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -554,7 +555,7 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 .v4-reflected{font-size:11px;color:var(--muted);margin-top:2px}
 
 /* ── v4 입력바 ── */
-.v4-input-zone{background:#f5f5f0;border-top:1px solid #e0e0da;padding:10px 14px;position:fixed;bottom:0;left:0;right:0;z-index:20}
+.v4-input-zone{background:#f0f0ec;border-top:1px solid #e0e0da;padding:10px 14px;position:fixed;bottom:0;left:0;right:0;z-index:20}
 
 /* ── v4 모든 재고 충분 ── */
 .v4-all-good{text-align:center;padding:40px 20px;color:var(--dim)}
@@ -3642,7 +3643,7 @@ async function renderOrder() {
     let html = '';
     if (_pendingRows.length || _chipItems.length) {
       html += `<div class="v4-card">
-        <div class="v4-card-hdr"><span>📋 오늘의 발주</span><button class="v4-copy-btn" onclick="_copyAllMerged()">전체 복사</button></div>
+        <div class="v4-card-hdr"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span></span><button class="v4-copy-btn" onclick="_copyAllMerged()">전체 복사</button></div>
         <table class="v4-table">
         <colgroup><col style="width:38%"><col style="width:18%"><col style="width:26%"><col style="width:18%"></colgroup>
         <thead><tr>
@@ -3679,7 +3680,7 @@ async function renderOrder() {
     } else {
       // pending 없고 ordered만 있는 경우
       html += `<div class="v4-card">
-        <div class="v4-card-hdr"><span>📋 오늘의 발주</span><button class="v4-copy-btn" onclick="_copyAllMerged()">전체 복사</button></div>
+        <div class="v4-card-hdr"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span></span><button class="v4-copy-btn" onclick="_copyAllMerged()">전체 복사</button></div>
         <div class="v4-empty-hint">추천을 탭하거나 아래에서 입력하세요</div>`;
       html += `<div class="v4-receive-bar" onclick="this.querySelector('.arrow').classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
         <span>📦 입고 대기 (${_orderedRows.length})</span><span class="arrow">▾</span>
@@ -3696,6 +3697,9 @@ async function renderOrder() {
     }
 
     list.innerHTML = html;
+
+    // 완료 카운트 초기화
+    _updateOrderCount();
 
     // 칩 데이터 전역 저장
     window._chipData = _chipItems;
@@ -3807,7 +3811,7 @@ function _renderTableRow(r) {
     : `<td class="v4-stock-empty" data-col="stock" onclick="_tblEdit(this,${r.item_id},'stock')">+입력</td>`;
   const checkIcon = checked ? '✓' : '';
   const checkCls = checked ? 'v4-check' : 'v4-check off';
-  return `<tr${rowCls} data-iid="${r.item_id}" ${r.order_id ? `data-oid="${r.order_id}"` : ''} data-unit="${r.unit}" data-vid="${r.vendor_id || ''}" data-vendor="${r.vendor || ''}" data-checked="${checked ? '1' : '0'}">
+  return `<tr${rowCls} data-iid="${r.item_id}" ${r.order_id ? `data-oid="${r.order_id}"` : ''} data-unit="${r.unit}" data-vid="${r.vendor_id || ''}" data-vendor="${r.vendor || ''}" data-checked="${checked ? '1' : '0'}" onclick="_tblRowTap(event,this)">
     <td class="v4-name">${r.name}</td>
     ${stockCell}
     <td class="v4-order-qty" data-col="order" onclick="_tblEdit(this,${r.item_id},'order')">${r.orderQty || '-'}<span style="font-size:10px;font-weight:400;color:var(--dim);margin-left:1px">${r.unit}</span></td>
@@ -3844,6 +3848,7 @@ function _chipAdd(itemId) {
   const chipEl = document.querySelector(`.v4-chip[data-iid="${itemId}"]`);
   if (chipEl) chipEl.classList.add('used');
   showToast(`${chip.name} 추가`);
+  _updateOrderCount();
 }
 
 // 칩 ✕ → 추천에서 제거
@@ -3859,6 +3864,19 @@ function _chipDismiss(itemId, chipEl) {
 }
 
 // ── 표 인터랙션 ──
+
+// v4 행 탭 → 체크 토글 (input/편집 셀 제외)
+function _tblRowTap(e, tr) {
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT') return;
+  // 인라인 편집 셀(재고/발주) 클릭은 제외
+  const td = e.target.closest('td');
+  if (td && td.dataset.col) return;
+  // 체크 스팬 자체 클릭은 이미 _tblToggleCheck가 처리
+  if (e.target.classList.contains('v4-check')) return;
+  const checkEl = tr.querySelector('.v4-check');
+  if (checkEl) _tblToggleCheck(checkEl);
+}
 
 // v4 체크 토글
 function _tblToggleCheck(el) {
@@ -3877,6 +3895,25 @@ function _tblToggleCheck(el) {
   }
   // 전체 복사 캐시 갱신
   _updateTextOrderCache();
+  // 완료 카운트 갱신
+  _updateOrderCount();
+}
+
+// v4 완료 카운트 업데이트
+function _updateOrderCount() {
+  const rows = document.querySelectorAll('#otBody tr[data-iid]');
+  const total = rows.length;
+  const done = [...rows].filter(r => r.dataset.checked === '1').length;
+  const countEl = document.getElementById('orderCount');
+  if (!countEl) return;
+  countEl.textContent = `${done}/${total}`;
+  if (total > 0 && done === total) {
+    countEl.style.color = 'var(--order-green)';
+    countEl.style.fontWeight = '800';
+  } else {
+    countEl.style.color = 'var(--dim)';
+    countEl.style.fontWeight = '600';
+  }
 }
 
 function _updateTextOrderCache() {
@@ -6129,8 +6166,7 @@ function toggleMic() {
   localStorage.setItem('zk_mic_used', 'true');
   const hint = document.getElementById('micHint');
   if (hint) hint.remove();
-  const inp = document.getElementById('nlInput');
-  inp.focus();
+  // 마이크 버튼은 음성 녹음 전용 — 입력창 포커스하지 않음
 }
 
 function _toggleMicLegacy() {
@@ -6371,20 +6407,19 @@ function _setMicTimeout(sec) {
   document.getElementById('micSettingsPopup').classList.remove('open');
 }
 
-// 모바일 키보드 대응: visualViewport 사용하여 입력창 위치 유지
+// 모바일 키보드 대응: visualViewport 사용하여 입력창 위치 유지 + 채팅 스크롤
 if (window.visualViewport) {
-  window.visualViewport.addEventListener('resize', () => {
+  const _adjustForKeyboard = () => {
     const vv = window.visualViewport;
     const inputZone = document.querySelector('.global-input-zone');
     const offset = window.innerHeight - vv.height - vv.offsetTop;
     inputZone.style.bottom = offset + 'px';
-  });
-  window.visualViewport.addEventListener('scroll', () => {
-    const vv = window.visualViewport;
-    const inputZone = document.querySelector('.global-input-zone');
-    const offset = window.innerHeight - vv.height - vv.offsetTop;
-    inputZone.style.bottom = offset + 'px';
-  });
+    // 키보드 올라올 때 채팅 영역 마지막 메시지 보이도록
+    const chatArea = document.getElementById('chatArea');
+    if (chatArea) setTimeout(() => { chatArea.scrollTop = chatArea.scrollHeight; }, 100);
+  };
+  window.visualViewport.addEventListener('resize', _adjustForKeyboard);
+  window.visualViewport.addEventListener('scroll', _adjustForKeyboard);
 }
 
 // 개발자 모드: 로고 5회 탭으로 테스트 탭 토글
