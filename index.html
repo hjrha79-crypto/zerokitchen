@@ -4124,7 +4124,7 @@ async function _tblDeleteRow(el) {
       .eq('id', oid);
     console.log('[삭제] DB 결과:', error ? error.message : 'OK');
   }
-  _cancelledItemIds.add(iid);
+  _dismissedItemIds.add(iid);
   tr.remove();
   console.log('[삭제] DOM 제거 완료');
   _updateOrderCount();
