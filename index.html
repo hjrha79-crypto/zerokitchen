@@ -502,7 +502,7 @@ tr.ot-done .ot-name{text-decoration:line-through;color:var(--dim)}
 .v4-card{background:#fff;border-radius:16px;padding:0;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px}
 .v4-card-hdr{display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px;cursor:pointer;user-select:none}
 .v4-card-hdr span{font-size:15px;font-weight:800;color:var(--text)}
-.v4-card-hdr .v4-fold-arrow{font-size:14px;color:var(--muted);margin-left:6px;transition:transform .2s;display:inline-block}
+.v4-card-hdr .v4-fold-arrow{font-size:16px;color:var(--muted);margin-left:6px;transition:transform .2s;display:inline-block}
 .v4-card-hdr .v4-fold-arrow.up{transform:rotate(180deg)}
 .v4-card-body.collapsed{display:none}
 .v4-copy-btn{font-size:12px;color:var(--order-green);background:#e8f7ec;border:1px solid #c3e6cd;border-radius:8px;padding:5px 14px;cursor:pointer;font-weight:700;font-family:inherit}
@@ -534,7 +534,7 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 /* ── v4 입고 대기 접기 ── */
 .v4-receive-bar{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;border-top:1px solid #f0f0ec;user-select:none}
 .v4-receive-bar span{font-size:13px;font-weight:700;color:var(--dim)}
-.v4-receive-bar .arrow{font-size:14px;color:var(--muted);transition:transform .2s}
+.v4-receive-bar .arrow{font-size:16px;color:var(--muted);transition:transform .2s}
 .v4-receive-bar .arrow.open{transform:rotate(180deg)}
 .v4-receive-list{display:none;padding:0 16px 12px}
 .v4-receive-list.open{display:block}
@@ -1903,7 +1903,7 @@ async function handleNaturalInput() {
       const opIds = result.operation_ids || [];
       addResult(raw, formatResult(result), result.status === 'success' ? 'ok' : 'warn', opIds);
       renderInventory();
-      if (document.getElementById('tab-input')?.classList.contains('active')) renderOrder();
+      if (document.getElementById('tab-input')?.classList.contains('active')) _patchOrderTable(result);
       _draftItems = [];
       return;
     }
@@ -2871,7 +2871,7 @@ async function confirmReview() {
     const opIds = result.operation_ids || [];
     addResult(rawText, formatResult(result), result.status === 'success' ? 'ok' : 'warn', opIds);
     renderInventory();
-    if (document.getElementById('tab-input')?.classList.contains('active')) renderOrder();
+    if (document.getElementById('tab-input')?.classList.contains('active')) _patchOrderTable(result);
   } catch(e) {
     // 실행 실패 시에도 로그 기록
     const rawText = document.getElementById('reviewPanel').dataset.rawText || '';
@@ -3662,7 +3662,7 @@ async function renderOrder() {
       // 입고 대기 섹션
       if (_orderedRows.length) {
         html += `<div class="v4-receive-bar" onclick="this.querySelector('.arrow').classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
-          <span>📦 입고 대기 (${_orderedRows.length})</span><span class="arrow">▾</span>
+          <span>📦 입고 대기 (${_orderedRows.length})</span><span class="arrow">▼</span>
         </div>
         <div class="v4-receive-list">`;
         for (const r of _orderedRows) {
@@ -3687,7 +3687,7 @@ async function renderOrder() {
         <div class="v4-card-hdr" onclick="_toggleOrderFold(this)"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span><span class="v4-fold-arrow">▲</span></span><button class="v4-copy-btn" onclick="event.stopPropagation();_copyAllMerged()">전체 복사</button></div>
         <div class="v4-card-body" id="orderCardBody"><div class="v4-empty-hint">추천을 탭하거나 아래에서 입력하세요</div>`;
       html += `<div class="v4-receive-bar" onclick="this.querySelector('.arrow').classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
-        <span>📦 입고 대기 (${_orderedRows.length})</span><span class="arrow">▾</span>
+        <span>📦 입고 대기 (${_orderedRows.length})</span><span class="arrow">▼</span>
       </div>
       <div class="v4-receive-list">`;
       for (const r of _orderedRows) {
@@ -3940,6 +3940,28 @@ function _updateOrderCount() {
     countEl.style.color = 'var(--dim)';
     countEl.style.fontWeight = '600';
   }
+}
+
+// 홈탭 표 부분 업데이트 (전체 리렌더링 방지)
+function _patchOrderTable(result) {
+  if (!result?.updated_items?.length) return;
+  const tbody = document.getElementById('otBody');
+  if (!tbody) return;
+  for (const u of result.updated_items) {
+    // 품목명으로 item_id 찾기
+    const item = _items.find(x => x.item_name === u.name);
+    if (!item) continue;
+    const tr = tbody.querySelector(`tr[data-iid="${item.item_id}"]`);
+    if (!tr) continue;
+    // 재고 셀 업데이트
+    const stockTd = tr.querySelector('[data-col="stock"]');
+    if (stockTd) {
+      const newQty = item.current_quantity ?? u.quantity;
+      stockTd.textContent = newQty;
+      stockTd.className = 'v4-stock';
+    }
+  }
+  _updateTextOrderCache();
 }
 
 function _updateTextOrderCache() {
@@ -5360,7 +5382,7 @@ async function _autoConfirmComplexItems(rawText, items) {
     const opIds = result.operation_ids || [];
     addResult(rawText, formatResult(result), result.status === 'success' ? 'ok' : 'warn', opIds);
     renderInventory();
-    if (document.getElementById('tab-input')?.classList.contains('active')) renderOrder();
+    if (document.getElementById('tab-input')?.classList.contains('active')) _patchOrderTable(result);
   } catch(e) {
     addResult(rawText, '❌ 저장 실패: ' + e.message, 'err');
   } finally {
