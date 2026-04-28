@@ -3507,12 +3507,19 @@ async function renderOrder() {
 
     // 2) 재고 부족 품목 (자동 제안용) — 추천 기준: current_qty <= 0 만
     await refreshItems();
+    console.log('[suggest] 전체 품목 수:', _items.length);
+    const _zeroItems = _items.filter(i => Number(i.current_qty) <= 0);
+    console.log('[suggest] 재고 0 이하:', _zeroItems.map(i => `${i.item_name}(${i.current_qty})`));
+    console.log('[suggest] _orderedItemIds:', [..._orderedItemIds]);
+    console.log('[suggest] _dismissedItemIds:', [..._dismissedItemIds]);
+    console.log('[suggest] _cancelledItemIds:', [..._cancelledItemIds]);
     const needItems = _items.filter(it =>
       Number(it.current_qty) <= 0 &&
       !_orderedItemIds.has(it.item_id) &&
       !_dismissedItemIds.has(it.item_id) &&
       !_cancelledItemIds.has(it.item_id)
     );
+    console.log('[suggest] 필터 후 needItems:', needItems.map(i => i.item_name));
     const suggestItems = [];
     for (const it of needItems) {
       const consumption = await _calcConsumption(it.item_id);
@@ -3720,6 +3727,7 @@ async function renderOrder() {
     window._chipData = _chipItems;
 
     // 소진 예측: 백그라운드 → 추가 칩 생성
+    console.log('[소진예측] 호출 직전, _seenIds:', [..._seenIds]);
     _loadDepletionAsync(_seenIds, _cancelledItemIds);
   } catch(e) {
     list.innerHTML = `<div class="no-item">오류: ${e.message}</div>`;
