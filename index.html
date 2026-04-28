@@ -522,6 +522,8 @@ td.v4-stock-empty{color:var(--muted);border:1px dashed var(--border);border-radi
 /* 체크 토글 */
 .v4-check{width:22px;height:22px;border-radius:6px;border:2px solid var(--order-green);background:#e8f7ec;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;font-size:13px;color:var(--order-green);transition:all .15s}
 .v4-check.off{border-color:var(--border);background:transparent;color:transparent}
+.v4-del{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:#ccc;cursor:pointer;border-radius:4px}
+.v4-del:active{color:var(--red);background:rgba(217,48,37,.08)}
 /* 체크 해제된 행 */
 tr.v4-unchecked{opacity:.35;background:#e8f7ec !important}
 tr.v4-unchecked td.v4-name{text-decoration:line-through}
@@ -3678,16 +3680,16 @@ async function renderOrder() {
     let html = '';
     if (_pendingRows.length || _chipItems.length) {
       html += `<div class="v4-card">
-        <div class="v4-card-hdr" onclick="_toggleOrderFold(this)"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span><span class="v4-fold-arrow">▲</span></span><button class="v4-copy-btn" onclick="event.stopPropagation();_copyAllMerged()">전체 복사</button></div>
+        <div class="v4-card-hdr" onclick="_toggleOrderFold(this)"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span><span class="v4-fold-arrow">▲</span></span><button class="v4-copy-btn" onclick="event.stopPropagation();_copyAllMerged()">발주하기</button></div>
         <div class="v4-card-body" id="orderCardBody"><table class="v4-table">
-        <colgroup><col style="width:38%"><col style="width:18%"><col style="width:26%"><col style="width:18%"></colgroup>
+        <colgroup><col style="width:34%"><col style="width:16%"><col style="width:24%"><col style="width:14%"><col style="width:12%"></colgroup>
         <thead><tr>
-          <th class="v4-name">품목</th><th>재고</th><th>발주</th><th>✓</th>
+          <th class="v4-name">품목</th><th>재고</th><th>발주</th><th>✓</th><th></th>
         </tr></thead><tbody id="otBody">`;
       if (_pendingRows.length) {
         for (const r of _pendingRows) html += _renderTableRow(r);
       } else {
-        html += `<tr><td colspan="4" class="v4-empty-hint">추천을 탭하거나 아래에서 입력하세요</td></tr>`;
+        html += `<tr><td colspan="5" class="v4-empty-hint">추천을 탭하거나 아래에서 입력하세요</td></tr>`;
       }
       html += `</tbody></table>`;
 
@@ -3716,7 +3718,7 @@ async function renderOrder() {
     } else {
       // pending 없고 ordered만 있는 경우
       html += `<div class="v4-card">
-        <div class="v4-card-hdr" onclick="_toggleOrderFold(this)"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span><span class="v4-fold-arrow">▲</span></span><button class="v4-copy-btn" onclick="event.stopPropagation();_copyAllMerged()">전체 복사</button></div>
+        <div class="v4-card-hdr" onclick="_toggleOrderFold(this)"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span><span class="v4-fold-arrow">▲</span></span><button class="v4-copy-btn" onclick="event.stopPropagation();_copyAllMerged()">발주하기</button></div>
         <div class="v4-card-body" id="orderCardBody"><div class="v4-empty-hint">추천을 탭하거나 아래에서 입력하세요</div>`;
       html += `<div class="v4-receive-bar" onclick="this.querySelector('.arrow').classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
         <span>📦 입고 대기 (${_orderedRows.length})</span><span class="arrow">▼</span>
@@ -3870,6 +3872,7 @@ function _renderTableRow(r) {
     ${stockCell}
     <td class="v4-order-qty" data-col="order" onclick="_tblEdit(this,${r.item_id},'order')">${r.orderQty || '-'}<span style="font-size:10px;font-weight:400;color:var(--dim);margin-left:1px">${r.unit}</span></td>
     <td><span class="${checkCls}" onclick="_tblToggleCheck(this)">${checkIcon}</span></td>
+    <td><span class="v4-del" onclick="_tblDeleteRow(this)">✕</span></td>
   </tr>`;
 }
 
@@ -3940,8 +3943,9 @@ function _tblRowTap(e, tr) {
   // 인라인 편집 셀(재고/발주) 클릭은 제외
   const td = e.target.closest('td');
   if (td && td.dataset.col) return;
-  // 체크 스팬 자체 클릭은 이미 _tblToggleCheck가 처리
+  // 체크/삭제 스팬 클릭은 각자 처리
   if (e.target.classList.contains('v4-check')) return;
+  if (e.target.classList.contains('v4-del')) return;
   const checkEl = tr.querySelector('.v4-check');
   if (checkEl) _tblToggleCheck(checkEl);
 }
@@ -4104,39 +4108,25 @@ async function _tblReceive(orderId) {
   await markReceived(orderId);
 }
 
-// 행 길게 누름 → 삭제
-let _longPressTimer = null;
-let _longPressTarget = null;
-document.addEventListener('touchstart', function(e) {
-  const tr = e.target.closest('#otBody tr[data-iid]');
+// ✕ 버튼 → 행 삭제
+function _tblDeleteRow(el) {
+  const tr = el.closest('tr');
   if (!tr) return;
-  // input/select 위에선 무시
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-  _longPressTarget = tr;
-  _longPressTimer = setTimeout(() => {
-    _longPressTarget = null;
-    const name = tr.querySelector('.v4-name')?.textContent?.trim() || '품목';
-    if (!confirm(`"${name}" 삭제할까요?`)) return;
-    const iid = parseInt(tr.dataset.iid);
-    const oid = tr.dataset.oid ? parseInt(tr.dataset.oid) : null;
-    if (oid) {
-      db.from('order_requests')
-        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
-        .eq('id', oid);
-    }
-    _cancelledItemIds.add(iid);
-    tr.remove();
-    _updateOrderCount();
-    _updateTextOrderCache();
-    showToast(`${name} 삭제됨`);
-  }, 500);
-}, { passive: true });
-document.addEventListener('touchend', function() {
-  clearTimeout(_longPressTimer); _longPressTarget = null;
-});
-document.addEventListener('touchmove', function() {
-  clearTimeout(_longPressTimer); _longPressTarget = null;
-});
+  const name = tr.querySelector('.v4-name')?.textContent?.trim() || '품목';
+  if (!confirm(`"${name}" 삭제할까요?`)) return;
+  const iid = parseInt(tr.dataset.iid);
+  const oid = tr.dataset.oid ? parseInt(tr.dataset.oid) : null;
+  if (oid) {
+    db.from('order_requests')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('id', oid);
+  }
+  _cancelledItemIds.add(iid);
+  tr.remove();
+  _updateOrderCount();
+  _updateTextOrderCache();
+  showToast(`${name} 삭제됨`);
+}
 
 // 행 삭제 (더블탭)
 document.addEventListener('dblclick', function(e) {
@@ -4449,9 +4439,9 @@ function _copyAllMerged() {
       html += `<div class="v4-sheet-item">${it.name} ${it.qty}${it.unit}</div>`;
     }
     const ids = JSON.stringify(items.map(i => i.item_id));
-    html += `<button class="v4-sheet-vbtn" onclick="_copyVendorGroup('${vendor.replace(/'/g,"\\'")}',${ids.replace(/"/g,'&quot;')})">📋 ${vendor} 복사</button>`;
+    html += `<button class="v4-sheet-vbtn" onclick="_copyVendorGroup('${vendor.replace(/'/g,"\\'")}',${ids.replace(/"/g,'&quot;')})">📋 ${vendor} 발주</button>`;
   }
-  html += `<button class="v4-sheet-allbtn" onclick="_copyAllGroups()">전체 복사 + 주문 완료</button>`;
+  html += `<button class="v4-sheet-allbtn" onclick="_copyAllGroups()">전체 발주</button>`;
 
   document.getElementById('copySheetBody').innerHTML = html;
   document.getElementById('copySheetOverlay').classList.add('show');
