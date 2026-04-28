@@ -3705,6 +3705,14 @@ async function renderOrder() {
     // 완료 카운트 초기화
     _updateOrderCount();
 
+    // 접기 상태 복원
+    if (_homeTableCollapsed) {
+      const body = document.getElementById('orderCardBody');
+      const arrow = document.querySelector('.v4-fold-arrow');
+      if (body) body.classList.add('collapsed');
+      if (arrow) arrow.classList.add('up');
+    }
+
     // 칩 데이터 전역 저장
     window._chipData = _chipItems;
 
@@ -3869,16 +3877,18 @@ function _chipDismiss(itemId, chipEl) {
 
 // ── 표 인터랙션 ──
 
+// v4 표 접기 상태
+let _homeTableCollapsed = false;
+
 // v4 표 접기/펼치기
 function _toggleOrderFold(hdrEl) {
   const body = hdrEl.nextElementSibling;
   if (!body) return;
   const arrow = hdrEl.querySelector('.v4-fold-arrow');
   body.classList.toggle('collapsed');
-  if (arrow) {
-    const folded = body.classList.contains('collapsed');
-    arrow.classList.toggle('up', folded);
-  }
+  const folded = body.classList.contains('collapsed');
+  _homeTableCollapsed = folded;
+  if (arrow) arrow.classList.toggle('up', folded);
 }
 
 // v4 행 탭 → 체크 토글 (input/편집 셀 제외)
