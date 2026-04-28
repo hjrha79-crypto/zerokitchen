@@ -3743,24 +3743,33 @@ async function _loadDepletionAsync(existingIds, cancelledIds) {
     if (cached) {
       try {
         const parsed = JSON.parse(cached);
-        // 5분 이내 캐시만 사용
-        if (Date.now() - parsed.ts < 5 * 60 * 1000) {
+        // 1분 이내 캐시만 사용
+        if (Date.now() - parsed.ts < 1 * 60 * 1000 && parsed.alerts?.length > 0) {
           alerts = parsed.alerts;
           console.log('[소진예측] 캐시 사용:', alerts.length, '건');
+        } else {
+          console.log('[소진예측] 캐시 만료 또는 0건 — 재계산');
+          sessionStorage.removeItem(cacheKey);
         }
-      } catch(e) { /* 캐시 파싱 실패 무시 */ }
+      } catch(e) { sessionStorage.removeItem(cacheKey); }
     }
 
     if (!alerts) {
-      console.log('[소진예측] 계산 시작');
+      console.log('[소진예측] DB 조회 시작');
       alerts = await _getDepletionAlerts();
-      sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), alerts: alerts.map(a => ({
-        item_id: a.item.item_id, item_name: a.item.item_name, current_qty: Number(a.item.current_qty),
-        unit: a.item.unit || '', vendor_id: a.item.vendor_id || null,
-        order_unit_qty: a.item.order_unit_qty, order_unit_name: a.item.order_unit_name,
-        depletion: a.depletion, lastOrderQty: a.lastOrderQty
-      })) }));
-      console.log('[소진예측] 결과 캐시 저장:', alerts.length, '건');
+      console.log('[소진예측] DB 조회 완료:', alerts.length, '건');
+      // 0건이면 캐시하지 않음 (다음 로드 시 재계산)
+      if (alerts.length > 0) {
+        sessionStorage.setItem(cacheKey, JSON.stringify({ ts: Date.now(), alerts: alerts.map(a => ({
+          item_id: a.item.item_id, item_name: a.item.item_name, current_qty: Number(a.item.current_qty),
+          unit: a.item.unit || '', vendor_id: a.item.vendor_id || null,
+          order_unit_qty: a.item.order_unit_qty, order_unit_name: a.item.order_unit_name,
+          depletion: a.depletion, lastOrderQty: a.lastOrderQty
+        })) }));
+        console.log('[소진예측] 캐시 저장:', alerts.length, '건');
+      } else {
+        console.log('[소진예측] 0건 — 캐시 안 함');
+      }
     }
 
     // 소진 임박 → 추천 칩에 추가
