@@ -4744,11 +4744,32 @@ async function markReceived(orderId) {
     });
     item.current_qty = newQty;
   }
-  // DOM 직접 제거 (v4 입고 대기 항목 + 레거시)
+  // DOM 직접 제거 (레거시)
   const el = document.querySelector(`[data-row-oid="${orderId}"]`);
   if (el) _removeOrderRow(el);
-  // v4: 입고 대기 리스트에서 입고 버튼의 부모 제거 후 재렌더
-  _renderOrderKeepScroll();
+  // v4: 입고 대기 항목 DOM 제거 (전체 리렌더 방지)
+  const receiveBtn = document.querySelector(`.v4-receive-btn[onclick*="_tblReceive(${orderId})"]`);
+  const receiveItem = receiveBtn?.closest('.v4-receive-item');
+  if (receiveItem) receiveItem.remove();
+  // 입고 대기 카운트 업데이트
+  const receiveList = document.querySelector('.v4-receive-list');
+  const remaining = receiveList ? receiveList.querySelectorAll('.v4-receive-item').length : 0;
+  const receiveBar = document.querySelector('.v4-receive-bar');
+  if (remaining === 0) {
+    if (receiveBar) receiveBar.style.display = 'none';
+    if (receiveList) receiveList.style.display = 'none';
+  } else if (receiveBar) {
+    const countSpan = receiveBar.querySelector('span');
+    if (countSpan) countSpan.textContent = `📦 입고 대기 (${remaining})`;
+  }
+  // 발주 표에 해당 품목 재고 셀 업데이트
+  if (item) {
+    const tr = document.querySelector(`#otBody tr[data-iid="${item.item_id}"]`);
+    if (tr) {
+      const stockTd = tr.querySelector('[data-col="stock"]');
+      if (stockTd) { stockTd.textContent = item.current_qty; stockTd.className = 'v4-stock'; }
+    }
+  }
   showToast(`${row.item_name} ${row.qty}${row.unit} 입고 완료`);
 }
 
