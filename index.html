@@ -3415,6 +3415,7 @@ async function _calcDepletion(itemId, currentQty) {
 
 // 소진 임박 품목 일괄 계산 (소진 ≤ 3일 + 재고 > 0)
 async function _getDepletionAlerts() {
+  console.log('[소진예측] 시작');
   const alerts = [];
   // 재고가 있고, 아직 발주 대기/주문 중이 아닌 품목만
   const candidates = _items.filter(it =>
@@ -3622,6 +3623,8 @@ async function renderOrder() {
     }));
 
     // [상단] 추천 공지바
+    console.log('[공지바] suggestItems:', suggestItems.length, suggestItems.map(s => s.name));
+    console.log('[공지바] _chipItems:', _chipItems.length, _chipItems.map(c => c.name));
     const suggestBar = document.getElementById('suggestBar');
     if (_chipItems.length && suggestBar) {
       const preview = _chipItems.slice(0, 2).map(c => c.name).join(', ');
