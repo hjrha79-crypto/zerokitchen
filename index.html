@@ -3946,21 +3946,46 @@ function _updateOrderCount() {
 function _patchOrderTable(result) {
   if (!result?.updated_items?.length) return;
   const tbody = document.getElementById('otBody');
-  if (!tbody) return;
   for (const u of result.updated_items) {
-    // 품목명으로 item_id 찾기
     const item = _items.find(x => x.item_name === u.name);
     if (!item) continue;
-    const tr = tbody.querySelector(`tr[data-iid="${item.item_id}"]`);
-    if (!tr) continue;
-    // 재고 셀 업데이트
-    const stockTd = tr.querySelector('[data-col="stock"]');
-    if (stockTd) {
-      const newQty = item.current_quantity ?? u.quantity;
-      stockTd.textContent = newQty;
-      stockTd.className = 'v4-stock';
+    const iid = u.item_id || item.item_id;
+
+    if (u.action === 'order') {
+      // 발주: 기존 행 있으면 발주 셀 업데이트, 없으면 새 행 추가
+      const tr = tbody?.querySelector(`tr[data-iid="${iid}"]`);
+      if (tr) {
+        const orderTd = tr.querySelector('[data-col="order"]');
+        if (orderTd) {
+          orderTd.innerHTML = `${u.inputQty}<span style="font-size:10px;font-weight:400;color:var(--dim);margin-left:1px">${u.unit}</span>`;
+        }
+      } else if (tbody) {
+        // 빈 안내 행 제거
+        const emptyHint = tbody.querySelector('.v4-empty-hint');
+        if (emptyHint) emptyHint.closest('tr')?.remove();
+        const row = { status: 'pending', order_id: null, item_id: iid, name: u.name,
+          stockQty: item.current_qty, orderQty: u.inputQty,
+          unit: u.unit || item.unit || '개', vendor_id: item.vendor_id || null,
+          vendor: '', checked: true };
+        tbody.insertAdjacentHTML('beforeend', _renderTableRow(row));
+        // 캐시 추가
+        if (window._textOrderCache) {
+          window._textOrderCache.push({ item_id: iid, name: u.name, qty: u.inputQty, unit: row.unit, vendor: '', vendor_id: row.vendor_id });
+        }
+      }
+    } else {
+      // stock_check / inbound / consume / set: 재고 셀 업데이트
+      if (!tbody) continue;
+      const tr = tbody.querySelector(`tr[data-iid="${iid}"]`);
+      if (!tr) continue;
+      const stockTd = tr.querySelector('[data-col="stock"]');
+      if (stockTd) {
+        stockTd.textContent = item.current_qty ?? u.quantity;
+        stockTd.className = 'v4-stock';
+      }
     }
   }
+  _updateOrderCount();
   _updateTextOrderCache();
 }
 
