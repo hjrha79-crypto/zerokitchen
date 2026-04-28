@@ -564,6 +564,22 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 .v4-all-good{text-align:center;padding:40px 20px;color:var(--dim)}
 .v4-all-good .icon{font-size:32px;margin-bottom:8px}
 .v4-all-good .title{font-size:15px;font-weight:600;margin-bottom:4px}
+
+/* ── v4 바텀시트 (거래처별 복사) ── */
+.v4-sheet-overlay{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;opacity:0;transition:opacity .2s}
+.v4-sheet-overlay.show{opacity:1}
+.v4-sheet{position:fixed;bottom:0;left:0;right:0;background:#fff;border-radius:18px 18px 0 0;z-index:101;transform:translateY(100%);transition:transform .25s ease-out;max-height:70dvh;display:flex;flex-direction:column}
+.v4-sheet.show{transform:translateY(0)}
+.v4-sheet-handle{width:40px;height:4px;background:#d0d0d0;border-radius:2px;margin:10px auto 6px}
+.v4-sheet-title{font-size:15px;font-weight:800;padding:4px 18px 10px;color:var(--text)}
+.v4-sheet-body{overflow-y:auto;padding:0 18px 18px;flex:1}
+.v4-sheet-vendor{font-size:13px;font-weight:700;color:var(--text);margin-top:12px;margin-bottom:4px}
+.v4-sheet-vendor:first-child{margin-top:0}
+.v4-sheet-item{font-size:13px;color:var(--dim);padding:2px 0 2px 8px}
+.v4-sheet-vbtn{display:inline-flex;align-items:center;gap:4px;margin-top:6px;padding:6px 14px;border-radius:8px;border:1px solid var(--order-green);background:#e8f7ec;color:var(--order-green);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
+.v4-sheet-vbtn:active{background:#c3e6cd}
+.v4-sheet-allbtn{width:100%;padding:12px;border-radius:10px;border:none;background:var(--order-green);color:#fff;font-size:14px;font-weight:700;cursor:pointer;margin-top:14px;font-family:inherit}
+.v4-sheet-allbtn:active{opacity:.85}
 </style>
 </head>
 <body>
@@ -789,6 +805,12 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 
 <div id="toast"></div>
 <div id="floatResult"></div>
+<div class="v4-sheet-overlay" id="copySheetOverlay" onclick="_closeCopySheet()"></div>
+<div class="v4-sheet" id="copySheet">
+  <div class="v4-sheet-handle"></div>
+  <div class="v4-sheet-title">거래처별 발주 복사</div>
+  <div class="v4-sheet-body" id="copySheetBody"></div>
+</div>
 
 <script>
 const SUPABASE_URL='https://pmdkmiayyZailcnmjhyo.supabase.co';
@@ -4082,6 +4104,40 @@ async function _tblReceive(orderId) {
   await markReceived(orderId);
 }
 
+// 행 길게 누름 → 삭제
+let _longPressTimer = null;
+let _longPressTarget = null;
+document.addEventListener('touchstart', function(e) {
+  const tr = e.target.closest('#otBody tr[data-iid]');
+  if (!tr) return;
+  // input/select 위에선 무시
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  _longPressTarget = tr;
+  _longPressTimer = setTimeout(() => {
+    _longPressTarget = null;
+    const name = tr.querySelector('.v4-name')?.textContent?.trim() || '품목';
+    if (!confirm(`"${name}" 삭제할까요?`)) return;
+    const iid = parseInt(tr.dataset.iid);
+    const oid = tr.dataset.oid ? parseInt(tr.dataset.oid) : null;
+    if (oid) {
+      db.from('order_requests')
+        .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+        .eq('id', oid);
+    }
+    _cancelledItemIds.add(iid);
+    tr.remove();
+    _updateOrderCount();
+    _updateTextOrderCache();
+    showToast(`${name} 삭제됨`);
+  }, 500);
+}, { passive: true });
+document.addEventListener('touchend', function() {
+  clearTimeout(_longPressTimer); _longPressTarget = null;
+});
+document.addEventListener('touchmove', function() {
+  clearTimeout(_longPressTimer); _longPressTarget = null;
+});
+
 // 행 삭제 (더블탭)
 document.addEventListener('dblclick', function(e) {
   const td = e.target.closest('.v4-name, .ot-name');
@@ -4372,26 +4428,104 @@ async function _copyVendorMerged(vendorName) {
 }
 
 // 전체 복사 (텍스트만, 상태 변경 없음)
-async function _copyAllMerged() {
-  // v4: 체크 ON인 품목만 캐시 갱신 후 복사
+function _copyAllMerged() {
+  // 체크 ON인 품목만 거래처별 그룹핑 → 바텀시트 표시
+  _updateTextOrderCache();
+  const cache = window._textOrderCache || [];
+  if (!cache.length) { showToast('복사할 품목이 없습니다'); return; }
+  const groups = new Map();
+  for (const it of cache) {
+    if (it.qty <= 0) continue;
+    const key = it.vendor || '거래처 미지정';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(it);
+  }
+  if (!groups.size) { showToast('복사할 품목이 없습니다'); return; }
+
+  let html = '';
+  for (const [vendor, items] of groups) {
+    html += `<div class="v4-sheet-vendor">${vendor}</div>`;
+    for (const it of items) {
+      html += `<div class="v4-sheet-item">${it.name} ${it.qty}${it.unit}</div>`;
+    }
+    const ids = JSON.stringify(items.map(i => i.item_id));
+    html += `<button class="v4-sheet-vbtn" onclick="_copyVendorGroup('${vendor.replace(/'/g,"\\'")}',${ids.replace(/"/g,'&quot;')})">📋 ${vendor} 복사</button>`;
+  }
+  html += `<button class="v4-sheet-allbtn" onclick="_copyAllGroups()">전체 복사 + 주문 완료</button>`;
+
+  document.getElementById('copySheetBody').innerHTML = html;
+  document.getElementById('copySheetOverlay').classList.add('show');
+  requestAnimationFrame(() => document.getElementById('copySheet').classList.add('show'));
+}
+
+function _closeCopySheet() {
+  document.getElementById('copySheet').classList.remove('show');
+  setTimeout(() => document.getElementById('copySheetOverlay').classList.remove('show'), 250);
+}
+
+async function _copyVendorGroup(vendor, itemIds) {
+  const cache = window._textOrderCache || [];
+  const items = cache.filter(it => itemIds.includes(it.item_id) && it.qty > 0);
+  const text = items.map(it => `${it.name} ${it.qty}${it.unit}`).join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch(e) { showToast('복사 실패'); return; }
+  // ordered 전환 + 표 행 처리
+  let count = 0;
+  for (const it of items) {
+    await _markRowOrdered(it.item_id);
+    count++;
+  }
+  showToast(`${vendor} ${count}건 복사 + 주문 완료`, 2500);
+  _closeCopySheet();
+}
+
+async function _copyAllGroups() {
   _updateTextOrderCache();
   const cache = window._textOrderCache || [];
   const groups = new Map();
   for (const it of cache) {
+    if (it.qty <= 0) continue;
     const key = it.vendor || '거래처 미지정';
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(it);
   }
   const parts = [];
   for (const [vendor, items] of groups) {
-    const lines = items.filter(it => it.qty > 0).map(it => `${it.name} ${it.qty}${it.unit}`);
-    if (lines.length) parts.push(`[${vendor}]\n${lines.join('\n')}`);
+    parts.push(`[${vendor}]\n${items.map(it => `${it.name} ${it.qty}${it.unit}`).join('\n')}`);
   }
-  if (!parts.length) { showToast('복사할 품목이 없습니다'); return; }
   try {
     await navigator.clipboard.writeText(parts.join('\n\n'));
-    showToast('📋 전체 복사 완료', 2000);
-  } catch(e) { showToast('복사 실패'); }
+  } catch(e) { showToast('복사 실패'); return; }
+  // 전부 ordered 전환
+  let count = 0;
+  for (const it of cache) {
+    if (it.qty <= 0) continue;
+    await _markRowOrdered(it.item_id);
+    count++;
+  }
+  showToast(`전체 ${count}건 복사 + 주문 완료`, 2500);
+  _closeCopySheet();
+}
+
+// 개별 행 → ordered 전환 (DB + DOM)
+async function _markRowOrdered(itemId) {
+  const tr = document.querySelector(`#otBody tr[data-iid="${itemId}"]`);
+  const orderId = tr?.dataset.oid ? parseInt(tr.dataset.oid) : null;
+  if (orderId) {
+    await db.from('order_requests')
+      .update({ status: 'ordered', updated_at: new Date().toISOString() })
+      .eq('id', orderId);
+  }
+  // DOM: 체크 해제 + 취소선 (ordered 스타일)
+  if (tr) {
+    tr.classList.add('v4-ordered');
+    tr.dataset.checked = '0';
+    const chk = tr.querySelector('.v4-check');
+    if (chk) { chk.classList.add('off'); chk.textContent = ''; }
+  }
+  _updateOrderCount();
+  _updateTextOrderCache();
 }
 
 // DOM에서 표 행 제거
