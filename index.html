@@ -785,6 +785,18 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
   </div>
   <div class="card" style="border:1px solid var(--border)">
     <div class="card-title">발주 주기 학습 (v3)</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 12px;background:#f5f5f5;border-radius:8px;margin-bottom:8px;">
+      <div>
+        <div style="font-size:14px;font-weight:500;">LOW 신뢰도 알림</div>
+        <div style="font-size:11px;color:#888;">데이터 부족 품목도 알림 받기</div>
+      </div>
+      <label style="position:relative;display:inline-block;width:44px;height:24px;">
+        <input type="checkbox" id="v3LowToggle" style="opacity:0;width:0;height:0;" onchange="v3ToggleLow(this.checked)">
+        <span id="v3LowSlider" style="position:absolute;cursor:pointer;top:0;left:0;right:0;bottom:0;background:#ccc;border-radius:24px;transition:0.2s;">
+          <span style="position:absolute;height:18px;width:18px;left:3px;bottom:3px;background:white;border-radius:50%;transition:0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.2);"></span>
+        </span>
+      </label>
+    </div>
     <button class="btn-run" onclick="debugRecalcPatterns()">발주 주기 전체 재계산</button>
     <button class="btn-run" style="margin-left:8px;background:var(--accent)" onclick="debugShowPatterns()">학습 결과 보기</button>
     <button class="btn-run" style="margin-top:6px;background:#e65100;color:#fff" onclick="debugForceNotif()">강제 알림 테스트</button>
@@ -996,6 +1008,7 @@ async function init() {
       _startOrderSession(); renderOrder();
       renderV3Notifications().catch(e=>console.error('[v3] Notif error:',e));
     }
+    v3InitLowToggle();
   } catch(e) {
     showToast('초기화 실패: ' + e.message);
   }
@@ -7407,22 +7420,47 @@ async function debugShowPatterns() {
     .from('item_usage_pattern')
     .select('*')
     .eq('store_id', SID)
-    .in('confidence_score', ['HIGH', 'MEDIUM'])
-    .order('confidence_score', { ascending: true });
+    .not('avg_cycle_days', 'is', null)
+    .order('confidence_score', { ascending: true })
+    .order('avg_cycle_days', { ascending: true });
 
-  if (error) { alert('조회 실패: ' + error.message); return; }
+  if (error) { alert('\uC870\uD68C \uC2E4\uD328: ' + error.message); return; }
   if (!data || data.length === 0) {
-    alert('학습된 패턴이 없습니다.\n\n먼저 [재계산] 버튼을 눌러주세요.');
+    alert('\uD559\uC2B5\uB41C \uD328\uD134\uC774 \uC5C6\uC2B5\uB2C8\uB2E4.\n\n[\uC7AC\uACC4\uC0B0] \uBA3C\uC800 \uB20C\uB7EC\uC8FC\uC138\uC694.');
     return;
   }
 
-  let msg = '학습 결과 (HIGH/MEDIUM only)\n\n';
+  const groups = { HIGH: [], MEDIUM: [], LOW: [] };
   for (const p of data) {
-    msg += `[${p.confidence_score}] ${p.item_name}\n`;
-    msg += `  평균 ${p.avg_cycle_days}일 / 편차 \u00B1${p.std_dev}일\n`;
-    msg += `  마지막 발주: ${p.last_order_date}\n`;
-    msg += `  발주 ${p.order_count}회 / 추천 ${p.recommended_qty}\n\n`;
+    if (groups[p.confidence_score]) groups[p.confidence_score].push(p);
   }
+
+  let msg = `\uD559\uC2B5 \uACB0\uACFC \u2014 \uCD1D ${data.length}\uAC74\n\n`;
+
+  if (groups.HIGH.length > 0) {
+    msg += `[HIGH ${groups.HIGH.length}\uAC74] \uD655\uC2E4\uD788 \uC54C\uB9BC \uBC1C\uC1A1\n`;
+    for (const p of groups.HIGH) {
+      msg += `  ${p.item_name}\n    ${p.avg_cycle_days}\uC77C \u00B1${p.std_dev} (${p.order_count}\uD68C)\n    \uB9C8\uC9C0\uB9C9: ${p.last_order_date}\n`;
+    }
+    msg += '\n';
+  }
+
+  if (groups.MEDIUM.length > 0) {
+    msg += `[MEDIUM ${groups.MEDIUM.length}\uAC74] \uBCF4\uC218\uC801 \uC54C\uB9BC \uBC1C\uC1A1\n`;
+    for (const p of groups.MEDIUM) {
+      msg += `  ${p.item_name}\n    ${p.avg_cycle_days}\uC77C \u00B1${p.std_dev} (${p.order_count}\uD68C)\n    \uB9C8\uC9C0\uB9C9: ${p.last_order_date}\n`;
+    }
+    msg += '\n';
+  }
+
+  if (groups.LOW.length > 0) {
+    const lowOn = localStorage.getItem('v3_low_alerts') === '1';
+    msg += `[LOW ${groups.LOW.length}\uAC74] ${lowOn ? '\uC54C\uB9BC ON' : '\uC54C\uB9BC OFF'}\n`;
+    for (const p of groups.LOW) {
+      msg += `  ${p.item_name}\n    ${p.avg_cycle_days}\uC77C \u00B1${p.std_dev} (${p.order_count}\uD68C)\n    \uB9C8\uC9C0\uB9C9: ${p.last_order_date}\n`;
+    }
+  }
+
   alert(msg);
 }
 
@@ -7448,12 +7486,15 @@ async function checkOrderNotifications(storeId) {
     return [];
   }
 
-  // HIGH/MEDIUM confidence 패턴만 조회
+  // confidence 패턴 조회 (LOW 토글 확인)
+  const includeLow = localStorage.getItem('v3_low_alerts') === '1';
+  const confLevels = includeLow ? ['HIGH', 'MEDIUM', 'LOW'] : ['HIGH', 'MEDIUM'];
+
   const { data: patterns, error } = await db
     .from('item_usage_pattern')
     .select('*')
     .eq('store_id', storeId)
-    .in('confidence_score', ['HIGH', 'MEDIUM'])
+    .in('confidence_score', confLevels)
     .not('avg_cycle_days', 'is', null)
     .not('last_order_date', 'is', null);
 
@@ -7481,7 +7522,11 @@ async function checkOrderNotifications(storeId) {
     const lastOrder = new Date(p.last_order_date);
     const daysSince = (today - lastOrder) / (1000 * 60 * 60 * 24);
 
-    const ratio = p.confidence_score === 'HIGH' ? 0.8 : 0.9;
+    // HIGH 0.8, MEDIUM 0.9, LOW 1.0 (보수적)
+    let ratio;
+    if (p.confidence_score === 'HIGH') ratio = 0.8;
+    else if (p.confidence_score === 'MEDIUM') ratio = 0.9;
+    else ratio = 1.0;
     const threshold = (p.avg_cycle_days * ratio) + adjustment;
 
     if (daysSince >= threshold) {
@@ -7596,16 +7641,32 @@ async function renderV3Notifications() {
 
   const candidates = await checkOrderNotifications(SID);
 
+  // 오늘 알림 카운트 조회
+  const _today = new Date().toISOString().split('T')[0];
+  const { data: quotaData } = await db
+    .from('daily_notification_quota')
+    .select('notification_count')
+    .eq('store_id', SID)
+    .eq('date', _today)
+    .maybeSingle();
+  const todayCount = quotaData?.notification_count || 0;
+
   if (candidates.length === 0) {
+    const includeLow = localStorage.getItem('v3_low_alerts') === '1';
+    const confCheck = includeLow ? ['HIGH', 'MEDIUM', 'LOW'] : ['HIGH', 'MEDIUM'];
     const { data: hasPatterns } = await db
       .from('item_usage_pattern')
       .select('item_id')
       .eq('store_id', SID)
-      .in('confidence_score', ['HIGH', 'MEDIUM'])
+      .in('confidence_score', confCheck)
       .limit(1);
 
     if (hasPatterns && hasPatterns.length > 0) {
-      container.innerHTML = '<div class="v3-empty-card">\u2713 오늘은 시킬 게 없어요</div>';
+      let emptyHtml = '<div class="v3-empty-card">\u2713 \uC624\uB298\uC740 \uC2DC\uD0AC \uAC8C \uC5C6\uC5B4\uC694</div>';
+      if (todayCount > 0) {
+        emptyHtml += `<div style="text-align:center;font-size:11px;color:#999;padding:4px 0;">\uC624\uB298 \uC54C\uB9BC ${todayCount}/2</div>`;
+      }
+      container.innerHTML = emptyHtml;
       container.style.display = 'block';
     } else {
       container.style.display = 'none';
@@ -7623,6 +7684,11 @@ async function renderV3Notifications() {
         <div class="v3-notif-body">
           <div class="v3-notif-title">\uC0AC\uC7A5\uB2D8, ${c.item_name} \uC2DC\uD0A4\uC2E4 \uB54C\uC608\uC694</div>
           <div class="v3-notif-meta">\uD3C9\uADE0 ${c.avg_cycle_days}\uC77C / \uB9C8\uC9C0\uB9C9 ${c.days_since_last_order}\uC77C \uC804</div>
+          <div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:10px;color:#999;">
+            <span>\uC774 \uC54C\uB9BC \uB3C4\uC6C0\uB410\uB098\uC694?</span>
+            <button onclick="event.stopPropagation();v3Feedback(${c.item_id},true)" style="border:none;background:transparent;cursor:pointer;padding:0 4px;font-size:14px;">\uD83D\uDC4D</button>
+            <button onclick="event.stopPropagation();v3Feedback(${c.item_id},false)" style="border:none;background:transparent;cursor:pointer;padding:0 4px;font-size:14px;">\uD83D\uDC4E</button>
+          </div>
         </div>
         <div class="v3-notif-actions">
           <button class="v3-btn v3-btn-primary" onclick="v3OrderNow(${c.item_id},'${safeName}',${c.recommended_qty||1})">\uC8FC\uBB38\uD558\uAE30</button>
@@ -7632,6 +7698,8 @@ async function renderV3Notifications() {
         </div>
       </div>`;
   }
+
+  html += `<div style="text-align:center;font-size:11px;color:#999;padding:4px 0;margin-top:-4px;">\uC624\uB298 \uC54C\uB9BC ${todayCount}/2</div>`;
 
   container.innerHTML = html;
   container.style.display = 'block';
@@ -7783,6 +7851,43 @@ async function debugForceNotif() {
   }, { onConflict: 'store_id,item_id' });
 
   alert(`\uAC15\uC81C \uD328\uD134 \uC8FC\uC785 \uC644\uB8CC\n\uD488\uBAA9: ${item.item_name}\n\uD648 \uD0ED\uC73C\uB85C \uC774\uB3D9\uD574\uC11C \uD655\uC778\uD558\uC138\uC694`);
+}
+
+// LOW 알림 토글
+function v3ToggleLow(enabled) {
+  localStorage.setItem('v3_low_alerts', enabled ? '1' : '0');
+  const slider = document.getElementById('v3LowSlider');
+  if (slider) {
+    slider.style.background = enabled ? '#4a90e2' : '#ccc';
+    const knob = slider.querySelector('span');
+    if (knob) knob.style.left = enabled ? '23px' : '3px';
+  }
+  showToast(enabled ? 'LOW \uC54C\uB9BC \uCF1C\uC9D0' : 'LOW \uC54C\uB9BC \uAEBC\uC9D0');
+  renderV3Notifications().catch(e=>console.error('[v3]',e));
+}
+
+function v3InitLowToggle() {
+  const enabled = localStorage.getItem('v3_low_alerts') === '1';
+  const checkbox = document.getElementById('v3LowToggle');
+  const slider = document.getElementById('v3LowSlider');
+  if (checkbox) checkbox.checked = enabled;
+  if (slider) {
+    slider.style.background = enabled ? '#4a90e2' : '#ccc';
+    const knob = slider.querySelector('span');
+    if (knob) knob.style.left = enabled ? '23px' : '3px';
+  }
+}
+
+// 알림 정확도 피드백
+async function v3Feedback(itemId, wasCorrect) {
+  const today = new Date().toISOString().split('T')[0];
+  await db.from('order_notifications')
+    .update({ was_correct: wasCorrect })
+    .eq('store_id', SID)
+    .eq('item_id', itemId)
+    .gte('notified_at', today + 'T00:00:00')
+    .is('was_correct', null);
+  showToast(wasCorrect ? '\uD83D\uDC4D \uAC10\uC0AC\uD569\uB2C8\uB2E4' : '\uD83D\uDC4E \uB2E4\uC74C\uC5D0 \uB354 \uC815\uD655\uD558\uAC8C');
 }
 
 setTimeout(()=>init(), 500);
