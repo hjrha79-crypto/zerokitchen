@@ -7340,16 +7340,15 @@ async function upsertUsagePattern(pattern) {
 
   const { data, error } = await db
     .from('item_usage_pattern')
-    .upsert(pattern, {
-      onConflict: 'store_id,item_id',
-      returning: 'representation'
-    });
+    .upsert(pattern, { onConflict: 'store_id,item_id' })
+    .select();
 
   if (error) {
-    console.error('[v3] Upsert pattern error:', error);
+    console.error('[v3] Upsert error:', error.message);
     return null;
   }
-  return data;
+  // 빈 배열도 성공으로 처리
+  return data !== undefined ? (data.length > 0 ? data : true) : true;
 }
 
 async function recalculateAllPatterns(storeId) {
@@ -7494,12 +7493,14 @@ async function checkOrderNotifications(storeId) {
     }
   }
 
-  // 오늘 이미 알림 보낸 품목 제외
+  // 오늘 사용자가 액션 완료한 품목만 제외
+  // (단순 노출은 제외하지 않음 — 액션 안 했으면 다시 표시)
   const { data: todayNotifs } = await db
     .from('order_notifications')
     .select('item_id')
     .eq('store_id', storeId)
-    .gte('notified_at', todayStr + 'T00:00:00');
+    .gte('notified_at', todayStr + 'T00:00:00')
+    .not('user_action', 'is', null);
 
   const notifiedIds = new Set((todayNotifs || []).map(n => n.item_id));
   const filtered = candidates.filter(c => !notifiedIds.has(c.item_id));
@@ -7540,6 +7541,53 @@ async function recordNotification(candidate, storeId) {
       notification_count: 1
     });
   }
+}
+
+// 액션 시점에만 알림 기록 (렌더링 시에는 호출하지 않음)
+async function recordNotificationOnAction(data, storeId) {
+  const today = new Date().toISOString().split('T')[0];
+
+  const { data: existing } = await db
+    .from('order_notifications')
+    .select('id')
+    .eq('store_id', storeId)
+    .eq('item_id', data.item_id)
+    .gte('notified_at', today + 'T00:00:00')
+    .maybeSingle();
+
+  if (existing) return existing.id;
+
+  const { data: inserted } = await db
+    .from('order_notifications')
+    .insert({
+      store_id: storeId,
+      item_id: data.item_id,
+      item_name: data.item_name,
+      notification_type: 'timing',
+      avg_cycle_days: data.avg_cycle_days,
+      days_since_last_order: data.days_since_last_order,
+      confidence_score: data.confidence_score
+    })
+    .select()
+    .single();
+
+  const { data: quotaExisting } = await db
+    .from('daily_notification_quota')
+    .select('id, notification_count')
+    .eq('store_id', storeId)
+    .eq('date', today)
+    .maybeSingle();
+
+  if (quotaExisting) {
+    await db.from('daily_notification_quota')
+      .update({ notification_count: quotaExisting.notification_count + 1 })
+      .eq('id', quotaExisting.id);
+  } else {
+    await db.from('daily_notification_quota').insert({
+      store_id: storeId, date: today, notification_count: 1
+    });
+  }
+  return inserted?.id;
 }
 
 async function renderV3Notifications() {
@@ -7583,7 +7631,6 @@ async function renderV3Notifications() {
             oncontextmenu="event.preventDefault();v3SkipMenu(${c.item_id},'${safeName}');return false;">\uB118\uAE30\uAE30</button>
         </div>
       </div>`;
-    await recordNotification(c, SID);
   }
 
   container.innerHTML = html;
@@ -7609,6 +7656,7 @@ async function renderV3Notifications() {
 
 // 주문하기
 async function v3OrderNow(itemId, itemName, qty) {
+  await recordNotificationOnAction({ item_id: itemId, item_name: itemName, store_id: SID }, SID);
   await db.from('order_notifications')
     .update({ user_action: 'ordered', action_at: new Date().toISOString() })
     .eq('item_id', itemId).eq('store_id', SID).is('user_action', null);
@@ -7626,6 +7674,7 @@ async function v3OrderNow(itemId, itemName, qty) {
 
 // 넘기기 (탭) — 이미 시켰음
 async function v3Skip(itemId, itemName, source) {
+  await recordNotificationOnAction({ item_id: itemId, item_name: itemName, store_id: SID }, SID);
   await db.from('order_notifications')
     .update({ user_action: 'already_ordered', action_at: new Date().toISOString(), action_detail: { source } })
     .eq('item_id', itemId).eq('store_id', SID).is('user_action', null);
@@ -7672,6 +7721,7 @@ function v3CloseMenu() {
 
 // 내일 다시 → threshold_adjustment +1일
 async function v3SkipPostpone(itemId, itemName) {
+  await recordNotificationOnAction({ item_id: itemId, item_name: itemName, store_id: SID }, SID);
   const { data: existing } = await db
     .from('item_notification_settings')
     .select('threshold_adjustment')
@@ -7696,6 +7746,7 @@ async function v3SkipPostpone(itemId, itemName) {
 
 // 이건 빼주세요 → 알림 OFF
 async function v3SkipDisable(itemId, itemName) {
+  await recordNotificationOnAction({ item_id: itemId, item_name: itemName, store_id: SID }, SID);
   await db.from('item_notification_settings').upsert({
     store_id: SID, item_id: itemId,
     notification_enabled: false, threshold_adjustment: 0,
