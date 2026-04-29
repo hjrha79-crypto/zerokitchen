@@ -582,6 +582,23 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 .v4-sheet-vbtn:active{background:#c3e6cd}
 .v4-sheet-allbtn{width:100%;padding:12px;border-radius:10px;border:none;background:var(--order-green);color:#fff;font-size:14px;font-weight:700;cursor:pointer;margin-top:14px;font-family:inherit}
 .v4-sheet-allbtn:active{opacity:.85}
+.v3-notif-card{background:#fff8e1;border:1px solid #ffd54f;border-radius:12px;padding:12px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px}
+.v3-notif-icon{font-size:22px;flex-shrink:0}
+.v3-notif-body{flex:1;min-width:0}
+.v3-notif-title{font-size:15px;font-weight:600;color:#333;margin-bottom:2px}
+.v3-notif-meta{font-size:12px;color:#777}
+.v3-notif-actions{display:flex;flex-direction:column;gap:4px;flex-shrink:0}
+.v3-btn{border:none;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap}
+.v3-btn-primary{background:#4a90e2;color:#fff}
+.v3-btn-secondary{background:#e8e8e8;color:#555}
+.v3-btn-secondary:active{background:#d0d0d0}
+.v3-skip-menu-overlay{position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:9999;display:flex;align-items:flex-end;opacity:0;transition:opacity 0.2s}
+.v3-skip-menu-overlay.open{opacity:1}
+.v3-skip-menu{background:#fff;border-radius:16px 16px 0 0;width:100%;padding:12px;display:flex;flex-direction:column;gap:8px}
+.v3-skip-menu-title{font-weight:600;text-align:center;padding:8px 0;border-bottom:1px solid #eee;margin-bottom:4px}
+.v3-skip-menu button{padding:14px;border:none;background:#f5f5f5;border-radius:8px;font-size:15px;text-align:left}
+.v3-skip-menu .v3-skip-cancel{background:#fff;color:#999;text-align:center;margin-top:4px}
+.v3-empty-card{background:#f0f8f0;border:1px solid #c8e6c9;border-radius:12px;padding:12px 14px;text-align:center;font-size:13px;color:#2e7d32}
 </style>
 </head>
 <body>
@@ -614,6 +631,9 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 
 <!-- 홈탭 (발주 체크리스트 + 입력) -->
 <div id="tab-input" class="tab active">
+  <!-- [v3] 발주 알림 카드 -->
+  <div id="v3NotifContainer" style="display:none; margin:8px 12px;"></div>
+
   <!-- [상단] 추천 공지바 -->
   <div id="suggestBar"></div>
 
@@ -767,6 +787,7 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
     <div class="card-title">발주 주기 학습 (v3)</div>
     <button class="btn-run" onclick="debugRecalcPatterns()">발주 주기 전체 재계산</button>
     <button class="btn-run" style="margin-left:8px;background:var(--accent)" onclick="debugShowPatterns()">학습 결과 보기</button>
+    <button class="btn-run" style="margin-top:6px;background:#e65100;color:#fff" onclick="debugForceNotif()">강제 알림 테스트</button>
   </div>
     </div><!-- /devToolsBody -->
   </div><!-- /개발자 도구 card -->
@@ -973,6 +994,7 @@ async function init() {
       history.replaceState(null, '', '#home');
       // 홈 = 발주 체크리스트��므로 초기 로드
       _startOrderSession(); renderOrder();
+      renderV3Notifications().catch(e=>console.error('[v3] Notif error:',e));
     }
   } catch(e) {
     showToast('초기화 실패: ' + e.message);
@@ -5813,7 +5835,7 @@ async function switchTab(n, btn) {
   // 탭 전환 시 하네스/확인 카드 닫기
   const rp = document.getElementById('reviewPanel');
   if (rp) rp.style.display = 'none';
-  if (n==='input') { _startOrderSession(); renderOrder(); }
+  if (n==='input') { _startOrderSession(); renderOrder(); renderV3Notifications().catch(e=>console.error('[v3] Notif error:',e)); }
   if (n==='inventory') { if (!_items.length) await refreshItems(); renderInventory(); }
   if (n==='settings') { _loadObservation(); }
 }
@@ -7403,6 +7425,313 @@ async function debugShowPatterns() {
     msg += `  발주 ${p.order_count}회 / 추천 ${p.recommended_qty}\n\n`;
   }
   alert(msg);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// v3.0 Phase 3+4 — 알림 트리거 + 홈 카드 UI
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async function checkOrderNotifications(storeId) {
+  const today = new Date();
+  const todayStr = today.toISOString().split('T')[0];
+
+  // 오늘 알림 한도 확인
+  const { data: quota } = await db
+    .from('daily_notification_quota')
+    .select('notification_count')
+    .eq('store_id', storeId)
+    .eq('date', todayStr)
+    .maybeSingle();
+
+  const todayCount = quota?.notification_count || 0;
+  if (todayCount >= 2) {
+    console.log('[v3] Daily quota reached:', todayCount);
+    return [];
+  }
+
+  // HIGH/MEDIUM confidence 패턴만 조회
+  const { data: patterns, error } = await db
+    .from('item_usage_pattern')
+    .select('*')
+    .eq('store_id', storeId)
+    .in('confidence_score', ['HIGH', 'MEDIUM'])
+    .not('avg_cycle_days', 'is', null)
+    .not('last_order_date', 'is', null);
+
+  if (error || !patterns) {
+    console.error('[v3] Pattern fetch error:', error);
+    return [];
+  }
+
+  // 알림 OFF 품목 제외 + threshold_adjustment 적용
+  const { data: settings } = await db
+    .from('item_notification_settings')
+    .select('item_id, notification_enabled, threshold_adjustment')
+    .eq('store_id', storeId);
+
+  const settingsMap = {};
+  (settings || []).forEach(s => { settingsMap[s.item_id] = s; });
+
+  // 임계값 통과 품목 산출
+  const candidates = [];
+  for (const p of patterns) {
+    const setting = settingsMap[p.item_id];
+    if (setting && setting.notification_enabled === false) continue;
+
+    const adjustment = setting?.threshold_adjustment || 0;
+    const lastOrder = new Date(p.last_order_date);
+    const daysSince = (today - lastOrder) / (1000 * 60 * 60 * 24);
+
+    const ratio = p.confidence_score === 'HIGH' ? 0.8 : 0.9;
+    const threshold = (p.avg_cycle_days * ratio) + adjustment;
+
+    if (daysSince >= threshold) {
+      candidates.push({
+        ...p,
+        days_since_last_order: Math.round(daysSince * 10) / 10,
+        urgency_score: daysSince / p.avg_cycle_days
+      });
+    }
+  }
+
+  // 오늘 이미 알림 보낸 품목 제외
+  const { data: todayNotifs } = await db
+    .from('order_notifications')
+    .select('item_id')
+    .eq('store_id', storeId)
+    .gte('notified_at', todayStr + 'T00:00:00');
+
+  const notifiedIds = new Set((todayNotifs || []).map(n => n.item_id));
+  const filtered = candidates.filter(c => !notifiedIds.has(c.item_id));
+
+  filtered.sort((a, b) => b.urgency_score - a.urgency_score);
+  const slots = 2 - todayCount;
+  return filtered.slice(0, slots);
+}
+
+async function recordNotification(candidate, storeId) {
+  const today = new Date().toISOString().split('T')[0];
+
+  await db.from('order_notifications').insert({
+    store_id: storeId,
+    item_id: candidate.item_id,
+    item_name: candidate.item_name,
+    notification_type: 'timing',
+    avg_cycle_days: candidate.avg_cycle_days,
+    days_since_last_order: candidate.days_since_last_order,
+    confidence_score: candidate.confidence_score
+  });
+
+  const { data: existing } = await db
+    .from('daily_notification_quota')
+    .select('id, notification_count')
+    .eq('store_id', storeId)
+    .eq('date', today)
+    .maybeSingle();
+
+  if (existing) {
+    await db.from('daily_notification_quota')
+      .update({ notification_count: existing.notification_count + 1 })
+      .eq('id', existing.id);
+  } else {
+    await db.from('daily_notification_quota').insert({
+      store_id: storeId,
+      date: today,
+      notification_count: 1
+    });
+  }
+}
+
+async function renderV3Notifications() {
+  const container = document.getElementById('v3NotifContainer');
+  if (!container) return;
+
+  const candidates = await checkOrderNotifications(SID);
+
+  if (candidates.length === 0) {
+    const { data: hasPatterns } = await db
+      .from('item_usage_pattern')
+      .select('item_id')
+      .eq('store_id', SID)
+      .in('confidence_score', ['HIGH', 'MEDIUM'])
+      .limit(1);
+
+    if (hasPatterns && hasPatterns.length > 0) {
+      container.innerHTML = '<div class="v3-empty-card">\u2713 오늘은 시킬 게 없어요</div>';
+      container.style.display = 'block';
+    } else {
+      container.style.display = 'none';
+      container.innerHTML = '';
+    }
+    return;
+  }
+
+  let html = '';
+  for (const c of candidates) {
+    const safeName = c.item_name.replace(/'/g, "\\'");
+    html += `
+      <div class="v3-notif-card" data-item-id="${c.item_id}">
+        <div class="v3-notif-icon">\uD83D\uDD14</div>
+        <div class="v3-notif-body">
+          <div class="v3-notif-title">\uC0AC\uC7A5\uB2D8, ${c.item_name} \uC2DC\uD0A4\uC2E4 \uB54C\uC608\uC694</div>
+          <div class="v3-notif-meta">\uD3C9\uADE0 ${c.avg_cycle_days}\uC77C / \uB9C8\uC9C0\uB9C9 ${c.days_since_last_order}\uC77C \uC804</div>
+        </div>
+        <div class="v3-notif-actions">
+          <button class="v3-btn v3-btn-primary" onclick="v3OrderNow(${c.item_id},'${safeName}',${c.recommended_qty||1})">\uC8FC\uBB38\uD558\uAE30</button>
+          <button class="v3-btn v3-btn-secondary"
+            onclick="v3Skip(${c.item_id},'${safeName}','tap')"
+            oncontextmenu="event.preventDefault();v3SkipMenu(${c.item_id},'${safeName}');return false;">\uB118\uAE30\uAE30</button>
+        </div>
+      </div>`;
+    await recordNotification(c, SID);
+  }
+
+  container.innerHTML = html;
+  container.style.display = 'block';
+
+  // 롱프레스 핸들러
+  container.querySelectorAll('.v3-btn-secondary').forEach(btn => {
+    let pressTimer;
+    btn.addEventListener('touchstart', () => {
+      pressTimer = setTimeout(() => {
+        const card = btn.closest('.v3-notif-card');
+        const itemId = parseInt(card.dataset.itemId);
+        const name = card.querySelector('.v3-notif-title').textContent
+          .replace('\uC0AC\uC7A5\uB2D8, ', '').replace(' \uC2DC\uD0A4\uC2E4 \uB54C\uC608\uC694', '');
+        v3SkipMenu(itemId, name);
+        pressTimer = null;
+      }, 500);
+    });
+    btn.addEventListener('touchend', () => { if (pressTimer) clearTimeout(pressTimer); });
+    btn.addEventListener('touchmove', () => { if (pressTimer) clearTimeout(pressTimer); });
+  });
+}
+
+// 주문하기
+async function v3OrderNow(itemId, itemName, qty) {
+  await db.from('order_notifications')
+    .update({ user_action: 'ordered', action_at: new Date().toISOString() })
+    .eq('item_id', itemId).eq('store_id', SID).is('user_action', null);
+
+  await db.from('order_requests').insert({
+    store_id: SID, item_id: itemId, item_name: itemName,
+    qty: qty, status: 'pending'
+  });
+
+  const card = document.querySelector(`.v3-notif-card[data-item-id="${itemId}"]`);
+  if (card) card.remove();
+  if (typeof renderOrder === 'function') await renderOrder();
+  showToast(`${itemName} \uBC1C\uC8FC \uD45C\uC5D0 \uCD94\uAC00\uB428`);
+}
+
+// 넘기기 (탭) — 이미 시켰음
+async function v3Skip(itemId, itemName, source) {
+  await db.from('order_notifications')
+    .update({ user_action: 'already_ordered', action_at: new Date().toISOString(), action_detail: { source } })
+    .eq('item_id', itemId).eq('store_id', SID).is('user_action', null);
+
+  await db.from('order_requests').insert({
+    store_id: SID, item_id: itemId, item_name: itemName,
+    qty: 0, status: 'done'
+  });
+
+  await db.from('item_notification_settings').upsert({
+    store_id: SID, item_id: itemId,
+    notification_enabled: true, threshold_adjustment: 0,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'store_id,item_id' });
+
+  await _onOrderPatternUpdate(itemId, itemName, SID);
+
+  const card = document.querySelector(`.v3-notif-card[data-item-id="${itemId}"]`);
+  if (card) card.remove();
+  showToast(`${itemName} \u2014 \uC774\uBBF8 \uC2DC\uD0A8 \uAC78\uB85C \uCC98\uB9AC`);
+}
+
+// 넘기기 (롱프레스) — 3옵션 메뉴
+function v3SkipMenu(itemId, itemName) {
+  const safeName = itemName.replace(/'/g, "\\'");
+  const menu = document.createElement('div');
+  menu.className = 'v3-skip-menu-overlay';
+  menu.innerHTML = `
+    <div class="v3-skip-menu">
+      <div class="v3-skip-menu-title">${itemName}</div>
+      <button onclick="v3Skip(${itemId},'${safeName}','menu_already');v3CloseMenu();">\u2713 \uC774\uBBF8 \uC2DC\uCBC8\uC5B4\uC694</button>
+      <button onclick="v3SkipPostpone(${itemId},'${safeName}');v3CloseMenu();">\u23F0 \uB0B4\uC77C \uB2E4\uC2DC</button>
+      <button onclick="v3SkipDisable(${itemId},'${safeName}');v3CloseMenu();">\uD83D\uDD15 \uC774\uAC74 \uBE7C\uC8FC\uC138\uC694</button>
+      <button class="v3-skip-cancel" onclick="v3CloseMenu()">\uCDE8\uC18C</button>
+    </div>`;
+  document.body.appendChild(menu);
+  setTimeout(() => menu.classList.add('open'), 10);
+}
+
+function v3CloseMenu() {
+  const m = document.querySelector('.v3-skip-menu-overlay');
+  if (m) m.remove();
+}
+
+// 내일 다시 → threshold_adjustment +1일
+async function v3SkipPostpone(itemId, itemName) {
+  const { data: existing } = await db
+    .from('item_notification_settings')
+    .select('threshold_adjustment')
+    .eq('store_id', SID).eq('item_id', itemId).maybeSingle();
+
+  const newAdj = (existing?.threshold_adjustment || 0) + 1;
+
+  await db.from('item_notification_settings').upsert({
+    store_id: SID, item_id: itemId,
+    notification_enabled: true, threshold_adjustment: newAdj,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'store_id,item_id' });
+
+  await db.from('order_notifications')
+    .update({ user_action: 'postponed', action_at: new Date().toISOString(), action_detail: { new_adjustment: newAdj } })
+    .eq('item_id', itemId).eq('store_id', SID).is('user_action', null);
+
+  const card = document.querySelector(`.v3-notif-card[data-item-id="${itemId}"]`);
+  if (card) card.remove();
+  showToast(`${itemName} \u2014 \uB0B4\uC77C \uB2E4\uC2DC \uC54C\uB824\uB4DC\uB9B4\uAC8C\uC694`);
+}
+
+// 이건 빼주세요 → 알림 OFF
+async function v3SkipDisable(itemId, itemName) {
+  await db.from('item_notification_settings').upsert({
+    store_id: SID, item_id: itemId,
+    notification_enabled: false, threshold_adjustment: 0,
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'store_id,item_id' });
+
+  await db.from('order_notifications')
+    .update({ user_action: 'dismissed', action_at: new Date().toISOString() })
+    .eq('item_id', itemId).eq('store_id', SID).is('user_action', null);
+
+  const card = document.querySelector(`.v3-notif-card[data-item-id="${itemId}"]`);
+  if (card) card.remove();
+  showToast(`${itemName} \u2014 \uC54C\uB9BC OFF`);
+}
+
+// 디버그: 강제 알림 테스트
+async function debugForceNotif() {
+  const { data: items } = await db.from('items')
+    .select('item_id, item_name').eq('store_id', SID).limit(1);
+
+  if (!items || items.length === 0) { alert('\uD488\uBAA9\uC774 \uC5C6\uC2B5\uB2C8\uB2E4'); return; }
+
+  const item = items[0];
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+
+  await db.from('item_usage_pattern').upsert({
+    store_id: SID, item_id: item.item_id, item_name: item.item_name,
+    avg_cycle_days: 5, std_dev: 0.5, cv: 0.1,
+    confidence_score: 'HIGH', order_count: 8,
+    last_order_date: sevenDaysAgo, recommended_qty: 1,
+    is_cold_start: false,
+    last_calculated_at: new Date().toISOString(),
+    updated_at: new Date().toISOString()
+  }, { onConflict: 'store_id,item_id' });
+
+  alert(`\uAC15\uC81C \uD328\uD134 \uC8FC\uC785 \uC644\uB8CC\n\uD488\uBAA9: ${item.item_name}\n\uD648 \uD0ED\uC73C\uB85C \uC774\uB3D9\uD574\uC11C \uD655\uC778\uD558\uC138\uC694`);
 }
 
 setTimeout(()=>init(), 500);
