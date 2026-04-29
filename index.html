@@ -763,6 +763,11 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
     <div class="card-title">결과</div>
     <div class="json-result" id="jsonResult">결과가 여기에 표시됩니다.</div>
   </div>
+  <div class="card" style="border:1px solid var(--border)">
+    <div class="card-title">발주 주기 학습 (v3)</div>
+    <button class="btn-run" onclick="debugRecalcPatterns()">발주 주기 전체 재계산</button>
+    <button class="btn-run" style="margin-left:8px;background:var(--accent)" onclick="debugShowPatterns()">학습 결과 보기</button>
+  </div>
     </div><!-- /devToolsBody -->
   </div><!-- /개발자 도구 card -->
 </div><!-- /tab-settings -->
@@ -4899,6 +4904,8 @@ async function markReceived(orderId) {
     }
   }
   showToast(`${row.item_name} ${row.qty}${row.unit} 입고 완료`);
+  // v3: 입고 완료 시 해당 품목 발주 주기 패턴 재계산
+  _onOrderPatternUpdate(row.item_id, row.item_name, SID);
 }
 
 // 기존 done 건 호환: completeOrder는 markOrdered로 리다이렉트
@@ -7210,6 +7217,192 @@ function _downloadFails() {
   const a = document.createElement('a');
   a.href = url; a.download = `zk_fail_${new Date().toISOString().slice(0,10)}.txt`;
   a.click(); URL.revokeObjectURL(url);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// v3.0 발주 주기 학습 엔진
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+async function calculateUsagePattern(itemId, itemName, storeId) {
+  const ninetyDaysAgo = new Date();
+  ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+
+  const { data: orders, error } = await db
+    .from('order_requests')
+    .select('created_at, qty, status')
+    .eq('item_id', itemId)
+    .eq('store_id', storeId)
+    .neq('status', 'cancelled')
+    .gte('created_at', ninetyDaysAgo.toISOString())
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    console.error('[v3] Pattern calc error:', error);
+    return null;
+  }
+
+  if (!orders || orders.length < 2) {
+    return {
+      item_id: itemId,
+      item_name: itemName,
+      store_id: storeId,
+      avg_cycle_days: null,
+      std_dev: null,
+      cv: null,
+      confidence_score: 'NONE',
+      order_count: orders ? orders.length : 0,
+      last_order_date: orders && orders.length > 0
+        ? orders[orders.length - 1].created_at.split('T')[0]
+        : null,
+      recommended_qty: null,
+      is_cold_start: false
+    };
+  }
+
+  // 발주 간격 계산 (일 단위)
+  const intervals = [];
+  for (let i = 1; i < orders.length; i++) {
+    const prev = new Date(orders[i - 1].created_at);
+    const curr = new Date(orders[i].created_at);
+    const diffDays = (curr - prev) / (1000 * 60 * 60 * 24);
+    if (diffDays >= 0.5) intervals.push(diffDays);
+  }
+
+  if (intervals.length === 0) {
+    return {
+      item_id: itemId,
+      item_name: itemName,
+      store_id: storeId,
+      avg_cycle_days: null,
+      std_dev: null,
+      cv: null,
+      confidence_score: 'NONE',
+      order_count: orders.length,
+      last_order_date: orders[orders.length - 1].created_at.split('T')[0],
+      recommended_qty: orders[orders.length - 1].qty,
+      is_cold_start: false
+    };
+  }
+
+  // 평균/표준편차/변동계수
+  const avg = intervals.reduce((s, x) => s + x, 0) / intervals.length;
+  const variance = intervals.reduce((s, x) => s + Math.pow(x - avg, 2), 0) / intervals.length;
+  const stdDev = Math.sqrt(variance);
+  const cv = avg > 0 ? stdDev / avg : 0;
+
+  // confidence 판정
+  let confidence = 'LOW';
+  if (orders.length >= 5 && cv < 0.3) confidence = 'HIGH';
+  else if (orders.length >= 3 && cv < 0.5) confidence = 'MEDIUM';
+
+  const lastOrder = orders[orders.length - 1];
+  return {
+    item_id: itemId,
+    item_name: itemName,
+    store_id: storeId,
+    avg_cycle_days: Math.round(avg * 10) / 10,
+    std_dev: Math.round(stdDev * 10) / 10,
+    cv: Math.round(cv * 100) / 100,
+    confidence_score: confidence,
+    order_count: orders.length,
+    last_order_date: lastOrder.created_at.split('T')[0],
+    recommended_qty: lastOrder.qty,
+    is_cold_start: false
+  };
+}
+
+async function upsertUsagePattern(pattern) {
+  if (!pattern) return null;
+  pattern.last_calculated_at = new Date().toISOString();
+  pattern.updated_at = new Date().toISOString();
+
+  const { data, error } = await db
+    .from('item_usage_pattern')
+    .upsert(pattern, {
+      onConflict: 'store_id,item_id',
+      returning: 'representation'
+    });
+
+  if (error) {
+    console.error('[v3] Upsert pattern error:', error);
+    return null;
+  }
+  return data;
+}
+
+async function recalculateAllPatterns(storeId) {
+  console.log('[v3] Recalculating all patterns for store', storeId);
+
+  const { data: items, error } = await db
+    .from('items')
+    .select('item_id, item_name')
+    .eq('store_id', storeId);
+
+  if (error || !items) {
+    console.error('[v3] Item fetch error:', error);
+    return { success: 0, failed: 0, high: 0, medium: 0, low: 0, none: 0 };
+  }
+
+  let success = 0, failed = 0;
+  let high = 0, medium = 0, low = 0, none = 0;
+
+  for (const item of items) {
+    const pattern = await calculateUsagePattern(item.item_id, item.item_name, storeId);
+    if (!pattern) { failed++; continue; }
+
+    const result = await upsertUsagePattern(pattern);
+    if (result !== null) {
+      success++;
+      if (pattern.confidence_score === 'HIGH') high++;
+      else if (pattern.confidence_score === 'MEDIUM') medium++;
+      else if (pattern.confidence_score === 'LOW') low++;
+      else none++;
+    } else {
+      failed++;
+    }
+  }
+
+  console.log(`[v3] Pattern recalc done: ${success} success, ${failed} failed`);
+  console.log(`[v3] Confidence: HIGH=${high}, MEDIUM=${medium}, LOW=${low}, NONE=${none}`);
+  return { success, failed, high, medium, low, none };
+}
+
+// 발주 상태 변경 시 해당 품목 패턴 재계산
+async function _onOrderPatternUpdate(itemId, itemName, storeId) {
+  const pattern = await calculateUsagePattern(itemId, itemName, storeId);
+  await upsertUsagePattern(pattern);
+  console.log('[v3] Pattern updated for', itemName);
+}
+
+// 디버그: 전체 재계산
+async function debugRecalcPatterns() {
+  const result = await recalculateAllPatterns(SID);
+  alert(`재계산 완료\n\nHIGH: ${result.high}건\nMEDIUM: ${result.medium}건\nLOW: ${result.low}건\nNONE: ${result.none}건\n\n실패: ${result.failed}건`);
+}
+
+// 디버그: 학습 결과 보기
+async function debugShowPatterns() {
+  const { data, error } = await db
+    .from('item_usage_pattern')
+    .select('*')
+    .eq('store_id', SID)
+    .in('confidence_score', ['HIGH', 'MEDIUM'])
+    .order('confidence_score', { ascending: true });
+
+  if (error) { alert('조회 실패: ' + error.message); return; }
+  if (!data || data.length === 0) {
+    alert('학습된 패턴이 없습니다.\n\n먼저 [재계산] 버튼을 눌러주세요.');
+    return;
+  }
+
+  let msg = '학습 결과 (HIGH/MEDIUM only)\n\n';
+  for (const p of data) {
+    msg += `[${p.confidence_score}] ${p.item_name}\n`;
+    msg += `  평균 ${p.avg_cycle_days}일 / 편차 \u00B1${p.std_dev}일\n`;
+    msg += `  마지막 발주: ${p.last_order_date}\n`;
+    msg += `  발주 ${p.order_count}회 / 추천 ${p.recommended_qty}\n\n`;
+  }
+  alert(msg);
 }
 
 setTimeout(()=>init(), 500);
