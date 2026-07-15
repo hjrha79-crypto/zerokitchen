@@ -7729,7 +7729,10 @@ async function v3OrderNow(itemId, itemName, qty) {
     .update({ user_action: 'ordered', action_at: new Date().toISOString() })
     .eq('item_id', itemId).eq('store_id', SID).is('user_action', null);
 
-  await db.from('order_requests').insert({
+  // Guard integration (ZK-WEB-DUP-GUARD-FIX-001): route through the shared
+  // dedup entry point so a pending/ordered order for this item is not duplicated.
+  // Same payload as before; unit/vendor_id remain DB-defaulted.
+  await _insertOrderIfNotDup({
     store_id: SID, item_id: itemId, item_name: itemName,
     qty: qty, status: 'pending'
   });
