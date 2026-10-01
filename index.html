@@ -1123,8 +1123,14 @@ async function processRequest(json) {
 
           if (item) {
             const action = req.action_type || json.action_type || 'stock_check';
+            // 발주는 items.unit을 바꾸지 않는다. 재고 단위와 다른 단위의 발주 수량은
+            // 환산·추측하지 않고 저장하지 않는다 (입고는 order.unit = items.unit만 받는다).
+            if (action === 'order' && unit && item.unit && unit.trim() !== item.unit.trim()) {
+              errors.push({ name, reason: `재고 단위는 ${item.unit}입니다. ${unit} 수량은 바로 저장할 수 없습니다` });
+              continue;
+            }
             // 단위 변경 경고
-            if (unit && item.unit && unit !== item.unit) {
+            if (action !== 'order' && unit && item.unit && unit !== item.unit) {
               const msg = `⚠️ ${name}: 단위가 '${item.unit}'에서 '${unit}'(으)로 바뀝니다`;
               if (!json._unitWarnings) json._unitWarnings = [];
               json._unitWarnings.push(msg);
@@ -1141,7 +1147,7 @@ async function processRequest(json) {
                   .select('vendor_id').eq('item_id', item.item_id).eq('is_default', true).limit(1);
                 if (vmap?.length) vid = vmap[0].vendor_id;
               }
-              const newUnit = unit || item.unit;
+              const newUnit = item.unit || unit;
               const { error, skipped, existing } = await _insertOrderIfNotDup({
                 store_id: SID, item_id: item.item_id, item_name: item.item_name,
                 qty: qty, unit: newUnit,
@@ -1321,7 +1327,7 @@ async function processRequest(json) {
             name:          it.item_name,
             current_qty:   Number(it.current_qty),
             target_qty:    Number(it.target_qty),
-            suggested_qty: Number(it.target_qty) - Number(it.current_qty),
+            suggested_qty: _calcOrderQty(Number(it.current_qty), Number(it.target_qty), null, it.order_unit_qty).qty,
             unit:          it.unit || '',
             vendor_id:     it.vendor_id || null,
             vendor:        _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || null
@@ -3425,7 +3431,8 @@ function _calcOrderQty(currentQty, targetQty, consumption, orderUnitQty) {
   const ouq = parseInt(orderUnitQty) || 1;
   const rawQty = qty;
   if (ouq > 1 && qty > 0) {
-    qty = Math.ceil(qty / ouq) * ouq;
+    // toFixed(9): 부동소수 잡음(8.3 - 2.3 = 6.000000000000001)이 한 팩을 더 올리지 않게 한다
+    qty = Math.ceil(Number((qty / ouq).toFixed(9))) * ouq;
   }
 
   return { qty, rawQty, source, avg };
@@ -4891,26 +4898,55 @@ async function markOrdered(orderId) {
   showToast(`${row.item_name} ${row.qty}${row.unit} 주문 완료`);
 }
 
+// 입고 RPC 응답 해석. 서버 code만 신뢰한다.
+//   ok   = 이번 호출로 재고가 입고됨 (SUCCESS 뿐)
+//   done = 발주가 서버에서 done 상태 (입고 대기 목록에서 제거 가능)
+// 응답 없음(네트워크/오류)·모르는 code는 성공이 아니다.
+function _receivingOutcome(res) {
+  const code = (!res || res.error) ? null : res.data?.code;
+  switch (code) {
+    case 'SUCCESS':
+      return { code, ok: true, done: true, message: '' };
+    case 'ALREADY_COMPLETED':
+      return { code, ok: false, done: true, message: '이미 입고 처리된 발주입니다' };
+    case 'STOCK_UNKNOWN':
+      return { code, ok: false, done: false, message: '현재 재고를 먼저 입력한 뒤 다시 입고해 주세요' };
+    case 'UNIT_MISMATCH':
+      return { code, ok: false, done: false, message: '발주 단위와 재고 단위가 달라 입고하지 못했습니다' };
+    case 'STORE_MISMATCH':
+      return { code, ok: false, done: false, message: '이 매장은 아직 입고 처리를 할 수 없습니다' };
+    case 'NOT_FOUND':
+      return { code, ok: false, done: false, message: '발주를 찾을 수 없어 입고하지 못했습니다' };
+    case 'NOT_ORDERED':
+      return { code, ok: false, done: false, message: '주문 완료 상태가 아니라 입고하지 못했습니다' };
+    case 'DATA_CONFLICT':
+      return { code, ok: false, done: false, message: '발주 데이터가 맞지 않아 입고하지 못했습니다' };
+    case 'WRITE_FAILED':
+      return { code, ok: false, done: false, message: '입고 저장에 실패했습니다' };
+    default:
+      return { code: code || null, ok: false, done: false, message: '입고 결과를 확인하지 못했습니다. 새로고침 후 확인해 주세요' };
+  }
+}
+
 // 입고 완료: ordered → done + 재고 입고
+// 재고·이력·발주 상태 쓰기는 complete_order_receiving RPC가 한 트랜잭션으로 수행한다.
+// 여기서는 items / kitchen_operations / order_requests를 직접 쓰지 않는다.
 async function markReceived(orderId) {
   const row = _orderRequests.find(r => r.id === orderId);
   if (!row) return;
-  await db.from('order_requests')
-    .update({ status: 'done', updated_at: new Date().toISOString() })
-    .eq('id', orderId);
-  const item = _items.find(it => it.item_id === row.item_id);
+  let res;
+  try {
+    res = await db.rpc('complete_order_receiving', { p_order_id: orderId, p_store_id: SID });
+  } catch (e) {
+    res = { data: null, error: e };
+  }
+  const out = _receivingOutcome(res);
+  if (!out.done) { showToast(out.message, 3000); return; }
+  const item = out.ok ? _items.find(it => it.item_id === row.item_id) : null;
   if (item) {
-    const newQty = Number(item.current_qty) + Number(row.qty);
-    await db.from('items')
-      .update({ current_qty: newQty, updated_at: new Date().toISOString() })
-      .eq('item_id', item.item_id);
-    await db.from('kitchen_operations').insert({
-      store_id: SID, item_id: item.item_id, item_name: item.item_name,
-      action_type: 'inbound', quantity: row.qty, unit: row.unit,
-      qty_before: item.current_qty, qty_after: newQty,
-      input_method: 'order_complete', raw_text: `발주 #${orderId} 입고 완료`
-    });
-    item.current_qty = newQty;
+    const qtyAfter = Number(res.data.qty_after);
+    if (res.data.qty_after != null && Number.isFinite(qtyAfter)) item.current_qty = qtyAfter;
+    _invalidateDepletionCache();
   }
   // DOM 직접 제거 (레거시)
   const el = document.querySelector(`[data-row-oid="${orderId}"]`);
@@ -4938,6 +4974,7 @@ async function markReceived(orderId) {
       if (stockTd) { stockTd.textContent = item.current_qty; stockTd.className = 'v4-stock'; }
     }
   }
+  if (!out.ok) { showToast(out.message, 3000); return; }
   showToast(`${row.item_name} ${row.qty}${row.unit} 입고 완료`);
   // v3: 입고 완료 시 해당 품목 발주 주기 패턴 재계산
   _onOrderPatternUpdate(row.item_id, row.item_name, SID);
