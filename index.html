@@ -3683,7 +3683,7 @@ async function renderOrder() {
       const it = _items.find(x => x.item_id === s.item_id);
       _chipItems.push({ item_id: s.item_id, name: s.name,
         stockQty: s.current_qty, orderQty: s.suggested_qty,
-        unit: it?.order_unit_name || s.unit || '개', vendor_id: s.vendor_id || it?.vendor_id || null,
+        unit: it?.unit || s.unit || '개', vendor_id: s.vendor_id || it?.vendor_id || null,
         vendor: s.vendor || '' });
     }
 
@@ -7731,11 +7731,15 @@ async function v3OrderNow(itemId, itemName, qty) {
 
   // Guard integration (ZK-WEB-DUP-GUARD-FIX-001): route through the shared
   // dedup entry point so a pending/ordered order for this item is not duplicated.
-  // Same payload as before; unit/vendor_id remain DB-defaulted.
-  await _insertOrderIfNotDup({
+  // unit = items.unit (Inventory Unit truth, never order_unit_name); an unknown
+  // item keeps the old DB-defaulted unit. vendor_id remains DB-defaulted.
+  const _v3Unit = _items.find(i => i.item_id === itemId)?.unit;
+  const _v3Row = {
     store_id: SID, item_id: itemId, item_name: itemName,
     qty: qty, status: 'pending'
-  });
+  };
+  if (_v3Unit) _v3Row.unit = _v3Unit;
+  await _insertOrderIfNotDup(_v3Row);
 
   const card = document.querySelector(`.v3-notif-card[data-item-id="${itemId}"]`);
   if (card) card.remove();

@@ -75,6 +75,7 @@ function makeEnv(orderRows, spy) {
   const renderOrder = async () => {};
   const recordNotificationOnAction = async () => {};
   const _dismissedItemIds = new Set();
+  const _items = []; // item unknown here -> v3OrderNow leaves unit DB-defaulted (CASE 8)
 
   // declaration -> expression so we can capture the reference
   // eslint-disable-next-line no-eval
