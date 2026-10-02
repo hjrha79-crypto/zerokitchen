@@ -179,12 +179,37 @@ function check(name, cond, detail) {
   // The stored quantity is usable only when it is a finite positive number. Anything else is
   // "no usable quantity": never replaced by 1, never ordered, never described as a past order.
   const INVALID = [['ZERO', 0], ['NULL', null], ['NEGATIVE', -1], ['NaN', NaN], ['text', 'abc'], ['empty', ''], ['blank', '  '],
-    ['undefined', undefined], ['Infinity', Infinity], ['zero text', '0'], ['boolean', true]];
+    ['undefined', undefined], ['Infinity', Infinity], ['zero text', '0'], ['boolean', true],
+    ['-0.5', -0.5], ['-Infinity', -Infinity], ['false', false],
+    // text that is not a plain decimal number
+    ['"3abc"', '3abc'], ['"3,000"', '3,000'], ['"true"', 'true'], ['"[3]"', '[3]'], ['"Infinity"', 'Infinity'], ['"NaN"', 'NaN'],
+    ['"-1"', '-1'], ['"1e3"', '1e3'], ['"+3"', '+3'], ['".5"', '.5'], ['"0x10"', '0x10'],
+    // structural / non-scalar input: must be refused by type, never coerced (Number([3]) === 3)
+    ['[3]', [3]], ['[]', []], ['[1,2]', [1, 2]], ['["3"]', ['3']], ['[[3]]', [[3]]], ['{}', {}], ['{value:3}', { value: 3 }],
+    ['new Number(3)', new Number(3)], ['new String("3")', new String('3')], ['Date', new Date(3)], ['function', () => 3],
+    ['Symbol', Symbol('3')], ['BigInt', 3n], ['{valueOf}', { valueOf: () => 3 }], ['{toString}', { toString: () => '3' }]];
   // QA-QD  zero / null / negative / invalid: no usable quantity
   {
     const e0 = makeEnv(P);
-    const verdicts = INVALID.map(([n, v]) => `${n}:${e0._v3ReminderQty(v)}`);
-    check('QA-QD _v3ReminderQty: 0 / null / negative / NaN / text -> null (never 1)', INVALID.every(([, v]) => e0._v3ReminderQty(v) === null), verdicts.join(' '));
+    const accepted = INVALID.filter(([, v]) => e0._v3ReminderQty(v) !== null).map(([n, v]) => `${n}->${String(e0._v3ReminderQty(v))}`);
+    check(`QA-QD _v3ReminderQty: all ${INVALID.length} invalid inputs -> null (scalars, text, arrays, objects, boxed)`, accepted.length === 0, accepted.length ? 'ACCEPTED: ' + accepted.join(' ') : 'accepted none');
+    // ST  the array that used to pass: Number([3]) === 3
+    {
+      const env = makeEnv([pattern(4, '핫소스', [3])], { confirm: true });
+      await env.renderV3Notifications();
+      const card = cardOf(env.notif.innerHTML, 4);
+      await env.v3AddToOrder(4, '핫소스', [3]);
+      check('ST [3]: not a quantity, no button, direct entry asks nothing and writes nothing',
+        env._v3ReminderQty([3]) === null && Number([3]) === 3 && !card.includes('v3-btn-add') && card.includes('알림 기준 수량 없음') &&
+        env.asked.length === 0 && env.db._writes.length === 0 && orders(env).length === 0,
+        `qty=${env._v3ReminderQty([3])} button=${card.includes('v3-btn-add')} asked=${env.asked.length} writes=${env.db._writes.length}`);
+    }
+    // SV  what IS accepted: a positive finite number, or a plain decimal string
+    {
+      const valid = [[3, 3], [3.5, 3.5], [0.5, 0.5], ['3', 3], ['3.5', 3.5], [' 3 ', 3]];
+      const got = valid.map(([v]) => e0._v3ReminderQty(v));
+      check('SV accepted: 3, 3.5, 0.5, "3", "3.5", " 3 " -> the number itself', valid.every(([, want], i) => got[i] === want && typeof got[i] === 'number'), JSON.stringify(got));
+    }
     let cardsOk = true, writesOk = true, askedOk = true; const seen = [];
     for (const [n, v] of INVALID) {
       const env = makeEnv([pattern(4, '핫소스', v)], { confirm: true });

@@ -7871,10 +7871,13 @@ function _v3NeedLine(itemId) {
 // 유한한 양수만 쓴다. 0·음수·없음·숫자 아님은 null이며, 1 같은 임의 수량으로 바꾸지 않는다.
 // 이 값은 알림 패턴을 계산한 시점의 마지막(취소 제외) 발주 기록 수량이다. "넘기기"가 남기는
 // 수량 0 기록도 그 대상이라 0이 될 수 있고, 패턴을 다시 계산하기 전까지 갱신되지 않는다.
+// 받는 타입은 둘뿐이다: number, 또는 숫자만으로 된 문자열("3", "3.5", 앞뒤 공백 허용).
+// 배열·객체·boolean·boxed 값 등은 Number()로 바꿔 보지 않고 거부한다 (Number([3])은 3이 된다).
 function _v3ReminderQty(v) {
-  if (v === null || v === undefined || typeof v === 'boolean') return null;
-  if (typeof v === 'string' && v.trim() === '') return null;
-  const n = Number(v);
+  let n;
+  if (typeof v === 'number') n = v;
+  else if (typeof v === 'string' && /^\s*\d+(\.\d+)?\s*$/.test(v)) n = Number(v.trim());
+  else return null;
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
