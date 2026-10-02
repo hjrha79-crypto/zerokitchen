@@ -33,7 +33,7 @@ function extractFn(name) {
 }
 const asExpr = (src, name) => '(' + src.replace(new RegExp('^(async )?function ' + name), '$1function') + ')';
 const SRC = {};
-for (const n of ['_orderNeedOf', '_renderOrderNeed', '_v3NeedLine', 'v3AddToOrder', 'v3OrderNow', '_insertOrderIfNotDup',
+for (const n of ['_orderNeedOf', '_renderOrderNeed', '_v3NeedLine', '_v3ReminderQty', 'v3AddToOrder', 'v3OrderNow', '_insertOrderIfNotDup',
   'checkOrderNotifications', 'renderV3Notifications', 'recordNotificationOnAction']) SRC[n] = extractFn(n);
 
 // --- MOCK Supabase client: reads answer from `tables`, every write is recorded ---
@@ -88,6 +88,8 @@ function makeEnv(patterns, opts = {}) {
   // eslint-disable-next-line no-eval
   const _v3NeedLine = eval(asExpr(SRC._v3NeedLine, '_v3NeedLine'));
   // eslint-disable-next-line no-eval
+  const _v3ReminderQty = eval(asExpr(SRC._v3ReminderQty, '_v3ReminderQty'));
+  // eslint-disable-next-line no-eval
   const _insertOrderIfNotDup = eval(asExpr(SRC._insertOrderIfNotDup, '_insertOrderIfNotDup'));
   // eslint-disable-next-line no-eval
   const recordNotificationOnAction = eval(asExpr(SRC.recordNotificationOnAction, 'recordNotificationOnAction'));
@@ -100,7 +102,7 @@ function makeEnv(patterns, opts = {}) {
   // eslint-disable-next-line no-eval
   const renderV3Notifications = eval(asExpr(SRC.renderV3Notifications, 'renderV3Notifications'));
   void f; void _orderRequests;
-  return { db, notif, need, toasts, asked, _orderNeedOf, _renderOrderNeed, _v3NeedLine, v3AddToOrder, renderV3Notifications };
+  return { db, notif, need, toasts, asked, _orderNeedOf, _renderOrderNeed, _v3NeedLine, _v3ReminderQty, v3AddToOrder, renderV3Notifications };
 }
 // one reminder card of the rendered container
 const cardOf = (html, id) => html.split('<div class="v3-notif-card"').slice(1).find(s => s.startsWith(` data-item-id="${id}"`)) || '';
@@ -160,7 +162,7 @@ function check(name, cond, detail) {
     await no.v3AddToOrder(4, '핫소스', 3);
     check('D1 declined -> no order, no write at all', no.db._writes.length === 0 && no.asked.length === 1, `writes=${no.db._writes.length}`);
     check('D2 the question shows qty+unit, its source, and the current verdict',
-      /^핫소스 3개을\(를\) 발주표에 추가할까요\?/.test(no.asked[0]) && no.asked[0].includes('직전 발주 수량입니다 (현재 부족량 아님)') && no.asked[0].includes('현재 10개 / 목표 6개 — 지금 부족하지 않음'), JSON.stringify(no.asked[0]));
+      /^핫소스 3개을\(를\) 발주표에 추가할까요\?/.test(no.asked[0]) && no.asked[0].includes('알림 기준 수량입니다 (현재 부족량 기준이 아닙니다)') && no.asked[0].includes('현재 10개 / 목표 6개 — 지금 부족하지 않음'), JSON.stringify(no.asked[0]));
     const none = makeEnv(P);
     await none.v3AddToOrder(4, '핫소스', 3);
     check('D3 no confirmation available -> no order, no write', none.db._writes.length === 0, `writes=${none.db._writes.length}`);
@@ -173,6 +175,73 @@ function check(name, cond, detail) {
     check('D5 confirmed order touches no stock and no audit', !yes.db._writes.some(w => w.table === 'items' || w.table === 'kitchen_operations'), yes.db._writes.map(w => w.table).join(','));
     check('D6 the rendered button goes through the confirming entry point', /onclick="v3AddToOrder\(4,'핫소스',3\)"/.test(cardOf((await (async () => { const e = makeEnv(P); await e.renderV3Notifications(); return e; })()).notif.innerHTML, 4)) && !/onclick="v3OrderNow\(/.test(unesc(SRC.renderV3Notifications)), '');
   }
+  // ── Reminder quantity provenance (fail closed) ──
+  // The stored quantity is usable only when it is a finite positive number. Anything else is
+  // "no usable quantity": never replaced by 1, never ordered, never described as a past order.
+  const INVALID = [['ZERO', 0], ['NULL', null], ['NEGATIVE', -1], ['NaN', NaN], ['text', 'abc'], ['empty', ''], ['blank', '  '],
+    ['undefined', undefined], ['Infinity', Infinity], ['zero text', '0'], ['boolean', true]];
+  // QA-QD  zero / null / negative / invalid: no usable quantity
+  {
+    const e0 = makeEnv(P);
+    const verdicts = INVALID.map(([n, v]) => `${n}:${e0._v3ReminderQty(v)}`);
+    check('QA-QD _v3ReminderQty: 0 / null / negative / NaN / text -> null (never 1)', INVALID.every(([, v]) => e0._v3ReminderQty(v) === null), verdicts.join(' '));
+    let cardsOk = true, writesOk = true, askedOk = true; const seen = [];
+    for (const [n, v] of INVALID) {
+      const env = makeEnv([pattern(4, '핫소스', v)], { confirm: true });
+      await env.renderV3Notifications();
+      const card = cardOf(env.notif.innerHTML, 4);
+      const noBtn = !card.includes('v3-btn-add') && !card.includes('v3AddToOrder(') && !card.includes('v3OrderNow(');
+      const says = card.includes('data-reminder-qty=""') && card.includes('알림 기준 수량 없음');
+      cardsOk = cardsOk && noBtn && says && card.includes('넘기기');
+      // even if the entry point is reached with that value, nothing is asked and nothing is written
+      await env.v3AddToOrder(4, '핫소스', v);
+      writesOk = writesOk && env.db._writes.length === 0;
+      askedOk = askedOk && env.asked.length === 0 && env.toasts.length === 1 && env.toasts[0].includes('알림 기준 수량이 없어');
+      seen.push(`${n}:${noBtn && says ? 'no-button' : 'BUTTON'}/${env.db._writes.length}w`);
+    }
+    check('QA-QD card: no add button, says no usable quantity, 넘기기 kept', cardsOk, seen.join(' '));
+    check('QA-QD entry point: no question, no order, 0 writes even when confirm would say yes', writesOk && askedOk, '');
+  }
+  // QE  valid quantity 3: shown, asked, inserted — the same number everywhere
+  {
+    const env = makeEnv([pattern(4, '핫소스', 3)], { confirm: true });
+    await env.renderV3Notifications();
+    const card = cardOf(env.notif.innerHTML, 4);
+    const before = env.db._writes.length;
+    await env.v3AddToOrder(4, '핫소스', 3);
+    const o = orders(env);
+    check('QE valid 3: card 3개 = question 3개 = insert 3, described as reminder quantity',
+      card.includes('data-reminder-qty="3"') && card.includes('알림 기준 수량 3개 (현재 부족량 아님)') && card.includes("v3AddToOrder(4,'핫소스',3)") &&
+      before === 0 && env.asked.length === 1 && env.asked[0].startsWith('핫소스 3개을(를)') &&
+      o.length === 1 && o[0].payload.qty === 3 && o[0].payload.unit === '개' && o[0].payload.status === 'pending',
+      `card qty=${(/data-reminder-qty="([^"]*)"/.exec(card) || [])[1]} asked=${JSON.stringify((env.asked[0] || '').split('\n')[0])} insert=${JSON.stringify(o.map(w => w.payload.qty))}`);
+    const str = makeEnv([pattern(4, '핫소스', '3')], { confirm: true });
+    await str.v3AddToOrder(4, '핫소스', '3');
+    check('QE numeric text "3" is the number 3 (insert qty 3, not "3")', orders(str).length === 1 && orders(str)[0].payload.qty === 3, JSON.stringify(orders(str).map(w => w.payload.qty)));
+  }
+  // QF  Production 핫소스: current 10 / target 6 / recommended_qty 0
+  {
+    const env = makeEnv([pattern(4, '핫소스', 0)], { confirm: true });
+    await env.renderV3Notifications();
+    env._renderOrderNeed();
+    const html = env.notif.innerHTML, card = cardOf(html, 4);
+    check('QF 핫소스 0: SUFFICIENT, not in the shortage list, reminder still shown',
+      env._orderNeedOf(ITEMS[0]).state === 'SUFFICIENT' && !neededIds(env.need.innerHTML).includes('4') &&
+      card.includes('현재 10개 / 목표 6개 — 지금 부족하지 않음') && card.includes('평소 발주 주기가 됐어요'), '');
+    check('QF 핫소스 0: no invented quantity, no order path, no write',
+      !/1개/.test(card) && card.includes('알림 기준 수량 없음') && !card.includes('v3-btn-add') && env.db._writes.length === 0, '');
+  }
+  // QG  provenance wording: nothing claims "previous order quantity", no 1 fallback in the source
+  {
+    const env = makeEnv([pattern(4, '핫소스', 3), pattern(174, '파인애플', 0)], { confirm: false });
+    await env.renderV3Notifications();
+    await env.v3AddToOrder(4, '핫소스', 3);
+    const shown = env.notif.innerHTML + '\n' + env.asked.join('\n');
+    const code = [SRC.renderV3Notifications, SRC.v3AddToOrder, SRC._v3ReminderQty].map(unesc).join('\n').split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n');
+    check('QG no "직전 발주 수량" claim on screen or in the question; no "|| 1" fallback',
+      !shown.includes('직전 발주') && !code.includes('직전 발주') && !/\|\|\s*1\b/.test(code) && !/recommended_qty\s*\|\|/.test(code), '');
+  }
+
   // CASE E  unknown stock / no target on a reminder card
   {
     const env = makeEnv([pattern(2, '양파', 2), pattern(9, '신규', 1)]);
