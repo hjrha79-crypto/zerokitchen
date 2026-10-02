@@ -81,6 +81,7 @@ function makeEnv(rpcAnswer, opts = {}) {
   const showToast = m => toasts.push(m);
   const _removeOrderRow = () => {};
   const _invalidateDepletionCache = () => {};
+  const _renderOrderNeed = () => {}; // home shortage card redraw (read-only, see test_order_need.js)
   const _onOrderPatternUpdate = () => { pattern.calls++; };
   // eslint-disable-next-line no-eval
   const _receivingOutcome = eval(asExpr(SRC_outcome, '_receivingOutcome'));
