@@ -142,10 +142,13 @@ const SIM = [item(174, '파인애플', 2, 6, '캔'), item(1, '우유', 1, 3, '�
   let threw = false; try { render(SIM, []); } catch (e) { threw = true; }
   check('H7 drawing the card writes nothing', !usesDb && !creates && !threw, `usesDb=${usesDb} creates=${creates} threw=${threw}`); }
 // H8  the other three meanings are not labelled as the current shortage
-{ const notif = extractFn('renderV3Notifications');
+{ // this part of index.html writes Korean as \uXXXX escapes; decode before reading it
+  const notif = extractFn('renderV3Notifications').replace(/\\u([0-9A-Fa-f]{4})/g, (_, h) => String.fromCharCode(parseInt(h, 16)))
+    .split('\n').filter(l => !/^\s*\/\//.test(l)).join('\n'); // what it shows, not its comments
   const recoHeads = HTML.split('\n').filter(l => l.includes('v4-suggest-bar-header') || l.includes('<span>💡'));
   const recoAsNeed = recoHeads.some(l => /발주 필요|부족/.test(l)) || HTML.includes('오늘의 발주 추천');
-  const notifAsNeed = /발주 필요|부족/.test(notif);
+  // the reminder may only mention the shortage to say it is a different thing (see test_order_reminder.js)
+  const notifAsNeed = /발주 필요|시키실 때예요|주문하기/.test(notif) || !notif.includes('현재 재고 부족과 별개');
   const falseAllGood = HTML.includes('모든 재고가 충분합니다');
   check('H8 notification / recommendation / order table not labelled as shortage', !recoAsNeed && !notifAsNeed && !falseAllGood && HTML.includes('추천 (재고 0·소진 예측 기준)'),
     `recoAsNeed=${recoAsNeed} notifAsNeed=${notifAsNeed} falseAllGood=${falseAllGood}`); }

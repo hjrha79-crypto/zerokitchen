@@ -598,6 +598,9 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 .v3-notif-body{flex:1;min-width:0}
 .v3-notif-title{font-size:15px;font-weight:600;color:#333;margin-bottom:2px}
 .v3-notif-meta{font-size:12px;color:#777}
+.v3-notif-head{font-size:11px;font-weight:600;color:#8a6d00;padding:0 2px 6px}
+.v3-notif-need{font-size:12px;font-weight:600;color:var(--dim);margin-top:2px}
+.v3-notif-need.short{color:var(--red)}
 .v3-notif-actions{display:flex;flex-direction:column;gap:4px;flex-shrink:0}
 .v3-btn{border:none;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:500;cursor:pointer;white-space:nowrap}
 .v3-btn-primary{background:#4a90e2;color:#fff}
@@ -7781,7 +7784,8 @@ async function renderV3Notifications() {
       .limit(1);
 
     if (hasPatterns && hasPatterns.length > 0) {
-      let emptyHtml = '<div class="v3-empty-card">\u2713 \uC624\uB298\uC740 \uC2DC\uD0AC \uAC8C \uC5C6\uC5B4\uC694</div>';
+      // 주기 알림이 없다는 뜻일 뿐, 부족한 품목이 없다는 뜻이 아니다 (부족은 최상단 카드가 말한다)
+      let emptyHtml = '<div class="v3-empty-card">\u2713 \uC624\uB298 \uBC1C\uC8FC \uC8FC\uAE30 \uC54C\uB9BC \uC5C6\uC74C</div>';
       if (todayCount > 0) {
         emptyHtml += `<div style="text-align:center;font-size:11px;color:#999;padding:4px 0;">\uC624\uB298 \uC54C\uB9BC ${todayCount}/2</div>`;
       }
@@ -7794,15 +7798,20 @@ async function renderV3Notifications() {
     return;
   }
 
-  let html = '';
+  // 이 카드는 과거 발주 간격에서 나온 참고 알림이다. 현재 부족(재고 < 목표)은
+  // 최상단 "지금 발주 필요" 카드가 말하며, 여기서는 그 판정을 읽어 옆에 적기만 한다.
+  let html = `<div class="v3-notif-head">\uD83D\uDD14 \uBC1C\uC8FC \uC8FC\uAE30 \uC54C\uB9BC \u2014 \uACFC\uAC70 \uBC1C\uC8FC \uAC04\uACA9 \uAE30\uC900 \uCC38\uACE0 (\uD604\uC7AC \uC7AC\uACE0 \uBD80\uC871\uACFC \uBCC4\uAC1C)</div>`;
   for (const c of candidates) {
     const safeName = c.item_name.replace(/'/g, "\\'");
+    const need = _v3NeedLine(c.item_id);
+    const qty = c.recommended_qty || 1;
     html += `
-      <div class="v3-notif-card" data-item-id="${c.item_id}">
+      <div class="v3-notif-card" data-item-id="${c.item_id}" data-item-name="${c.item_name.replace(/"/g, '&quot;')}">
         <div class="v3-notif-icon">\uD83D\uDD14</div>
         <div class="v3-notif-body">
-          <div class="v3-notif-title">\uC0AC\uC7A5\uB2D8, ${c.item_name} \uC2DC\uD0A4\uC2E4 \uB54C\uC608\uC694</div>
+          <div class="v3-notif-title">${c.item_name} \u2014 \uD3C9\uC18C \uBC1C\uC8FC \uC8FC\uAE30\uAC00 \uB410\uC5B4\uC694</div>
           <div class="v3-notif-meta">\uD3C9\uADE0 ${c.avg_cycle_days}\uC77C / \uB9C8\uC9C0\uB9C9 ${c.days_since_last_order}\uC77C \uC804</div>
+          <div class="v3-notif-need${need.state === 'NEEDED' ? ' short' : ''}" data-need-state="${need.state}">${need.text}</div>
           <div style="display:flex;gap:6px;align-items:center;margin-top:4px;font-size:10px;color:#999;">
             <span>\uC774 \uC54C\uB9BC \uB3C4\uC6C0\uB410\uB098\uC694?</span>
             <button onclick="event.stopPropagation();v3Feedback(${c.item_id},true)" style="border:none;background:transparent;cursor:pointer;padding:0 4px;font-size:14px;">\uD83D\uDC4D</button>
@@ -7810,7 +7819,7 @@ async function renderV3Notifications() {
           </div>
         </div>
         <div class="v3-notif-actions">
-          <button class="v3-btn v3-btn-primary" onclick="v3OrderNow(${c.item_id},'${safeName}',${c.recommended_qty||1})">\uC8FC\uBB38\uD558\uAE30</button>
+          <button class="v3-btn ${need.state === 'NEEDED' ? 'v3-btn-primary' : 'v3-btn-secondary'} v3-btn-add" onclick="v3AddToOrder(${c.item_id},'${safeName}',${qty})">\uBC1C\uC8FC\uD45C\uC5D0 \uCD94\uAC00</button>
           <button class="v3-btn v3-btn-secondary"
             onclick="v3Skip(${c.item_id},'${safeName}','tap')"
             oncontextmenu="event.preventDefault();v3SkipMenu(${c.item_id},'${safeName}');return false;">\uB118\uAE30\uAE30</button>
@@ -7824,14 +7833,13 @@ async function renderV3Notifications() {
   container.style.display = 'block';
 
   // 롱프레스 핸들러
-  container.querySelectorAll('.v3-btn-secondary').forEach(btn => {
+  container.querySelectorAll('.v3-btn-secondary:not(.v3-btn-add)').forEach(btn => {
     let pressTimer;
     btn.addEventListener('touchstart', () => {
       pressTimer = setTimeout(() => {
         const card = btn.closest('.v3-notif-card');
         const itemId = parseInt(card.dataset.itemId);
-        const name = card.querySelector('.v3-notif-title').textContent
-          .replace('\uC0AC\uC7A5\uB2D8, ', '').replace(' \uC2DC\uD0A4\uC2E4 \uB54C\uC608\uC694', '');
+        const name = card.dataset.itemName;
         v3SkipMenu(itemId, name);
         pressTimer = null;
       }, 500);
@@ -7839,6 +7847,25 @@ async function renderV3Notifications() {
     btn.addEventListener('touchend', () => { if (pressTimer) clearTimeout(pressTimer); });
     btn.addEventListener('touchmove', () => { if (pressTimer) clearTimeout(pressTimer); });
   });
+}
+
+// 알림 카드에 적는 현재 부족 판정 한 줄. 판정은 _orderNeedOf가 하고 여기서는 읽기만 한다.
+function _v3NeedLine(itemId) {
+  const it = (_items || []).find(i => i.item_id === itemId);
+  const n = it ? _orderNeedOf(it) : { state: 'NO_TARGET' };
+  if (n.state === 'NEEDED') return { state: n.state, text: `현재 부족 ${n.qty}${n.unit} (현재 ${n.current}${n.unit} / 목표 ${n.target}${n.unit})` };
+  if (n.state === 'SUFFICIENT') return { state: n.state, text: `현재 ${n.current}${n.unit} / 목표 ${n.target}${n.unit} — 지금 부족하지 않음` };
+  if (n.state === 'UNKNOWN') return { state: n.state, text: '현재 재고 모름 — 재고 확인 필요' };
+  return { state: n.state, text: '목표 재고 없음 — 부족 여부 판단 안 함' };
+}
+
+// 알림 카드의 "발주표에 추가": 수량과 그 근거를 보여 주고 확인받은 뒤에만 발주를 만든다.
+// 수량은 직전 발주 수량이며 현재 부족량이 아니다.
+async function v3AddToOrder(itemId, itemName, qty) {
+  const unit = (_items || []).find(i => i.item_id === itemId)?.unit || '';
+  const msg = `${itemName} ${qty}${unit}을(를) 발주표에 추가할까요?\n\n· 수량은 직전 발주 수량입니다 (현재 부족량 아님)\n· ${_v3NeedLine(itemId).text}`;
+  if (!(typeof confirm === 'function' && confirm(msg))) return;
+  await v3OrderNow(itemId, itemName, qty);
 }
 
 // 주문하기
