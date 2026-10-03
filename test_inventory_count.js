@@ -98,6 +98,7 @@ function makeEnv(opts = {}) {
   let _itemTrust = new Map();
   let _countMode = false, _countedIds = new Set(), _stockCheckBusy = false;
   const _countSaving = new Set(), _invQtySaving = new Set(), _invAuditPending = new Map(), _invAuditRetrying = new Set();
+  const _isKnownQty = eval(asExpr(extractFn('_isKnownQty'), '_isKnownQty')); void _isKnownQty;
   const f = {};
   for (const n of NAMES) f[n] = eval(asExpr(SRC[n], n));
   // the functions call each other by name; give the eval scope those names

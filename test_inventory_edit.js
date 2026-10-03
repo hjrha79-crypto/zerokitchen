@@ -109,7 +109,8 @@ function makeEnv(memQty, opts = {}) {
   const _invAuditPending = new Map();
   const _invAuditRetrying = new Set();
   const _countMode = false;   // 기록 수정 path (count mode is covered by test_inventory_count.js)
-  void _countMode;
+  const _isKnownQty = eval(asExpr(extractFn('_isKnownQty'), '_isKnownQty'));
+  void _countMode; void _isKnownQty;
   const _invAuditRetryBtn = eval(asExpr(BTN_SRC, '_invAuditRetryBtn'));
   const retry = eval(asExpr(RETRY_SRC, '_retryInvAudit'));
   const f = eval(asExpr(SAVE_SRC, '_saveInvQty'));

@@ -3093,6 +3093,9 @@ if (window.visualViewport) {
   });
 }
 
+// 기록된 재고 수량이 있는가 (null/undefined/'' = 재고 모름, 0은 아는 0).
+function _isKnownQty(v) { return v !== null && v !== undefined && v !== ''; }
+
 function _renderInvCard(it, qty, tgt, cls, vName) {
   // 한 줄 카드: 품목명(인라인 편집) + 수량(인라인 편집) + 단위 + 거래처 + 삭제.
   // 품목명/수량은 input으로 렌더되어 탭 시 즉시 편집, blur/Enter 시 자동 저장.
@@ -3100,13 +3103,16 @@ function _renderInvCard(it, qty, tgt, cls, vName) {
     `<option value="${v.vendor_id}" ${v.vendor_id===it.vendor_id?'selected':''}>${v.vendor_name}</option>`
   ).join('');
   const safeName = it.item_name.replace(/"/g,'&quot;').replace(/'/g,"&#39;");
+  // 재고 모름(current_qty null)은 0이 아니다: 빈 칸 + "재고 모름"으로 그린다(value/defaultValue가 "0"이 되면
+  // 실제로 센 0을 입력해도 바뀐 것이 없다고 보아 저장되지 않는다).
+  const qtyAttr = _isKnownQty(it.current_qty) ? qty : '';
   return `<div class="inv-card ${cls}" id="ic_${it.item_id}">
     <input class="inv-name" type="text" value="${safeName}" data-id="${it.item_id}"
       onfocus="_invEditFocus(this)"
       onblur="_invEditBlur();_saveInvName(${it.item_id}, this)"
       onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">
     <div class="inv-qty-wrap">
-      <input class="inv-qty ${cls}" type="number" inputmode="decimal" value="${qty}" data-id="${it.item_id}" min="0" step="0.1"
+      <input class="inv-qty ${cls}" type="number" inputmode="decimal" value="${qtyAttr}" placeholder="${qtyAttr === '' ? '재고 모름' : ''}" data-id="${it.item_id}" min="0" step="0.1"
         onfocus="_invEditFocus(this)"
         onblur="_invEditBlur();_saveInvQty(${it.item_id}, this)"
         onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">
@@ -3175,8 +3181,9 @@ async function _retryInvAudit(id) {
       .order('created_at', { ascending: false }).order('operation_id', { ascending: false }).limit(1);
     if (rErr) throw rErr;
     const l = (last || [])[0];
+    const sameQty = (a, b) => _isKnownQty(a) ? (_isKnownQty(b) && Number(a) === Number(b)) : !_isKnownQty(b);   // null ≠ 0
     const persisted = !!l && l.action_type === row.action_type && l.input_method === row.input_method &&
-      Number(l.qty_before) === Number(row.qty_before) && Number(l.qty_after) === Number(row.qty_after);
+      sameQty(l.qty_before, row.qty_before) && sameQty(l.qty_after, row.qty_after);
     if (!persisted) {
       const { error: aErr } = await db.from('kitchen_operations').insert(row);
       if (aErr) throw aErr;
@@ -3206,8 +3213,8 @@ async function _saveInvQty(id, el) {
   if (_countMode) return _countModeSave(id, el, false); // 재고 점검 중: 바꾼 수량 = 실제로 센 수량
   const newQty = parseFloat(el.value);
   if (!Number.isFinite(newQty) || newQty < 0) { restore(); showToast('0 이상의 숫자로 입력해 주세요'); return; }
-  if (newQty === Number(el.defaultValue)) { el.value = el.defaultValue; return; }   // "3" → "3.0"
-  const oldQty = Number(item.current_qty);
+  if (el.defaultValue !== '' && newQty === Number(el.defaultValue)) { el.value = el.defaultValue; return; }   // "3" → "3.0" (빈 칸=재고 모름은 0이 아니다)
+  const oldQty = _isKnownQty(item.current_qty) ? Number(item.current_qty) : null;   // 재고 모름 → qty_before null
   _invQtySaving.add(id);
   let stage = 'update', auditRow = null;
   try {
@@ -3226,7 +3233,7 @@ async function _saveInvQty(id, el) {
       store_id: SID, item_id: id, item_name: item.item_name,
       action_type: 'stock_check', quantity: newQty, unit: item.unit || '개',
       qty_before: oldQty, qty_after: newQty,
-      input_method: 'inv_card_edit', raw_text: `재고 ${oldQty}→${newQty}`
+      input_method: 'inv_card_edit', raw_text: `재고 ${oldQty ?? '확인 불가'}→${newQty}`
     };
     const { error: aErr } = await db.from('kitchen_operations').insert(auditRow);
     if (aErr) throw aErr;
@@ -3256,7 +3263,7 @@ async function _saveInvQty(id, el) {
   }
   el.style.borderColor = 'var(--accent)';
   setTimeout(() => { el.style.borderColor = ''; }, 600);
-  showToast(`${item.item_name}: ${oldQty}→${newQty}${item.unit||''}`);
+  showToast(`${item.item_name}: ${oldQty ?? '재고 모름'}→${newQty}${item.unit||''}`);
 }
 
 // ── 재고 점검 ──
@@ -3358,7 +3365,7 @@ function renderInventory() {
   const alertBar = document.getElementById('invAlertBar');
   const alertText = document.getElementById('invAlertText');
   if (alertBar && alertText) {
-    const zeroCount = _items.filter(it => Number(it.current_qty) <= 0).length;
+    const zeroCount = _items.filter(it => _isKnownQty(it.current_qty) && Number(it.current_qty) <= 0).length;
     if (zeroCount > 0) {
       alertText.textContent = `⚠️ 재고 없음 ${zeroCount}개`;
       alertBar.style.display = '';
@@ -3414,7 +3421,7 @@ function renderInventory() {
   const sort = document.getElementById('invSort')?.value || 'updated';
   if (q) items = items.filter(it => it.item_name.includes(q));
   // "재고 없음만" 필터 (이름은 low_stock 유지 — 호환). 기준: 재고 0
-  if (flt === 'low_stock') items = items.filter(it => Number(it.current_qty) <= 0);
+  if (flt === 'low_stock') items = items.filter(it => _isKnownQty(it.current_qty) && Number(it.current_qty) <= 0);
   if (sort === 'name') items.sort((a,b) => a.item_name < b.item_name ? -1 : 1);
   else if (sort === 'qty_asc') items.sort((a,b) => Number(a.current_qty) - Number(b.current_qty));
   else if (sort === 'qty_desc') items.sort((a,b) => Number(b.current_qty) - Number(a.current_qty));
@@ -3441,7 +3448,7 @@ function renderInventory() {
     grid.innerHTML = Object.entries(groups).map(([vName, groupItems]) => {
       const cards = groupItems.map(it => {
         const qty = Number(it.current_qty), tgt = Number(it.target_qty);
-        const cls = qty <= 0 ? 'zero' : '';
+        const cls = _isKnownQty(it.current_qty) && qty <= 0 ? 'zero' : '';
         const vN = _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || '';
         return _renderInvCard(it, qty, tgt, cls, vN);
       }).join('');
@@ -3461,7 +3468,7 @@ function renderInventory() {
     grid.classList.add('inv-grid');
     grid.innerHTML = items.map(it => {
       const qty = Number(it.current_qty), tgt = Number(it.target_qty);
-      const cls = qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
+      const cls = !_isKnownQty(it.current_qty) ? '' : qty <= 0 ? 'zero' : qty < tgt ? 'low' : '';
       const vName = _vendors.find(v => v.vendor_id === it.vendor_id)?.vendor_name || '';
       return _renderInvCard(it, qty, tgt, cls, vName);
     }).join('');
