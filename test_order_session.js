@@ -36,21 +36,39 @@ for (const n of ['init', 'switchTab', 'resetToHome', '_startOrderSession', '_end
 const HASH_SRC = (/window\.addEventListener\('hashchange', \(\) => \{([\s\S]*?)\n\}\);/.exec(HTML) || [, ''])[1];
 
 // --- MOCK Supabase client: reads answer from `tables`, every write is recorded ---
-function makeDb(tables) {
+// `insertModes`: how successive order_sessions inserts answer — 'ok' (default), 'error'
+// ({data:null,error}), 'throw' (insert() throws), 'reject' (the request rejects),
+// 'nulldata' ({data:null,error:null}) or 'noid' ({data:{},error:null}).
+function makeDb(tables, insertModes = []) {
   const writes = [];
-  let nextId = 900;
+  let nextId = 900, sessionInsertNo = 0;
   function builder(table) {
-    let single = false, inserted = null;
+    let single = false, inserted = null, mode = 'ok';
     const b = {
       select() { return b; }, eq() { return b; }, in() { return b; }, is() { return b; }, not() { return b; },
       gte() { return b; }, limit() { return b; }, order() { return b; },
       maybeSingle() { single = true; return b; }, single() { single = true; return b; },
-      insert(p) { inserted = { id: nextId++, ...p }; writes.push({ table, op: 'insert', payload: p }); return b; },
+      insert(p) {
+        if (table === 'order_sessions') mode = insertModes[sessionInsertNo++] || 'ok';
+        writes.push({ table, op: 'insert', payload: p, mode });
+        if (mode === 'throw') throw new Error('insert threw');
+        inserted = { id: nextId++, ...p };
+        return b;
+      },
       update(p) { writes.push({ table, op: 'update', payload: p }); return b; },
       upsert(p) { writes.push({ table, op: 'upsert', payload: p }); return b; },
       delete() { writes.push({ table, op: 'delete' }); return b; },
-      then(resolve) {
-        if (inserted !== null) { setTimeout(() => resolve({ data: single ? inserted : [inserted], error: null }), 5); return; }
+      then(resolve, reject) {
+        if (inserted !== null) {
+          setTimeout(() => {
+            if (mode === 'reject') reject(new Error('request rejected'));
+            else if (mode === 'error') resolve({ data: null, error: { message: 'insert failed' } });
+            else if (mode === 'nulldata') resolve({ data: null, error: null });
+            else if (mode === 'noid') resolve({ data: {}, error: null });
+            else resolve({ data: single ? inserted : [inserted], error: null });
+          }, 5);
+          return;
+        }
         const rows = tables[table] || [];
         resolve({ data: single ? (rows[0] || null) : rows, error: null });
       },
@@ -62,7 +80,7 @@ function makeDb(tables) {
 
 // --- environment: the real functions with a minimal DOM; Home renderers are spies ---
 function makeEnv(opts = {}) {
-  const db = makeDb({ stores: [{ store_id: 1, store_name: 'A' }], order_requests: [], store_aliases: [] });
+  const db = makeDb({ stores: [{ store_id: 1, store_name: 'A' }], order_requests: [], store_aliases: [] }, opts.insertModes);
   let SID = opts.sid === undefined ? 1 : opts.sid;
   let _stores = [], _items = [], _orderedItemIds = new Set(), _storeAliases = [], _lastRawInput = '';
   let _currentSessionId = null, _sessionStartedAt = null;
@@ -111,7 +129,7 @@ function makeEnv(opts = {}) {
   void _stores; void _items; void _orderedItemIds; void _storeAliases; void _lastRawInput;
   return {
     db, calls, navs, location, toasts, switchTab, resetToHome, init, onHashChange, _startOrderSession: realStart, _endOrderSession, _confirmAllOrders,
-    session: () => ({ id: _currentSessionId, startedAt: _sessionStartedAt }),
+    session: () => ({ id: _currentSessionId, startedAt: _sessionStartedAt, pending: _sessionStarting }),
     sessionInserts: () => db._writes.filter(w => w.table === 'order_sessions' && w.op === 'insert').length,
   };
 }
@@ -197,6 +215,68 @@ const brief = env => `start=${env.calls.start} sessionInserts=${env.sessionInser
     await noSess._endOrderSession();
     check('I closing without a session writes nothing', noSess.db._writes.length === 0, '');
   }
+  // ── Start failure leaves no partial session state ──
+  // Terminal state after a failed start: id null / startedAt null / pending cleared.
+  // After a successful start: a real id / a Date / pending cleared.
+  const failed = s => s.id === null && s.startedAt === null && s.pending === null;
+  const started = s => s.id !== null && s.id !== undefined && s.startedAt instanceof Date && s.pending === null;
+  const show = s => `id=${s.id} startedAt=${s.startedAt instanceof Date ? 'Date' : s.startedAt} pending=${s.pending === null ? 'cleared' : 'SET'}`;
+  const run = async (env, n = 1) => { let threw = null; try { for (let i = 0; i < n; i++) await env._startOrderSession(); } catch (e) { threw = e; } return threw; };
+  // CASE K  returned error
+  {
+    const env = makeEnv({ insertModes: ['error'] });
+    const threw = await run(env);
+    check('K returned error -> null / null / cleared, nothing thrown', failed(env.session()) && threw === null && env.sessionInserts() === 1, show(env.session()));
+  }
+  // CASE L  thrown and rejected
+  {
+    const t = makeEnv({ insertModes: ['throw'] }), r = makeEnv({ insertModes: ['reject'] });
+    const tThrew = await run(t), rThrew = await run(r);
+    check('L insert throws -> null / null / cleared, caller not stuck', failed(t.session()) && tThrew === null, show(t.session()));
+    check('L request rejects -> null / null / cleared, caller not stuck', failed(r.session()) && rThrew === null, show(r.session()));
+  }
+  // CASE M  malformed success
+  {
+    const n = makeEnv({ insertModes: ['nulldata'] }), i = makeEnv({ insertModes: ['noid'] });
+    await run(n); await run(i);
+    check('M data null -> not a success: null / null / cleared', failed(n.session()), show(n.session()));
+    check('M data without id -> not a success: null / null / cleared', failed(i.session()), show(i.session()));
+  }
+  // CASE N  failure then retry succeeds
+  {
+    let all = true; const seen = [];
+    for (const mode of ['error', 'throw', 'reject', 'nulldata', 'noid']) {
+      const env = makeEnv({ insertModes: [mode, 'ok'] });
+      await run(env);
+      const after1 = env.session();
+      await run(env);
+      const after2 = env.session();
+      const ok = failed(after1) && started(after2) && env.sessionInserts() === 2;
+      all = all && ok; seen.push(`${mode}:${ok ? 'reset->started' : show(after1) + ' / ' + show(after2)}`);
+    }
+    check('N any failure, then retry -> second start succeeds (valid id, Date, cleared)', all, seen.join(' '));
+  }
+  // CASE O  concurrent calls share one failing insert, then a retry succeeds
+  {
+    let all = true; const seen = [];
+    for (const mode of ['error', 'throw', 'reject', 'nulldata', 'noid']) {
+      const env = makeEnv({ insertModes: [mode, 'ok'] });
+      let threw = null;
+      try { await Promise.all([env._startOrderSession(), env._startOrderSession(), env._startOrderSession()]); } catch (e) { threw = e; }
+      const mid = env.session(), midInserts = env.sessionInserts();
+      await run(env);
+      const ok = threw === null && midInserts === 1 && failed(mid) && started(env.session()) && env.sessionInserts() === 2;
+      all = all && ok; seen.push(`${mode}:${ok ? 'ok' : `threw=${!!threw} inserts=${midInserts} ${show(mid)} -> ${show(env.session())}`}`);
+    }
+    check('O concurrent start with one failing insert -> 1 insert, all settle, no ghost state, retry works', all, seen.join(' '));
+  }
+  // CASE P  a successful start keeps the full state
+  {
+    const env = makeEnv();
+    await run(env);
+    check('P success -> valid id / Date / cleared, 1 insert', started(env.session()) && env.sessionInserts() === 1, show(env.session()));
+  }
+
   // CASE J  Home render paths themselves contain no write calls
   {
     const writeRe = /\.(insert|update|upsert|delete)\(/;

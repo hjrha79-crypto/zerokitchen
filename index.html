@@ -6039,19 +6039,26 @@ async function _startOrderSession() {
   if (!SID) return;  // store_id 없으면 스킵
   if (_currentSessionId) return;
   if (_sessionStarting) return _sessionStarting;
+  // 세션 id를 받은 뒤에만 id와 시작 시각을 함께 남긴다. 오류 반환·예외·id 없는 응답은 모두
+  // 실패이며, 그때는 둘 다 비워 둔다 (DB 세션 없이 시작 시각만 남는 상태를 만들지 않는다).
   _sessionStarting = (async () => {
+    const startedAt = new Date();
     try {
-      _sessionStartedAt = new Date();
       const { data, error } = await db.from('order_sessions').insert({
         store_id: SID,
         order_date: new Date().toISOString().slice(0, 10),
-        started_at: _sessionStartedAt.toISOString()
+        started_at: startedAt.toISOString()
       }).select('id').single();
-      if (!error && data) _currentSessionId = data.id;
+      if (!error && data && data.id !== null && data.id !== undefined && data.id !== '') {
+        _currentSessionId = data.id;
+        _sessionStartedAt = startedAt;
+        return;
+      }
     } catch(e) {
-      console.warn('세션 생성 실패:', e.message);
-      _currentSessionId = null;
+      console.warn('세션 생성 실패:', e?.message);
     }
+    _currentSessionId = null;
+    _sessionStartedAt = null;
   })();
   try { await _sessionStarting; } finally { _sessionStarting = null; }
 }
