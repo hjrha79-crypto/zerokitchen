@@ -3647,30 +3647,50 @@ function _admittedNeedOf(it) {
 }
 
 // "재고 확인": 사람이 지금 직접 센 수량을 입력해 저장하는 명시적 행동. 이 기록부터 신뢰가 시작된다.
+// 쓰기는 두 번(재고 → 확인 기록)이고 트랜잭션이 없다. 어느 단계가 실패하든(오류 응답·예외·reject)
+// 성공이라고 말하지 않고, 끝에 항상 신뢰 판정을 다시 읽어 화면을 실제 상태로 되돌린다.
+// 재고만 바뀌고 확인 기록이 없으면 확인 필요로 남으며, 다시 누르면 재시도된다.
+let _stockCheckBusy = false;
 async function _trustedStockCheck(itemId) {
+  if (_stockCheckBusy) return;
   const it = (_items || []).find(i => i.item_id === itemId);
   if (!it) return;
   const raw = (typeof prompt === 'function') ? prompt(`${it.item_name} — 지금 직접 세어 본 재고를 입력하세요 (단위: ${it.unit || '개'})`, '') : null;
   if (raw === null) return;
   const v = String(raw).trim();
-  if (!/^\d+(\.\d+)?$/.test(v)) { showToast('숫자로 입력해 주세요'); return; }
+  if (!/^\d+(\.\d+)?$/.test(v) || Number(v) > 1000000) { showToast('0 이상의 숫자로 입력해 주세요'); return; }
   const val = Number(v);
   const before = (it.current_qty === null || it.current_qty === undefined || it.current_qty === '') ? null : Number(it.current_qty);
-  const { error: uErr } = await db.from('items').update({ current_qty: val, updated_at: new Date().toISOString() })
-    .eq('item_id', itemId).eq('store_id', SID);
-  if (uErr) { showToast('재고 저장 실패: ' + uErr.message, 3000); return; }
-  it.current_qty = val;
-  const { error: aErr } = await db.from('kitchen_operations').insert({
-    store_id: SID, item_id: itemId, item_name: it.item_name,
-    action_type: 'stock_check', quantity: val, unit: it.unit || '개',
-    qty_before: before, qty_after: val,
-    input_method: TRUSTED_STOCK_CHECK, raw_text: '재고 확인: 직접 센 수량'
-  });
-  if (aErr) showToast('재고는 저장했지만 확인 기록을 남기지 못해 계속 확인 필요로 표시됩니다', 3000);
-  else showToast(`${it.item_name} 재고 ${val}${it.unit || ''} 확인됨`);
+  _stockCheckBusy = true;
+  let stage = 'update';
+  try {
+    const { error: uErr } = await db.from('items').update({ current_qty: val, updated_at: new Date().toISOString() })
+      .eq('item_id', itemId).eq('store_id', SID);
+    if (uErr) throw uErr;
+    it.current_qty = val;
+    stage = 'audit';
+    const { error: aErr } = await db.from('kitchen_operations').insert({
+      store_id: SID, item_id: itemId, item_name: it.item_name,
+      action_type: 'stock_check', quantity: val, unit: it.unit || '개',
+      qty_before: before, qty_after: val,
+      input_method: TRUSTED_STOCK_CHECK, raw_text: '재고 확인: 직접 센 수량'
+    });
+    if (aErr) throw aErr;
+    stage = 'done';
+  } catch (e) {
+    console.warn(`[trust] 재고 확인 ${stage} 실패:`, e?.message);
+    // 재고 저장이 실패로 끝나면 서버에 반영됐는지 단정할 수 없다 — 실제 값을 다시 읽는다.
+    if (stage === 'update') { try { await refreshItems(); } catch (_) { /* 표시는 아래 신뢰 판정이 막는다 */ } }
+  } finally {
+    _stockCheckBusy = false;
+  }
   _invalidateDepletionCache();
   await _loadInventoryTrust();
   _renderOrderNeed();
+  const nowTrusted = !!_itemTrust.get(itemId)?.trusted;
+  if (stage === 'done' && nowTrusted) showToast(`${it.item_name} 재고 ${val}${it.unit || ''} 확인됨`);
+  else if (stage === 'update') showToast('재고 확인을 저장하지 못했습니다. 다시 시도해 주세요', 3000);
+  else showToast('재고 확인이 완료되지 않았습니다. 확인 필요로 남아 있으니 다시 [재고 확인]을 눌러 주세요', 3500);
 }
 
 // 홈 최상단 카드. 그리기만 하고 어떤 것도 저장·발주하지 않는다 ("재고 확인"은 누를 때만 쓴다).

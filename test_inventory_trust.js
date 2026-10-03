@@ -38,21 +38,32 @@ const SRC = {};
 for (const n of ['_orderNeedOf', '_inventoryTrustOf', '_admittedNeedOf', '_loadInventoryTrust', '_trustedStockCheck', '_renderOrderNeed', '_v3NeedLine']) SRC[n] = extractFn(n);
 const TRUSTED = (/const TRUSTED_STOCK_CHECK = '([^']+)'/.exec(HTML) || [])[1];
 
-// --- MOCK Supabase client: kitchen_operations reads honour eq / in / gte; every write is recorded ---
-function makeDb(ops, opts = {}) {
+// --- MOCK Supabase client: kitchen_operations reads honour eq / in / gte; every write is recorded.
+// `server` holds the items as the database has them (an update that succeeds is applied there).
+// Write failures: failInsert / failUpdate -> {error}; insertMode / updateMode 'throw' (the call throws)
+// or 'reject' (the request rejects); 'rejectAfterApply' = applied on the server, then the response is lost.
+function makeDb(ops, opts = {}, server = []) {
   const writes = [];
+  let stamp = 0;
   function builder(table) {
     const eqs = {}; let ins = null, gte = null, op = null, payload = null;
+    const mode = () => (op === 'insert' && table === 'kitchen_operations') ? opts.insertMode : (op === 'update' ? opts.updateMode : null);
     const b = {
       select() { return b; }, order() { return b; },
       eq(c, v) { eqs[c] = v; return b; }, in(c, v) { ins = [c, v]; return b; }, gte(c, v) { gte = [c, v]; return b; },
-      insert(p) { op = 'insert'; payload = p; writes.push({ table, op, payload: p }); return b; },
-      update(p) { op = 'update'; payload = p; writes.push({ table, op, payload: p }); return b; },
-      then(resolve) {
+      insert(p) { op = 'insert'; payload = p; writes.push({ table, op, payload: p }); if (mode() === 'throw') throw new Error('insert threw'); return b; },
+      update(p) { op = 'update'; payload = p; writes.push({ table, op, payload: p }); if (mode() === 'throw') throw new Error('update threw'); return b; },
+      then(resolve, reject) {
         if (op) {
+          const applyWrite = () => {
+            if (op === 'insert' && table === 'kitchen_operations') ops.push({ operation_id: 9000 + ops.length, created_at: `2026-10-03T09:${String(stamp++).padStart(2, '0')}:00Z`, ...payload });
+            if (op === 'update' && table === 'items') { const row = server.find(r => r.item_id === eqs.item_id); if (row) Object.assign(row, payload); }
+          };
+          if (mode() === 'reject') { reject(new Error('request rejected')); return; }
+          if (mode() === 'rejectAfterApply') { applyWrite(); reject(new Error('response lost')); return; }
           const fail = (opts.failInsert && op === 'insert' && table === 'kitchen_operations') || (opts.failUpdate && op === 'update');
+          if (!fail) applyWrite();
           resolve({ data: null, error: fail ? { message: 'write failed' } : null });
-          if (!fail && op === 'insert' && table === 'kitchen_operations') ops.push({ operation_id: 9000 + ops.length, created_at: '2026-10-03T09:00:00Z', ...payload });
           return;
         }
         if (opts.failRead) { resolve({ data: null, error: { message: 'read failed' } }); return; }
@@ -75,11 +86,15 @@ const op = (item_id, action_type, qty_before, qty_after, input_method = 'api', r
 const item = (item_id, item_name, current_qty, target_qty, unit) => ({ item_id, item_name, current_qty, target_qty, unit, order_unit_qty: 1, order_unit_name: '' });
 
 function makeEnv(items, ops, opts = {}) {
-  const db = makeDb(ops, opts);
+  const server = opts.server || items.map(i => ({ ...i }));
+  const db = makeDb(ops, opts, server);
   const SID = 1;
-  const _items = items.map(i => ({ ...i }));
+  let _items = items.map(i => ({ ...i }));
+  let refreshCalls = 0;
+  const refreshItems = async () => { refreshCalls++; _items = server.map(i => ({ ...i })); };
   const _orderRequests = [];
   let _itemTrust = new Map();
+  let _stockCheckBusy = false;
   const el = { innerHTML: null };
   const document = { getElementById: id => (id === 'orderNeedCard' ? el : null) };
   const toasts = [];
@@ -91,8 +106,11 @@ function makeEnv(items, ops, opts = {}) {
   // eslint-disable-next-line no-eval
   for (const n of Object.keys(SRC)) f[n] = eval(asExpr(SRC[n], n));
   const { _orderNeedOf, _inventoryTrustOf, _admittedNeedOf, _loadInventoryTrust, _renderOrderNeed } = f;
-  void _orderNeedOf; void _inventoryTrustOf; void _admittedNeedOf; void _loadInventoryTrust; void _renderOrderNeed; void prompt; void TRUSTED_STOCK_CHECK;
-  return { db, f, el, toasts, items: _items, trust: () => _itemTrust, setTrust: m => { _itemTrust = m; } };
+  void _orderNeedOf; void _inventoryTrustOf; void _admittedNeedOf; void _loadInventoryTrust; void _renderOrderNeed; void prompt; void TRUSTED_STOCK_CHECK; void refreshItems;
+  return {
+    db, f, el, toasts, server, refreshes: () => refreshCalls,
+    get items() { return _items; }, trust: () => _itemTrust, setTrust: m => { _itemTrust = m; },
+  };
 }
 
 let pass = 0, fail = 0, total = 0;
@@ -273,12 +291,80 @@ async function gate(it, ops) {
     for (const p of [null, '', 'abc', '-1', '3,000', '1e3']) { const e = makeEnv(items, ops.slice(), { prompt: p }); await e.f._trustedStockCheck(174); noWrite = noWrite && e.db._writes.length === 0; seen.push(`${JSON.stringify(p)}:${e.db._writes.length}`); }
     const noPrompt = makeEnv(items, ops.slice()); await noPrompt.f._trustedStockCheck(174);
     check('stock check: cancel / invalid input / no prompt -> no write', noWrite && noPrompt.db._writes.length === 0, seen.join(' '));
-    const auditFail = makeEnv(items, ops.slice(), { prompt: '3', failInsert: true });
-    await auditFail.f._loadInventoryTrust(); await auditFail.f._trustedStockCheck(174);
-    check('stock check: audit insert fails -> stock saved but stays NEEDS_VERIFICATION', auditFail.f._admittedNeedOf(auditFail.items[0]).state === 'NEEDS_VERIFICATION' && auditFail.toasts.some(t => t.includes('계속 확인 필요')), auditFail.toasts.join(' | '));
-    const updFail = makeEnv(items, ops.slice(), { prompt: '3', failUpdate: true });
-    await updFail.f._trustedStockCheck(174);
-    check('stock check: item update fails -> no audit, nothing trusted', !updFail.db._writes.some(x => x.table === 'kitchen_operations') && updFail.items[0].current_qty === 2, ''); }
+    // ── recovery failures: every path ends with no false success, the card re-drawn from a re-read
+    //    verdict, and a retry possible ──
+    const NOT_DONE = '재고 확인이 완료되지 않았습니다';
+    const auditCases = [['C audit {error}', { failInsert: true }], ['D audit request rejects', { insertMode: 'reject' }],
+      ['E audit call throws', { insertMode: 'throw' }], ['E2 audit applied but the response is lost', { insertMode: 'rejectAfterApply' }]];
+    for (const [name, o] of auditCases) {
+      const e = makeEnv(items, ops.slice(), { prompt: '3', ...o });
+      await e.f._loadInventoryTrust();
+      let threw = null; try { await e.f._trustedStockCheck(174); } catch (x) { threw = x; }
+      const n = e.f._admittedNeedOf(e.items[0]);
+      const lost = o.insertMode === 'rejectAfterApply';
+      const html = e.el.innerHTML || '';
+      check(`${name} -> no throw, never "확인됨", card re-drawn, stock 3 kept, ${lost ? 'reload decides (trusted)' : 'still NEEDS_VERIFICATION'}`,
+        threw === null && !e.toasts.some(t => t.includes('확인됨')) && e.toasts.some(t => t.includes(NOT_DONE)) && e.items[0].current_qty === 3 &&
+        (lost ? n.state === 'NEEDED' : (n.state === 'NEEDS_VERIFICATION' && html.includes('data-verify-iid="174"') && html.includes('기록 재고 3캔'))),
+        `${show(n)} | ${e.toasts.join(' | ')}${threw ? ' | THREW ' + threw.message : ''}`);
+    }
+    const updCases = [['B item update {error}', { failUpdate: true }], ['B2 item update rejects', { updateMode: 'reject' }],
+      ['B3 item update throws', { updateMode: 'throw' }], ['B4 item update applied, response lost', { updateMode: 'rejectAfterApply' }]];
+    for (const [name, o] of updCases) {
+      const e = makeEnv(items, ops.slice(), { prompt: '3', ...o });
+      await e.f._loadInventoryTrust();
+      let threw = null; try { await e.f._trustedStockCheck(174); } catch (x) { threw = x; }
+      const applied = o.updateMode === 'rejectAfterApply';
+      check(`${name} -> no audit, nothing trusted, stock re-read (${applied ? '3 on the server' : 'still 2'}), "저장하지 못했습니다"`,
+        threw === null && !e.db._writes.some(x => x.table === 'kitchen_operations') && e.refreshes() === 1 &&
+        e.items[0].current_qty === (applied ? 3 : 2) && e.f._admittedNeedOf(e.items[0]).state === 'NEEDS_VERIFICATION' &&
+        e.toasts.some(t => t.includes('저장하지 못했습니다')) && !e.toasts.some(t => t.includes('확인됨')), `${e.toasts.join(' | ')}${threw ? ' | THREW ' + threw.message : ''}`);
+    }
+    // G  retry after a failed audit succeeds; the env is re-used as the user would
+    { const shared = ops.slice();
+      const e = makeEnv(items, shared, { prompt: '3', insertMode: 'reject' });
+      await e.f._loadInventoryTrust(); await e.f._trustedStockCheck(174);
+      const first = e.f._admittedNeedOf(e.items[0]).state;
+      const retry = makeEnv(e.items, shared, { prompt: '3', server: e.server });
+      await retry.f._loadInventoryTrust(); await retry.f._trustedStockCheck(174);
+      const n = retry.f._admittedNeedOf(retry.items[0]);
+      check('G retry after a failed audit -> trusted NEEDED 3, "확인됨"', first === 'NEEDS_VERIFICATION' && n.state === 'NEEDED' && n.qty === 3 && retry.toasts.some(t => t.includes('확인됨')) && (retry.el.innerHTML || '').includes('data-need-iid="174"'), show(n)); }
+    // A/F  success re-draws the card from the re-read verdict
+    { const e = makeEnv(items, ops.slice(), { prompt: '2' });
+      await e.f._loadInventoryTrust(); e.f._renderOrderNeed();
+      const beforeHtml = e.el.innerHTML;
+      await e.f._trustedStockCheck(174);
+      check('A success: card goes from "재고 확인 필요" to "지금 발주 필요 … 4캔"', beforeHtml.includes('data-verify-iid="174"') && e.el.innerHTML.includes('data-need-iid="174"') && e.el.innerHTML.includes('4캔') && !e.el.innerHTML.includes('data-verify-iid="174"'), ''); }
+    // H  reload / tab re-entry: a fresh screen reading the same rows keeps the trust
+    { const shared = ops.slice();
+      const e = makeEnv(items, shared, { prompt: '2' });
+      await e.f._loadInventoryTrust(); await e.f._trustedStockCheck(174);
+      const fresh = makeEnv(e.server, shared);
+      await fresh.f._loadInventoryTrust();
+      const n = fresh.f._admittedNeedOf(fresh.items[0]);
+      check('H reload / re-entry -> still trusted NEEDED 4', n.state === 'NEEDED' && n.qty === 4, show(n)); }
+    // I  repeated checks: the latest count wins
+    { const shared = ops.slice();
+      const a = makeEnv(items, shared, { prompt: '2' }); await a.f._loadInventoryTrust(); await a.f._trustedStockCheck(174);
+      const b = makeEnv(a.server, shared, { prompt: '5', server: a.server }); await b.f._loadInventoryTrust(); await b.f._trustedStockCheck(174);
+      const n = b.f._admittedNeedOf(b.items[0]);
+      check('I repeated check -> latest count (5) trusted, NEEDED 1', n.state === 'NEEDED' && n.qty === 1, show(n)); }
+    // J  an ordinary edit after the check ends the trust (as the table / inventory edits write it)
+    { const shared = ops.slice();
+      const a = makeEnv(items, shared, { prompt: '2' }); await a.f._loadInventoryTrust(); await a.f._trustedStockCheck(174);
+      shared.push({ ...op(174, 'stock_check', 2, 3, 'table_edit'), created_at: '2026-10-03T10:00:00Z' });
+      a.server[0].current_qty = 3;
+      const fresh = makeEnv(a.server, shared); await fresh.f._loadInventoryTrust();
+      const n = fresh.f._admittedNeedOf(fresh.items[0]);
+      check('J ordinary edit after the check -> NEEDS_VERIFICATION again', n.state === 'NEEDS_VERIFICATION' && n.recorded === 3, show(n)); }
+    // a second press while a check is running is ignored
+    { let release; const gate = new Promise(r => { release = r; });
+      const e = makeEnv(items, ops.slice(), { prompt: '3' });
+      const realFrom = e.db.from; let calls = 0;
+      e.db.from = t => { const b = realFrom(t); if (t === 'items') { const u = b.update; b.update = p => { calls++; const r = u(p); const then = r.then; r.then = (res, rej) => gate.then(() => then(res, rej)); return r; }; } return b; };
+      const p1 = e.f._trustedStockCheck(174); const p2 = e.f._trustedStockCheck(174);
+      release(); await Promise.all([p1, p2]);
+      check('double press while a check runs -> one write', calls === 1, `item updates=${calls}`); } }
 
   // ── reminder state line follows the gate ──
   { const env = makeEnv([item(174, '파인애플', 2, 6, '캔')], [op(174, 'stock_check', 0, 2, 'api', 'simulation baseline 001')]);
