@@ -508,6 +508,8 @@ td.need-qty{font-size:17px;font-weight:700;color:var(--red)}
 .need-ok{padding:8px 16px;font-size:12px;color:var(--dim);border-top:1px solid #f0f0ec}
 .need-ok summary{cursor:pointer;font-weight:600}
 .need-ok div{padding:2px 0 0 12px;color:var(--muted)}
+.need-verify{padding:3px 0 0 12px;color:var(--dim)}
+.need-check-btn{margin-left:6px;font-size:11px;padding:2px 8px;border-radius:6px;border:1px solid var(--warn);background:#fff;color:var(--warn);cursor:pointer;font-family:inherit}
 
 /* ── v4 표 카드 ── */
 .v4-card{background:#fff;border-radius:16px;padding:0;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px}
@@ -3576,13 +3578,108 @@ function _orderNeedOf(it) {
   return { ...base, state: 'NEEDED', qty: exact > 0 ? exact : target - current };
 }
 
-// 홈 최상단 카드. 읽기 전용: 화면에 그리기만 하고 어떤 것도 저장·발주하지 않는다.
+// ── 신뢰 재고 Gate: 기록된 재고 숫자를 현재 재고로 믿어도 되는가 ──
+// 숫자가 있다는 것만으로는 믿지 않는다. 믿는 경우는 하나뿐이다:
+//   1. 마지막 절대 관측(stock_check)이 명시적인 "재고 확인"(TRUSTED_STOCK_CHECK)이고
+//   2. 그 뒤 재고를 바꾼 기록(입고·차감 등)이 끊김 없이 이어지며 (앞 qty_after = 다음 qty_before)
+//   3. 시뮬레이션 기록이 섞이지 않았고
+//   4. 마지막 기록의 qty_after가 지금 current_qty와 같을 때.
+// 그 밖에는 NEEDS_VERIFICATION이다. 기록 숫자는 지우지도 0·UNKNOWN으로 바꾸지도 않는다.
+// 기존 데이터는 이 표시가 없으므로 모두 확인 필요로 시작한다 (기간·입력 방식으로 추정하지 않는다).
+const TRUSTED_STOCK_CHECK = 'trusted_stock_check';
+let _itemTrust = new Map(); // item_id -> { trusted, reason, lastQty }
+
+// ops: 이 품목의 kitchen_operations (생성 순). 판정만 하고 아무것도 쓰지 않는다.
+function _inventoryTrustOf(currentQty, ops) {
+  const list = (ops || []).filter(o => o && o.action_type !== 'order'); // 발주 기록은 재고를 바꾸지 않는다
+  let anchor = -1;
+  for (let i = list.length - 1; i >= 0; i--) if (list[i].action_type === 'stock_check') { anchor = i; break; }
+  if (anchor < 0 || list[anchor].input_method !== TRUSTED_STOCK_CHECK) return { trusted: false, reason: 'NO_TRUST_BASIS' };
+  const chain = list.slice(anchor);
+  if (chain.some(o => o.input_method === 'simulation' || /simulation/i.test(o.raw_text || ''))) return { trusted: false, reason: 'SIMULATION' };
+  const n = v => (v === null || v === undefined || v === '') ? null : Number(v);
+  for (let k = 1; k < chain.length; k++) {
+    const before = n(chain[k].qty_before), prevAfter = n(chain[k - 1].qty_after);
+    if (before === null || prevAfter === null || before !== prevAfter) return { trusted: false, reason: 'BROKEN_CONTINUITY' };
+  }
+  const lastQty = n(chain[chain.length - 1].qty_after), cur = n(currentQty);
+  if (lastQty === null || cur === null || lastQty !== cur) return { trusted: false, reason: 'CONFLICT' };
+  return { trusted: true, reason: null, lastQty };
+}
+
+// 현재 매장의 신뢰 판정을 읽어 _itemTrust에 둔다. 읽기 전용. 실패하면 모두 미확인(fail closed).
+async function _loadInventoryTrust() {
+  const next = new Map();
+  try {
+    const { data: anchors, error } = await db.from('kitchen_operations')
+      .select('item_id, created_at').eq('store_id', SID).eq('input_method', TRUSTED_STOCK_CHECK);
+    if (error) throw error;
+    const since = new Map();
+    for (const a of anchors || []) if (!since.has(a.item_id) || a.created_at > since.get(a.item_id)) since.set(a.item_id, a.created_at);
+    if (since.size) {
+      const from = [...since.values()].sort()[0];
+      const { data: ops, error: e2 } = await db.from('kitchen_operations')
+        .select('item_id, created_at, operation_id, action_type, qty_before, qty_after, input_method, raw_text')
+        .eq('store_id', SID).in('item_id', [...since.keys()]).gte('created_at', from)
+        .order('created_at', { ascending: true }).order('operation_id', { ascending: true });
+      if (e2) throw e2;
+      for (const [itemId, at] of since) {
+        const item = (_items || []).find(i => i.item_id === itemId);
+        if (!item) continue;
+        next.set(itemId, _inventoryTrustOf(item.current_qty, (ops || []).filter(o => o.item_id === itemId && o.created_at >= at)));
+      }
+    }
+  } catch (e) {
+    console.warn('[trust] 신뢰 재고 판정을 읽지 못했습니다 — 모두 확인 필요로 둡니다:', e?.message);
+    next.clear();
+  }
+  _itemTrust = next;
+}
+
+// 확정 OrderNeed: 계산식(_orderNeedOf)은 그대로 두고, 확정(NEEDED/SUFFICIENT)에만 신뢰 Gate를 건다.
+// 판정 뒤에 화면에서 재고가 바뀌었으면(lastQty ≠ current) 다시 읽기 전까지 확인 필요로 둔다.
+function _admittedNeedOf(it) {
+  const n = _orderNeedOf(it);
+  if (n.state !== 'NEEDED' && n.state !== 'SUFFICIENT') return n;
+  const t = _itemTrust.get(it.item_id);
+  if (t && t.trusted && t.lastQty === n.current) return n;
+  return { ...n, state: 'NEEDS_VERIFICATION', qty: 0, recorded: n.current, reason: t ? (t.trusted ? 'CONFLICT' : t.reason) : 'NO_TRUST_BASIS' };
+}
+
+// "재고 확인": 사람이 지금 직접 센 수량을 입력해 저장하는 명시적 행동. 이 기록부터 신뢰가 시작된다.
+async function _trustedStockCheck(itemId) {
+  const it = (_items || []).find(i => i.item_id === itemId);
+  if (!it) return;
+  const raw = (typeof prompt === 'function') ? prompt(`${it.item_name} — 지금 직접 세어 본 재고를 입력하세요 (단위: ${it.unit || '개'})`, '') : null;
+  if (raw === null) return;
+  const v = String(raw).trim();
+  if (!/^\d+(\.\d+)?$/.test(v)) { showToast('숫자로 입력해 주세요'); return; }
+  const val = Number(v);
+  const before = (it.current_qty === null || it.current_qty === undefined || it.current_qty === '') ? null : Number(it.current_qty);
+  const { error: uErr } = await db.from('items').update({ current_qty: val, updated_at: new Date().toISOString() })
+    .eq('item_id', itemId).eq('store_id', SID);
+  if (uErr) { showToast('재고 저장 실패: ' + uErr.message, 3000); return; }
+  it.current_qty = val;
+  const { error: aErr } = await db.from('kitchen_operations').insert({
+    store_id: SID, item_id: itemId, item_name: it.item_name,
+    action_type: 'stock_check', quantity: val, unit: it.unit || '개',
+    qty_before: before, qty_after: val,
+    input_method: TRUSTED_STOCK_CHECK, raw_text: '재고 확인: 직접 센 수량'
+  });
+  if (aErr) showToast('재고는 저장했지만 확인 기록을 남기지 못해 계속 확인 필요로 표시됩니다', 3000);
+  else showToast(`${it.item_name} 재고 ${val}${it.unit || ''} 확인됨`);
+  _invalidateDepletionCache();
+  await _loadInventoryTrust();
+  _renderOrderNeed();
+}
+
+// 홈 최상단 카드. 그리기만 하고 어떤 것도 저장·발주하지 않는다 ("재고 확인"은 누를 때만 쓴다).
 function _renderOrderNeed() {
   const el = document.getElementById('orderNeedCard');
   if (!el) return;
-  const rows = (_items || []).map(it => ({ it, need: _orderNeedOf(it) }));
+  const rows = (_items || []).map(it => ({ it, need: _admittedNeedOf(it) }));
   const by = s => rows.filter(r => r.need.state === s);
-  const needed = by('NEEDED'), ok = by('SUFFICIENT'), unknown = by('UNKNOWN');
+  const needed = by('NEEDED'), ok = by('SUFFICIENT'), unknown = by('UNKNOWN'), verify = by('NEEDS_VERIFICATION');
   const skipped = by('NO_TARGET').length + by('INVALID').length;
   if (!rows.length) { el.innerHTML = ''; return; }
   // 이미 등록된 발주는 부족량에서 빼지 않고, 상태만 옆에 적는다.
@@ -3601,11 +3698,20 @@ function _renderOrderNeed() {
         <td class="need-qty">${need.qty}${need.unit}</td></tr>`;
     }
     html += `</tbody></table>`;
+  } else if (verify.length || unknown.length) {
+    // 확인되지 않은 품목이 있으면 "발주 필요 없음"이라고 단정하지 않는다.
+    html += `<div class="need-hdr">🔎 확정된 발주 필요 없음 — 재고 확인 필요 ${verify.length + unknown.length}개<span class="need-sub">확인된 재고 기준으로만 발주 필요·불필요를 판단합니다</span></div>`;
   } else {
     html += `<div class="need-hdr">✅ 지금 발주 필요한 품목 없음<span class="need-sub">현재 재고가 목표 재고보다 적은 품목이 없습니다</span></div>`;
   }
+  const checkBtn = id => `<button class="need-check-btn" onclick="_trustedStockCheck(${id})">재고 확인</button>`;
+  if (verify.length) {
+    html += `<div class="need-note warn">재고 확인 필요 ${verify.length}개 — 기록된 재고를 지금 재고로 믿을 수 없어 발주 필요 여부를 판단하지 않았습니다${
+      verify.map(({ it, need }) => `<div class="need-verify" data-verify-iid="${it.item_id}" data-verify-reason="${need.reason}">${it.item_name} — 기록 재고 ${need.recorded}${need.unit} / 목표 ${need.target}${need.unit} ${checkBtn(it.item_id)}</div>`).join('')}</div>`;
+  }
   if (unknown.length) {
-    html += `<div class="need-note warn">재고 확인 필요 ${unknown.length}개 — 현재 재고를 몰라 부족량을 계산하지 않았습니다: ${unknown.map(r => r.it.item_name).join(', ')}</div>`;
+    html += `<div class="need-note warn">재고 확인 필요 ${unknown.length}개 — 현재 재고를 몰라 부족량을 계산하지 않았습니다${
+      unknown.map(({ it }) => `<div class="need-verify" data-unknown-iid="${it.item_id}">${it.item_name} — 재고 기록 없음 ${checkBtn(it.item_id)}</div>`).join('')}</div>`;
   }
   if (ok.length) {
     html += `<details class="need-ok"><summary>발주 불필요 ${ok.length}개 (현재 재고 ≥ 목표 재고)</summary>${
@@ -3637,6 +3743,7 @@ async function renderOrder() {
     _orderRequests = (pendingRows || []).filter(r => Number(r.qty) > 0);
     // 전역 _orderedItemIds 갱신 (pending + ordered 품목)
     _orderedItemIds = new Set(_orderRequests.map(r => r.item_id));
+    await _loadInventoryTrust();
     _renderOrderNeed();
     const _pendingItems = _orderRequests.filter(r => r.status === 'pending');
     const _orderedItems = _orderRequests.filter(r => r.status === 'ordered');
@@ -7874,12 +7981,13 @@ async function renderV3Notifications() {
   });
 }
 
-// 알림 카드에 적는 현재 부족 판정 한 줄. 판정은 _orderNeedOf가 하고 여기서는 읽기만 한다.
+// 알림 카드에 적는 현재 부족 판정 한 줄. 판정은 _admittedNeedOf(신뢰 Gate 포함)가 하고 여기서는 읽기만 한다.
 function _v3NeedLine(itemId) {
   const it = (_items || []).find(i => i.item_id === itemId);
-  const n = it ? _orderNeedOf(it) : { state: 'NO_TARGET' };
+  const n = it ? _admittedNeedOf(it) : { state: 'NO_TARGET' };
   if (n.state === 'NEEDED') return { state: n.state, text: `현재 부족 ${n.qty}${n.unit} (현재 ${n.current}${n.unit} / 목표 ${n.target}${n.unit})` };
   if (n.state === 'SUFFICIENT') return { state: n.state, text: `현재 ${n.current}${n.unit} / 목표 ${n.target}${n.unit} — 지금 부족하지 않음` };
+  if (n.state === 'NEEDS_VERIFICATION') return { state: n.state, text: `기록 재고 ${n.recorded}${n.unit} / 목표 ${n.target}${n.unit} — 재고 확인 필요` };
   if (n.state === 'UNKNOWN') return { state: n.state, text: '현재 재고 모름 — 재고 확인 필요' };
   return { state: n.state, text: '목표 재고 없음 — 부족 여부 판단 안 함' };
 }

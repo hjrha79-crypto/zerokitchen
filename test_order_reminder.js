@@ -33,7 +33,7 @@ function extractFn(name) {
 }
 const asExpr = (src, name) => '(' + src.replace(new RegExp('^(async )?function ' + name), '$1function') + ')';
 const SRC = {};
-for (const n of ['_orderNeedOf', '_renderOrderNeed', '_v3NeedLine', '_v3ReminderQty', 'v3AddToOrder', 'v3OrderNow', '_insertOrderIfNotDup',
+for (const n of ['_orderNeedOf', '_admittedNeedOf', '_renderOrderNeed', '_v3NeedLine', '_v3ReminderQty', 'v3AddToOrder', 'v3OrderNow', '_insertOrderIfNotDup',
   'checkOrderNotifications', 'renderV3Notifications', 'recordNotificationOnAction']) SRC[n] = extractFn(n);
 
 // --- MOCK Supabase client: reads answer from `tables`, every write is recorded ---
@@ -83,6 +83,10 @@ function makeEnv(patterns, opts = {}) {
   const f = {};
   // eslint-disable-next-line no-eval
   const _orderNeedOf = eval(asExpr(SRC._orderNeedOf, '_orderNeedOf'));
+  // fixtures' recorded stock is treated as trusted (the trust gate is tested in test_inventory_trust.js)
+  const _itemTrust = new Map(_items.map(i => [i.item_id, { trusted: true, reason: null, lastQty: i.current_qty === null ? null : Number(i.current_qty) }]));
+  // eslint-disable-next-line no-eval
+  const _admittedNeedOf = eval(asExpr(SRC._admittedNeedOf, '_admittedNeedOf'));
   // eslint-disable-next-line no-eval
   const _renderOrderNeed = eval(asExpr(SRC._renderOrderNeed, '_renderOrderNeed'));
   // eslint-disable-next-line no-eval
@@ -289,7 +293,8 @@ function check(name, cond, detail) {
   // CASE G  the reminder decides nothing: the verdict comes from _orderNeedOf only
   {
     const own = /target_qty|current_qty/.test(SRC._v3NeedLine) || /target_qty|current_qty/.test(SRC.renderV3Notifications) || /target_qty|current_qty/.test(SRC.checkOrderNotifications);
-    check('G1 reminder code reads the verdict, never recomputes it; selection logic untouched by stock', !own && SRC._v3NeedLine.includes('_orderNeedOf('), `ownsCalc=${own}`);
+    // the verdict now comes through the trusted inventory gate (_admittedNeedOf -> _orderNeedOf)
+    check('G1 reminder code reads the verdict, never recomputes it; selection logic untouched by stock', !own && SRC._v3NeedLine.includes('_admittedNeedOf(') && SRC._admittedNeedOf.includes('_orderNeedOf('), `ownsCalc=${own}`);
   }
 
   console.log(`\nDB Write: 0 (mock client only, no network/supabase import)`);

@@ -36,15 +36,22 @@ const asExpr = (src, name) => '(' + src.replace(new RegExp('^(async )?function '
 
 const SRC_need = extractFn('_orderNeedOf');
 const SRC_render = extractFn('_renderOrderNeed');
+const SRC_admit = extractFn('_admittedNeedOf');
 
 // eslint-disable-next-line no-eval
 const _orderNeedOf = eval(asExpr(SRC_need, '_orderNeedOf'));
 
 // Renders the real card into a fake element. `db` throws on any use: drawing must not touch it.
+// These cases test the need formula and the card layout, so every item's recorded stock is
+// treated as trusted here (the trust gate itself is tested in test_inventory_trust.js).
 function render(_items, _orderRequests) {
   const el = { innerHTML: null };
   const document = { getElementById: id => (id === 'orderNeedCard' ? el : null) };
   const db = new Proxy({}, { get() { throw new Error('db used while rendering the need card'); } });
+  const num = v => (v === null || v === undefined || v === '') ? null : Number(v);
+  const _itemTrust = new Map(_items.map(i => [i.item_id, { trusted: true, reason: null, lastQty: num(i.current_qty) }]));
+  // eslint-disable-next-line no-eval
+  const _admittedNeedOf = eval(asExpr(SRC_admit, '_admittedNeedOf'));
   // eslint-disable-next-line no-eval
   const _renderOrderNeed = eval(asExpr(SRC_render, '_renderOrderNeed'));
   _renderOrderNeed();
@@ -77,9 +84,11 @@ if (process.argv[2] === '--live') {
   const rows = neededRows(html);
   const find = id => items.find(i => i.item_id === id);
   const n174 = _orderNeedOf(find(174)), n1 = _orderNeedOf(find(1)), n10 = _orderNeedOf(find(10));
-  check('LIVE 파인애플(174) 2/6 -> 발주 필요 4캔', n174.state === 'NEEDED' && n174.qty === 4 && n174.unit === '캔' && (rows['174'] || []).join(' ') === '파인애플 2캔 6캔 4캔', `${show(n174)} | card: ${(rows['174'] || []).join(' ')}`);
-  check('LIVE 우유(1) 1/3 -> 발주 필요 2박스', n1.state === 'NEEDED' && n1.qty === 2 && n1.unit === '박스' && (rows['1'] || []).join(' ') === '우유 1박스 3박스 2박스', `${show(n1)} | card: ${(rows['1'] || []).join(' ')}`);
-  check('LIVE 치즈(10) 8/6 -> 발주 불필요', n10.state === 'SUFFICIENT' && !rows['10'] && okIds(html).includes('10'), `${show(n10)} | in needed table: ${!!rows['10']} | in 발주 불필요 list: ${okIds(html).includes('10')}`);
+  // formula + card layout over the live item rows, with recorded stock treated as trusted (see render()).
+  // What Production actually shows after the trust gate is checked by test_inventory_trust.js --live.
+  check('LIVE formula 파인애플(174) 2/6 -> 4캔', n174.state === 'NEEDED' && n174.qty === 4 && n174.unit === '캔' && (rows['174'] || []).join(' ') === '파인애플 2캔 6캔 4캔', `${show(n174)} | card: ${(rows['174'] || []).join(' ')}`);
+  check('LIVE formula 우유(1) 1/3 -> 2박스', n1.state === 'NEEDED' && n1.qty === 2 && n1.unit === '박스' && (rows['1'] || []).join(' ') === '우유 1박스 3박스 2박스', `${show(n1)} | card: ${(rows['1'] || []).join(' ')}`);
+  check('LIVE formula 치즈(10) 8/6 -> 충분', n10.state === 'SUFFICIENT' && !rows['10'] && okIds(html).includes('10'), `${show(n10)} | in needed table: ${!!rows['10']} | in 발주 불필요 list: ${okIds(html).includes('10')}`);
   const st = {}; for (const i of items) { const s = _orderNeedOf(i).state; st[s] = (st[s] || 0) + 1; }
   console.log(`\nstore items=${items.length} states=${JSON.stringify(st)} needed rows on card=${Object.keys(rows).length}`);
   console.log(`RESULT: ${pass} PASS / ${fail} FAIL (of ${total})`);
@@ -128,17 +137,23 @@ const SIM = [item(174, '파인애플', 2, 6, '캔'), item(1, '우유', 1, 3, '�
     'ok ids=' + okIds(html).join(','));
   check('H3 UNKNOWN shown as 재고 확인 필요, not as a shortage', html.includes('재고 확인 필요 1개') && html.includes('양파') && !rows['2'] && !okIds(html).includes('2'), '');
   check('H4 header counts only real shortages', html.includes('지금 발주 필요 2개 품목') && html.includes('목표 재고가 없는 1개 품목'), ''); }
-// H5  nothing short -> says so; never claims a shortage
+// H5  nothing short -> says so; never claims a shortage. With an item still to be checked
+//     (UNKNOWN) the card does not claim "nothing to order" either (trusted inventory gate).
 { const html = render([item(10, '치즈', 8, 6, '개'), item(2, '양파', null, 6, 'kg')], []);
-  check('H5 no shortage -> "지금 발주 필요한 품목 없음"', html.includes('지금 발주 필요한 품목 없음') && Object.keys(neededRows(html)).length === 0 && html.includes('재고 확인 필요 1개'), ''); }
+  const clean = render([item(10, '치즈', 8, 6, '개')], []);
+  check('H5 no shortage -> "지금 발주 필요한 품목 없음"; with UNKNOWN -> "확정된 발주 필요 없음 — 재고 확인 필요"',
+    clean.includes('지금 발주 필요한 품목 없음') && Object.keys(neededRows(html)).length === 0 &&
+    !html.includes('지금 발주 필요한 품목 없음') && html.includes('확정된 발주 필요 없음 — 재고 확인 필요 1개') && html.includes('재고 확인 필요 1개'), ''); }
 // H6  a registered order is shown as a lifecycle note; the need is not reduced by it
 { const html = render(SIM, [{ id: 1, item_id: 174, status: 'pending', qty: 6, unit: '캔' }, { id: 2, item_id: 1, status: 'ordered', qty: 2, unit: '박스' }]);
   const rows = neededRows(html);
   check('H6 open order noted, need unchanged (4캔 / 2박스)', rows['174'].join(' ') === '파인애플 2캔 6캔 4캔' && rows['1'].join(' ') === '우유 1박스 3박스 2박스' &&
     html.includes('발주 등록됨 6캔') && html.includes('주문 완료 · 입고 대기 2박스'), JSON.stringify(rows)); }
-// H7  display only: no DB access, no order creation, no click-to-order in the card
+// H7  display only: no DB access, no order creation, no click-to-order in the card.
+//     The only button the card draws is "재고 확인" (_trustedStockCheck), which writes only when pressed.
 { const usesDb = /\bdb\s*\./.test(SRC_render) || /\bdb\s*\./.test(SRC_need);
-  const creates = /_insertOrderIfNotDup|processRequest|\.rpc\(|onclick=/.test(SRC_render + SRC_need);
+  const clicks = [...(SRC_render + SRC_need).matchAll(/onclick="([A-Za-z_$][\w$]*)\(/g)].map(m => m[1]);
+  const creates = /_insertOrderIfNotDup|processRequest|\.rpc\(|v3OrderNow|v3AddToOrder/.test(SRC_render + SRC_need) || clicks.some(c => c !== '_trustedStockCheck');
   let threw = false; try { render(SIM, []); } catch (e) { threw = true; }
   check('H7 drawing the card writes nothing', !usesDb && !creates && !threw, `usesDb=${usesDb} creates=${creates} threw=${threw}`); }
 // H8  the other three meanings are not labelled as the current shortage
