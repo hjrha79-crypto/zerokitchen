@@ -3110,7 +3110,7 @@ function _renderInvCard(it, qty, tgt, cls, vName) {
         onblur="_invEditBlur();_saveInvQty(${it.item_id}, this)"
         onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">
       <span class="inv-unit">${it.unit||''}</span>
-    </div>
+    </div>${_invAuditRetryBtn(it.item_id)}
     <select class="inv-vendor-sel" onchange="_saveInvVendor(${it.item_id}, this.value)">
       <option value="">거래처</option>${vOpts}
     </select>
@@ -3151,18 +3151,63 @@ async function _saveInvName(id, el) {
 // (그려진 뒤 메모리가 바뀐 입력칸에 focus→blur만 해도 옛 값이 새 값을 덮어쓰던 결함).
 // 성공 표시는 재고 저장과 수정 기록이 둘 다 성공한 뒤에만 한다.
 const _invQtySaving = new Set();
+// 재고는 저장됐지만 수정 기록(audit)만 실패한 전이. 품목당 1건, 이 페이지 세션 동안만 보관한다(새로고침하면 사라짐).
+// 다시 시도는 기록 INSERT만 한다 — 재고를 다시 쓰지 않는다. 보류 중인 품목의 새 수정은 순서를 지키려고 막는다.
+const _invAuditPending = new Map();   // item_id → kitchen_operations INSERT body
+const _invAuditRetrying = new Set();
+function _invAuditRetryBtn(id) {
+  return _invAuditPending.has(id)
+    ? `<button class="inv-audit-retry" data-audit-retry="${id}" onclick="_retryInvAudit(${id})" style="flex-shrink:0;font-size:12px;padding:4px 8px;border:1px solid #e67e22;border-radius:6px;background:#fff7ef;color:#c0601a">기록 다시 시도</button>`
+    : '';
+}
+async function _retryInvAudit(id) {
+  const row = _invAuditPending.get(id);
+  if (!row || _invAuditRetrying.has(id)) return;
+  _invAuditRetrying.add(id);
+  let done = false;
+  try {
+    // 응답만 잃고 실제로는 저장됐을 수 있다: 이 품목의 가장 최근 기록이 바로 이 전이면 다시 넣지 않는다.
+    // (보류 중에는 같은 품목의 새 수정이 막혀 있으므로, 저장됐다면 그것이 최신 기록이다.)
+    const { data: last, error: rErr } = await db.from('kitchen_operations')
+      .select('operation_id, action_type, input_method, qty_before, qty_after')
+      .eq('store_id', row.store_id).eq('item_id', id)
+      .order('created_at', { ascending: false }).order('operation_id', { ascending: false }).limit(1);
+    if (rErr) throw rErr;
+    const l = (last || [])[0];
+    const persisted = !!l && l.action_type === row.action_type && l.input_method === row.input_method &&
+      Number(l.qty_before) === Number(row.qty_before) && Number(l.qty_after) === Number(row.qty_after);
+    if (!persisted) {
+      const { error: aErr } = await db.from('kitchen_operations').insert(row);
+      if (aErr) throw aErr;
+    }
+    done = true;
+  } catch (e) {
+    console.warn('[inv] 재고 수정 기록 다시 시도 실패:', e?.message);
+  } finally {
+    _invAuditRetrying.delete(id);
+  }
+  if (!done) { showToast(`${row.item_name}: 수정 기록을 아직 저장하지 못했습니다. 다시 시도해 주세요`, 3000); return; }
+  _invAuditPending.delete(id);
+  document.querySelector(`[data-audit-retry="${id}"]`)?.remove();
+  showToast(`${row.item_name}: 재고 수정 기록 저장 완료 (${row.qty_before}→${row.qty_after}${row.unit || ''})`);
+}
 async function _saveInvQty(id, el) {
   const item = _items.find(i => i.item_id === id);
   if (!item) return;
   if (el.value === el.defaultValue) return;            // 바꾸지 않았다 → 쓰기 0
   if (_invQtySaving.has(id)) return;                   // 같은 품목 저장 중 → 중복 쓰기 0
   const restore = () => { const v = item.current_qty ?? ''; el.value = el.defaultValue = String(v); };
+  if (_invAuditPending.has(id)) {                      // 앞선 수정 기록이 보류 중 → 새 수정 막음(기록 순서 보존)
+    el.value = el.defaultValue;
+    showToast('이전 재고 수정 기록 저장이 완료되지 않았습니다. 먼저 [기록 다시 시도]를 눌러 주세요', 3500);
+    return;
+  }
   const newQty = parseFloat(el.value);
   if (!Number.isFinite(newQty) || newQty < 0) { restore(); showToast('0 이상의 숫자로 입력해 주세요'); return; }
   if (newQty === Number(el.defaultValue)) { el.value = el.defaultValue; return; }   // "3" → "3.0"
   const oldQty = Number(item.current_qty);
   _invQtySaving.add(id);
-  let stage = 'update';
+  let stage = 'update', auditRow = null;
   try {
     const { error: uErr } = await db.from('items').update({ current_qty: newQty, updated_at: new Date().toISOString() }).eq('item_id', id);
     if (uErr) throw uErr;
@@ -3175,16 +3220,18 @@ async function _saveInvQty(id, el) {
     if (card) card.classList.toggle('zero', newQty <= 0);
     // kitchen_operations에 재고 직접 수정 이력 기록 (일반 수정 — 신뢰 재고 확인이 아니다)
     stage = 'audit';
-    const { error: aErr } = await db.from('kitchen_operations').insert({
+    auditRow = {
       store_id: SID, item_id: id, item_name: item.item_name,
       action_type: 'stock_check', quantity: newQty, unit: item.unit || '개',
       qty_before: oldQty, qty_after: newQty,
       input_method: 'inv_card_edit', raw_text: `재고 ${oldQty}→${newQty}`
-    });
+    };
+    const { error: aErr } = await db.from('kitchen_operations').insert(auditRow);
     if (aErr) throw aErr;
     stage = 'done';
   } catch (e) {
     console.warn(`[inv] 재고 수정 ${stage} 실패:`, e?.message);
+    if (stage === 'audit') _invAuditPending.set(id, auditRow);   // 전이를 잃지 않는다 — 기록만 다시 시도
   } finally {
     _invQtySaving.delete(id);
   }
@@ -3200,7 +3247,9 @@ async function _saveInvQty(id, el) {
       const { data, error } = await db.from('items').select('current_qty').eq('item_id', id).maybeSingle();
       if (!error && data && data.current_qty !== undefined) { item.current_qty = data.current_qty; restore(); }
     } catch (_) { /* 다시 읽기 실패 — 아래 안내로 충분하다 */ }
-    showToast(`${item.item_name}: 재고는 ${item.current_qty}${item.unit||''}로 저장됐지만 수정 기록을 남기지 못했습니다`, 3500);
+    const card = document.getElementById('ic_' + id);
+    if (card && !card.querySelector('[data-audit-retry]')) card.querySelector('.inv-qty-wrap')?.insertAdjacentHTML('afterend', _invAuditRetryBtn(id));
+    showToast(`${item.item_name}: 재고는 ${item.current_qty}${item.unit||''}로 저장됐지만 수정 기록을 남기지 못했습니다. [기록 다시 시도]를 눌러 주세요`, 3500);
     return;
   }
   el.style.borderColor = 'var(--accent)';

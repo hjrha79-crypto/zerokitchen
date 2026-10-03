@@ -35,34 +35,50 @@ const MAPS_SRC = (/const _tabHashMap = [^\n]*\nconst _hashTabMap = [^\n]*/.exec(
 let pass = 0, fail = 0;
 function check(name, ok, detail = '') { if (ok) pass++; else fail++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  — ' + detail : ''}`); }
 
-// ── MOCK db: items rows on a server; update / insert answer per mode ('ok' | 'error' | 'reject' | 'throw') ──
-function makeDb(server, modes = {}) {
+const RETRY_SRC = extractFn('_retryInvAudit');
+const BTN_SRC = extractFn('_invAuditRetryBtn');
+
+// ── MOCK db: items rows and kitchen_operations rows on a server.
+// update / insert answer per mode: 'ok' | 'error' | 'reject' | 'throw' | 'lost' (applied on the server, then the
+// response is lost = reject); kitchen_operations reads answer per `opsReadModes` ('ok' | 'error' | 'reject').
+function makeDb(server, modes = {}, ops = []) {
   const writes = [];
   const reads = [];
+  let nextOp = 1000;
   function builder(table) {
     let op = null, payload = null; const eqs = {};
     const mode = () => (op === 'update' ? (modes.update || []).shift() : op === 'insert' ? (modes.insert || []).shift() : null) || 'ok';
     let m = 'ok';
     const b = {
       select() { if (!op) op = 'select'; return b; }, maybeSingle() { return b; }, single() { return b; },
+      order() { return b; }, limit() { return b; },
       eq(c, v) { eqs[c] = v; return b; },
       update(p) { op = 'update'; payload = p; writes.push({ table, op, payload: p }); m = mode(); if (m === 'throw') throw new Error('update threw'); return b; },
       insert(p) { op = 'insert'; payload = p; writes.push({ table, op, payload: p }); m = mode(); if (m === 'throw') throw new Error('insert threw'); return b; },
       then(resolve, reject) {
         if (op === 'select') {
           reads.push({ table, eqs: { ...eqs } });
+          if (table === 'kitchen_operations') {
+            const rm = (modes.opsRead || []).shift() || 'ok';
+            if (rm === 'reject') return reject(new Error('read rejected'));
+            if (rm === 'error') return resolve({ data: null, error: { message: 'read failed' } });
+            const mine = ops.filter(o => o.store_id === eqs.store_id && o.item_id === eqs.item_id);
+            return resolve({ data: mine.length ? [mine[mine.length - 1]] : [], error: null });   // newest first, limit 1
+          }
           const row = server.find(r => r.item_id === eqs.item_id);
           return resolve({ data: row ? { current_qty: row.current_qty } : null, error: null });
         }
         if (m === 'reject') return reject(new Error('request rejected'));
         if (m === 'error') return resolve({ data: null, error: { message: op + ' failed' } });
         if (op === 'update' && table === 'items') { const row = server.find(r => r.item_id === eqs.item_id); if (row) Object.assign(row, payload); }
+        if (op === 'insert' && table === 'kitchen_operations') ops.push({ operation_id: nextOp++, ...payload });
+        if (m === 'lost') return reject(new Error('response lost'));
         resolve({ data: null, error: null });
       },
     };
     return b;
   }
-  return { from: t => builder(t), _writes: writes, _reads: reads };
+  return { from: t => builder(t), _writes: writes, _reads: reads, _ops: ops };
 }
 
 function makeEl(drawn) {
@@ -72,24 +88,32 @@ function makeEl(drawn) {
 }
 
 function makeEnv(memQty, opts = {}) {
-  const server = [{ item_id: 21, current_qty: opts.serverQty === undefined ? memQty : opts.serverQty }];
-  const db = makeDb(server, opts.modes || {});
+  const server = [{ item_id: 21, current_qty: opts.serverQty === undefined ? memQty : opts.serverQty }, { item_id: 39, current_qty: 2 }];
+  const db = makeDb(server, opts.modes || {}, opts.ops || []);
   const SID = 1;
-  const _items = [{ item_id: 21, item_name: '마늘빵', unit: '박스', current_qty: memQty }];
+  const _items = [{ item_id: 21, item_name: '마늘빵', unit: '박스', current_qty: memQty }, { item_id: 39, item_name: '칵테일냅킨', unit: '박스', current_qty: 2 }];
   const toasts = [];
   const showToast = t => toasts.push(t);
   let depletionInvalidations = 0;
   const _invalidateDepletionCache = () => { depletionInvalidations++; };
-  const document = { getElementById: () => null };
+  // one inventory card for item 21 (where the retry button is placed), nothing else
+  const card = { kids: [], classList: { toggle() {} }, querySelector: sel => sel === '[data-audit-retry]' ? (card.kids[0] || null) : sel === '.inv-qty-wrap' ? { insertAdjacentHTML: (w, h) => { if (h) card.kids.push({ html: h, remove: () => { card.kids.length = 0; } }); } } : null };
+  const document = {
+    getElementById: id => id === 'ic_21' ? card : null,
+    querySelector: sel => (sel === '[data-audit-retry="21"]' ? card.kids[0] || null : null),
+  };
   const console = { warn() {}, log() {}, error() {} };
   const setTimeout = () => 0;
-  const f = eval(asExpr(SAVE_SRC.replace(/^async function _saveInvQty/, 'async function _saveInvQty'), '_saveInvQty'));
-  // _invQtySaving is a top-level const next to the function in index.html
-  void SID; void showToast; void _invalidateDepletionCache; void document; void console; void setTimeout;
-  return { db, server, items: _items, toasts, save: f, invalidations: () => depletionInvalidations };
+  // the top-level state next to the functions in index.html, fresh per env
+  const _invQtySaving = new Set();
+  const _invAuditPending = new Map();
+  const _invAuditRetrying = new Set();
+  const _invAuditRetryBtn = eval(asExpr(BTN_SRC, '_invAuditRetryBtn'));
+  const retry = eval(asExpr(RETRY_SRC, '_retryInvAudit'));
+  const f = eval(asExpr(SAVE_SRC, '_saveInvQty'));
+  void SID; void showToast; void _invalidateDepletionCache; void document; void console; void setTimeout; void _invQtySaving; void _invAuditRetrying;
+  return { db, server, items: _items, toasts, save: f, retry, pending: _invAuditPending, card, btn: _invAuditRetryBtn, invalidations: () => depletionInvalidations };
 }
-// the in-flight set lives at top level in index.html; give each eval scope one
-const _invQtySaving = new Set();
 const SUCCESS = t => /: [\d.]+→[\d.]+박스$/.test(t);
 const itemWrites = e => e.db._writes.filter(w => w.table === 'items').length;
 const auditWrites = e => e.db._writes.filter(w => w.table === 'kitchen_operations');
@@ -169,6 +193,88 @@ const auditWrites = e => e.db._writes.filter(w => w.table === 'kitchen_operation
     const p1 = e.save(21, el); const p2 = e.save(21, el);
     release(); await Promise.all([p1, p2]);
     check('blur again while saving -> one item update', itemWrites(e) === 1, `updates=${itemWrites(e)}`); }
+
+  // ═══ AUDIT RETRY (stock saved, audit failed → retry the audit only) ═══
+  const T32 = r => r.input_method === 'inv_card_edit' && r.action_type === 'stock_check' && r.qty_before === 3 && r.qty_after === 2;
+  const failedSave = async (insertMode, opts = {}) => {
+    const e = makeEnv(3, { ...opts, modes: { insert: [insertMode], ...(opts.modes || {}) } }); const el = makeEl(3);
+    el.value = '2'; await e.save(21, el); return { e, el };
+  };
+  // A. audit {error} → pending holds the transition, retry button shown, partial message
+  { const { e, el } = await failedSave('error');
+    const p = e.pending.get(21);
+    check('A audit error -> pending 3→2 (inv_card_edit, body kept), stock 2 persisted, retry button, partial message with [기록 다시 시도]',
+      !!p && T32(p) && p.store_id === 1 && p.item_name === '마늘빵' && p.unit === '박스' && p.quantity === 2 && p.raw_text === '재고 3→2' &&
+      e.server[0].current_qty === 2 && e.items[0].current_qty === 2 && el.defaultValue === '2' && e.card.kids.length === 1 && /data-audit-retry="21"/.test(e.card.kids[0].html) &&
+      e.toasts.some(t => t.includes('[기록 다시 시도]')) && !e.toasts.some(SUCCESS), e.toasts.join(' | '));
+    // B. retry → audit INSERT only, pending cleared, button removed
+    await e.retry(21);
+    check('B retry -> item write 0 more (still 1), exactly 1 audit row 3→2, pending cleared, button removed, "기록 저장 완료"',
+      itemWrites(e) === 1 && e.db._ops.filter(T32).length === 1 && e.db._ops.length === 1 && !e.pending.has(21) && e.card.kids.length === 0 &&
+      e.toasts.some(t => t.includes('재고 수정 기록 저장 완료 (3→2박스)')) && e.server[0].current_qty === 2 && e.items[0].current_qty === 2 && el.defaultValue === '2',
+      `items=${itemWrites(e)} ops=${e.db._ops.length} ${e.toasts.join(' | ')}`);
+    // I. after the retry, an unchanged blur writes nothing
+    await e.save(21, el);
+    check('I after retry success, unchanged blur -> write 0', itemWrites(e) === 1 && e.db._ops.length === 1);
+    // J. the retried row is a general edit, never trusted
+    check('J retried audit stays inv_card_edit (never trusted_stock_check)', e.db._ops.every(o => o.input_method === 'inv_card_edit')); }
+
+  // C/D/E. the retry itself fails → pending kept, no false success, no item write, no revert; a later retry works
+  for (const mode of ['error', 'reject', 'throw']) {
+    const { e, el } = await failedSave('error', { modes: { insert: ['error', mode] } });
+    let threw = null; try { await e.retry(21); } catch (x) { threw = x; }
+    check(`${({ error: 'C', reject: 'D', throw: 'E' })[mode]} retry ${mode} -> no throw, pending kept, no row, no item write, stock stays 2, "아직 저장하지 못했습니다"`,
+      threw === null && e.pending.has(21) && e.db._ops.length === 0 && itemWrites(e) === 1 && e.items[0].current_qty === 2 && e.server[0].current_qty === 2 && el.defaultValue === '2' &&
+      e.card.kids.length === 1 && !e.toasts.some(t => t.includes('저장 완료')) && e.toasts.some(t => t.includes('아직 저장하지 못했습니다')), `${e.toasts.join(' | ')}${threw ? ' THREW ' + threw.message : ''}`);
+    await e.retry(21);
+    check(`retry again after ${mode} -> 1 row, pending cleared`, e.db._ops.filter(T32).length === 1 && !e.pending.has(21) && itemWrites(e) === 1);
+  }
+  // readback failure before the retry insert → nothing inserted, pending kept
+  for (const rm of ['error', 'reject']) {
+    const { e } = await failedSave('error', { modes: { opsRead: [rm] } });
+    await e.retry(21);
+    check(`retry readback ${rm} -> no insert, pending kept`, e.db._ops.length === 0 && e.pending.has(21) && auditWrites(e).length === 1);
+  }
+
+  // F. the first audit insert was stored but its response was lost → readback finds it, no second row
+  { const { e } = await failedSave('lost');
+    check('F response lost: stored row exists, pending created (client could not know)', e.db._ops.filter(T32).length === 1 && e.pending.has(21));
+    await e.retry(21);
+    check('F retry -> readback finds the stored 3→2, insert 0, exactly 1 row, pending cleared',
+      auditWrites(e).length === 1 && e.db._ops.filter(T32).length === 1 && !e.pending.has(21) && e.toasts.some(t => t.includes('저장 완료')), `inserts=${auditWrites(e).length} rows=${e.db._ops.length}`); }
+  // F2. an older identical transition (3→2, then 2→3) must not be mistaken for the lost one
+  { const older = [{ operation_id: 1, store_id: 1, item_id: 21, action_type: 'stock_check', input_method: 'inv_card_edit', qty_before: 3, qty_after: 2 },
+      { operation_id: 2, store_id: 1, item_id: 21, action_type: 'stock_check', input_method: 'inv_card_edit', qty_before: 2, qty_after: 3 }];
+    const { e } = await failedSave('error', { ops: older.map(o => ({ ...o })) });
+    await e.retry(21);
+    check('F2 older identical 3→2 (followed by 2→3) is not taken as stored -> retry inserts the missing row', e.db._ops.filter(T32).length === 2 && e.db._ops.length === 3 && !e.pending.has(21));
+    const l = await failedSave('lost', { ops: older.map(o => ({ ...o })) });
+    await l.e.retry(21);
+    check('F2 same history, response lost -> no duplicate (2 rows 3→2 total: old + this one)', l.e.db._ops.filter(T32).length === 2 && l.e.db._ops.length === 3 && !l.e.pending.has(21)); }
+
+  // G. same item, new edit while its audit is pending → blocked, nothing written
+  { const { e, el } = await failedSave('error');
+    el.value = '1'; await e.save(21, el);
+    check('G same item new edit while pending -> blocked: item write 0, audit 0, input back to 2, pending 3→2 kept, message',
+      itemWrites(e) === 1 && auditWrites(e).length === 1 && el.value === '2' && e.items[0].current_qty === 2 && T32(e.pending.get(21)) &&
+      e.toasts.some(t => t.includes('이전 재고 수정 기록 저장이 완료되지 않았습니다')), e.toasts.join(' | '));
+    // H. a different item is still editable
+    const el39 = makeEl(2); el39.value = '1'; await e.save(39, el39);
+    check('H other item edit while 21 is pending -> allowed and saved (2→1)', e.server[1].current_qty === 1 && e.db._ops.some(o => o.item_id === 39 && o.qty_after === 1) && e.toasts.some(t => t === '칵테일냅킨: 2→1박스') && e.pending.has(21));
+    // after the retry the same item can be edited again, in order
+    await e.retry(21); el.value = '1'; await e.save(21, el);
+    const rows21 = e.db._ops.filter(o => o.item_id === 21).map(o => `${o.qty_before}→${o.qty_after}`);
+    check('after retry, the next edit of 21 saves; audit order 3→2 then 2→1', JSON.stringify(rows21) === '["3→2","2→1"]' && e.server[0].current_qty === 1, JSON.stringify(rows21)); }
+
+  // double press on the retry button → one insert
+  { const { e } = await failedSave('error');
+    await Promise.all([e.retry(21), e.retry(21)]);
+    check('retry pressed twice while running -> one insert', auditWrites(e).length === 2 && e.db._ops.length === 1); }
+  // a success never leaves a pending entry or a button; the card renders the button only while pending
+  { const e = makeEnv(3); const el = makeEl(3); el.value = '2'; await e.save(21, el);
+    check('plain success -> no pending, no retry button', !e.pending.has(21) && e.card.kids.length === 0 && e.btn(21) === '');
+    const { e: f } = await failedSave('error');
+    check('retry button HTML only while pending; inventory card renders it', /onclick="_retryInvAudit\(21\)"/.test(f.btn(21)) && f.btn(39) === '' && /\$\{_invAuditRetryBtn\(it\.item_id\)\}/.test(extractFn('_renderInvCard'))); }
 
   // ═══ DEFECT B ═══
   function makeNavEnv(hash, devModeStored = 'false') {
