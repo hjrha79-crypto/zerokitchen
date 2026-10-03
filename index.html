@@ -1022,7 +1022,8 @@ async function init() {
     } else {
       history.replaceState(null, '', '#home');
       // 홈 = 발주 체크리스트��므로 초기 로드
-      _startOrderSession(); renderOrder();
+      // 홈을 여는 것은 발주 작업 시작이 아니므로 발주 세션(order_sessions)을 만들지 않는다.
+      renderOrder();
       renderV3Notifications().catch(e=>console.error('[v3] Notif error:',e));
     }
     v3InitLowToggle();
@@ -5970,7 +5971,8 @@ async function switchTab(n, btn) {
   // 탭 전환 시 하네스/확인 카드 닫기
   const rp = document.getElementById('reviewPanel');
   if (rp) rp.style.display = 'none';
-  if (n==='input') { _startOrderSession(); renderOrder(); renderV3Notifications().catch(e=>console.error('[v3] Notif error:',e)); }
+  // 홈 탭 진입(탭·hash·resetToHome·자동 복귀 모두 여기를 지난다)은 발주 세션을 만들지 않는다.
+  if (n==='input') { renderOrder(); renderV3Notifications().catch(e=>console.error('[v3] Notif error:',e)); }
   if (n==='inventory') { if (!_items.length) await refreshItems(); renderInventory(); }
   if (n==='settings') { _loadObservation(); }
 }
@@ -6030,20 +6032,28 @@ async function _saveObservation() {
   showToast('관찰 기록 저장됨');
 }
 
+// 발주 KPI 세션(order_sessions) 시작. 명시적인 발주 작업에서만 부른다 — 홈 진입·탭 전환·화면
+// 그리기에서는 부르지 않는다. 이미 진행 중이거나 시작 중인 세션이 있으면 새로 만들지 않는다.
+let _sessionStarting = null;
 async function _startOrderSession() {
   if (!SID) return;  // store_id 없으면 스킵
-  try {
-    _sessionStartedAt = new Date();
-    const { data, error } = await db.from('order_sessions').insert({
-      store_id: SID,
-      order_date: new Date().toISOString().slice(0, 10),
-      started_at: _sessionStartedAt.toISOString()
-    }).select('id').single();
-    if (!error && data) _currentSessionId = data.id;
-  } catch(e) {
-    console.warn('세션 생성 실패:', e.message);
-    _currentSessionId = null;
-  }
+  if (_currentSessionId) return;
+  if (_sessionStarting) return _sessionStarting;
+  _sessionStarting = (async () => {
+    try {
+      _sessionStartedAt = new Date();
+      const { data, error } = await db.from('order_sessions').insert({
+        store_id: SID,
+        order_date: new Date().toISOString().slice(0, 10),
+        started_at: _sessionStartedAt.toISOString()
+      }).select('id').single();
+      if (!error && data) _currentSessionId = data.id;
+    } catch(e) {
+      console.warn('세션 생성 실패:', e.message);
+      _currentSessionId = null;
+    }
+  })();
+  try { await _sessionStarting; } finally { _sessionStarting = null; }
 }
 
 async function _endOrderSession() {
