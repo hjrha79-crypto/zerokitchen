@@ -677,6 +677,7 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
     <span id="invDupText"></span>
     <button onclick="_showDupCleanup()">정리하기</button>
   </div>
+  <div id="invCountBar" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:13px"></div>
   <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
     <input id="invSearch" style="flex:1;min-width:120px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 11px;font-size:14px;font-family:inherit;color:var(--text);outline:none" placeholder="품목명 검색..." oninput="renderInventory()">
     <select id="invFilter" onchange="renderInventory()" style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:9px 10px;font-size:13px;font-family:inherit;color:var(--text);outline:none">
@@ -3110,7 +3111,7 @@ function _renderInvCard(it, qty, tgt, cls, vName) {
         onblur="_invEditBlur();_saveInvQty(${it.item_id}, this)"
         onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}else if(event.key==='Escape'){this.value=this.defaultValue;this.blur();}">
       <span class="inv-unit">${it.unit||''}</span>
-    </div>${_invAuditRetryBtn(it.item_id)}
+    </div>${_invAuditRetryBtn(it.item_id)}${_countCtl(it)}
     <select class="inv-vendor-sel" onchange="_saveInvVendor(${it.item_id}, this.value)">
       <option value="">거래처</option>${vOpts}
     </select>
@@ -3202,6 +3203,7 @@ async function _saveInvQty(id, el) {
     showToast('이전 재고 수정 기록 저장이 완료되지 않았습니다. 먼저 [기록 다시 시도]를 눌러 주세요', 3500);
     return;
   }
+  if (_countMode) return _countModeSave(id, el, false); // 재고 점검 중: 바꾼 수량 = 실제로 센 수량
   const newQty = parseFloat(el.value);
   if (!Number.isFinite(newQty) || newQty < 0) { restore(); showToast('0 이상의 숫자로 입력해 주세요'); return; }
   if (newQty === Number(el.defaultValue)) { el.value = el.defaultValue; return; }   // "3" → "3.0"
@@ -3257,9 +3259,101 @@ async function _saveInvQty(id, el) {
   showToast(`${item.item_name}: ${oldQty}→${newQty}${item.unit||''}`);
 }
 
+// ── 재고 점검 ──
+// [재고 점검 시작]으로 "지금 실제로 세는 중"이라는 의도를 한 번 밝힌다. 점검 중에는 수량을 바꾸거나
+// [그대로 맞음]을 누른 품목만 실제로 센 수량으로 저장한다 — 재고 확인과 같은 신뢰 기록(TRUSTED_STOCK_CHECK),
+// raw_text만 '재고 점검'. 손대지 않은 품목은 그대로이고, [재고 점검 완료]는 화면 상태만 끝낸다(일괄 쓰기·일괄 신뢰 없음).
+// 점검이 아닐 때 수량을 바꾸면 기록 수정(inv_card_edit)이다.
+let _countMode = false;
+let _countedIds = new Set();          // 이번 점검에서 기록까지 성공한 품목
+const _countSaving = new Set();
+const COUNT_MODE_RAW_TEXT = '재고 점검: 직접 센 수량';
+function _renderCountBar() {
+  const bar = document.getElementById('invCountBar');
+  if (!bar) return;
+  const btn = 'padding:6px 10px;border-radius:8px;font-size:13px;font-family:inherit;cursor:pointer';
+  bar.innerHTML = _countMode
+    ? `<span style="font-weight:600;color:var(--accent)">재고 점검 중 — 실제로 센 수량만 입력해 주세요</span>
+       <span style="color:var(--muted)">같으면 [그대로 맞음] · 점검 ${_countedIds.size}개</span>
+       <button style="${btn};border:1px solid var(--accent);background:var(--accent);color:#fff" onclick="_endCountMode()">재고 점검 완료</button>`
+    : `<span style="color:var(--muted)">수량을 고치면 기록만 수정됩니다</span>
+       <button style="${btn};border:1px solid var(--border);background:var(--surface2);color:var(--text)" onclick="_startCountMode()">재고 점검 시작</button>`;
+}
+function _countCtl(it) {
+  if (!_countMode) return '';
+  const id = it.item_id;
+  const known = it.current_qty !== null && it.current_qty !== undefined && it.current_qty !== '';
+  return `<span class="inv-count-ctl" data-count-iid="${id}" style="display:flex;gap:4px;align-items:center;flex-shrink:0">${
+    _countedIds.has(id) ? '<span style="font-size:12px;color:var(--accent)">✓ 점검</span>' : ''}${
+    known ? `<button onclick="_countModeSave(${id}, document.querySelector('#ic_${id} .inv-qty'), true)" style="font-size:12px;padding:4px 8px;border:1px solid var(--border);border-radius:6px;background:var(--surface2);color:var(--text)">그대로 맞음</button>` : ''}</span>`;
+}
+function _startCountMode() { _countMode = true; _countedIds = new Set(); renderInventory(); }
+function _endCountMode() {
+  const n = _countedIds.size;
+  _countMode = false; _countedIds = new Set();
+  renderInventory();
+  showToast(`재고 점검 완료 — 실제로 센 품목 ${n}개`);
+}
+// 점검 중 한 품목 저장. same=false: 바꾼 수량(blur) / same=true: [그대로 맞음] — 기록된 수량을 다시 세어 보니 같았다.
+// 같은 수량이라도 새 관찰로 남긴다(일반 수정의 "같으면 쓰지 않음"과 다르다). 실패한 품목은 확인되지 않은 채 남고
+// 다시 입력하거나 [그대로 맞음]으로 재시도한다.
+async function _countModeSave(id, el, same) {
+  if (!_countMode || !el) return;
+  const item = _items.find(i => i.item_id === id);
+  if (!item) return;
+  if (_countSaving.has(id) || _invQtySaving.has(id)) return;
+  if (_invAuditPending.has(id)) { showToast('이전 재고 수정 기록 저장이 완료되지 않았습니다. 먼저 [기록 다시 시도]를 눌러 주세요', 3500); return; }
+  const known = item.current_qty !== null && item.current_qty !== undefined && item.current_qty !== '';
+  const restore = () => { el.value = el.defaultValue = known ? String(item.current_qty) : ''; };
+  let val;
+  if (same) {
+    if (el.value !== el.defaultValue) return;          // 바꾼 숫자가 있으면 그 숫자가 센 수량(blur에서 저장)
+    if (!known) { showToast('기록된 재고가 없습니다 — 센 수량을 입력해 주세요'); return; }
+    if (Number(el.defaultValue) !== Number(item.current_qty)) { restore(); showToast('기록이 바뀌었습니다 — 화면의 수량을 다시 확인해 주세요'); return; }
+    val = Number(item.current_qty);
+  } else {
+    if (el.value === el.defaultValue) return;          // 손대지 않은 칸 → 쓰기 0
+    const v = String(el.value).trim();
+    if (!/^\d+(\.\d+)?$/.test(v) || Number(v) > 1000000) { restore(); showToast('0 이상의 숫자로 입력해 주세요'); return; }
+    val = Number(v);
+  }
+  const before = known ? Number(item.current_qty) : null;
+  _countSaving.add(id);
+  let stage = 'update';
+  try {
+    const { error: uErr } = await db.from('items').update({ current_qty: val, updated_at: new Date().toISOString() })
+      .eq('item_id', id).eq('store_id', SID);
+    if (uErr) throw uErr;
+    item.current_qty = val;
+    el.value = el.defaultValue = String(val);
+    _invalidateDepletionCache();
+    stage = 'audit';
+    const { error: aErr } = await db.from('kitchen_operations').insert({
+      store_id: SID, item_id: id, item_name: item.item_name,
+      action_type: 'stock_check', quantity: val, unit: item.unit || '개',
+      qty_before: before, qty_after: val,
+      input_method: TRUSTED_STOCK_CHECK, raw_text: COUNT_MODE_RAW_TEXT
+    });
+    if (aErr) throw aErr;
+    stage = 'done';
+  } catch (e) {
+    console.warn(`[count] 재고 점검 ${stage} 실패:`, e?.message);
+  } finally {
+    _countSaving.delete(id);
+  }
+  if (stage === 'done') _countedIds.add(id); else _countedIds.delete(id);
+  const ctl = document.querySelector(`[data-count-iid="${id}"]`);
+  if (ctl) ctl.outerHTML = _countCtl(item);
+  _renderCountBar();
+  if (stage === 'done') showToast(`${item.item_name} ${val}${item.unit || ''} 점검 기록`);
+  else if (stage === 'update') { restore(); showToast(`${item.item_name}: 점검 수량을 저장하지 못했습니다. 다시 입력해 주세요`, 3000); }
+  else showToast(`${item.item_name}: 재고는 ${val}${item.unit || ''}로 저장됐지만 점검 기록을 남기지 못했습니다. [그대로 맞음]을 다시 눌러 주세요`, 3500);
+}
+
 function renderInventory() {
   const grid = document.getElementById('invGrid');
   if (!grid) return;
+  _renderCountBar();
   // 재고 없음 요약 바 (목표/최소 기반 "부족" 개념은 제거 — 재고 0 기준만)
   const alertBar = document.getElementById('invAlertBar');
   const alertText = document.getElementById('invAlertText');
