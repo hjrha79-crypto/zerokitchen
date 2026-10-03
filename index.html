@@ -3146,30 +3146,63 @@ async function _saveInvName(id, el) {
 }
 
 // 수량 인라인 저장 (blur 시 호출)
+// 저장 조건은 "사용자가 입력칸 값을 실제로 바꿨는가" 하나다. 기준은 입력칸이 그려질 때(또는 마지막
+// 저장 성공 때)의 값 el.defaultValue — 메모리 재고와 다르다는 이유만으로는 쓰지 않는다
+// (그려진 뒤 메모리가 바뀐 입력칸에 focus→blur만 해도 옛 값이 새 값을 덮어쓰던 결함).
+// 성공 표시는 재고 저장과 수정 기록이 둘 다 성공한 뒤에만 한다.
+const _invQtySaving = new Set();
 async function _saveInvQty(id, el) {
   const item = _items.find(i => i.item_id === id);
   if (!item) return;
+  if (el.value === el.defaultValue) return;            // 바꾸지 않았다 → 쓰기 0
+  if (_invQtySaving.has(id)) return;                   // 같은 품목 저장 중 → 중복 쓰기 0
+  const restore = () => { const v = item.current_qty ?? ''; el.value = el.defaultValue = String(v); };
   const newQty = parseFloat(el.value);
-  if (!Number.isFinite(newQty) || newQty < 0) { el.value = item.current_qty; return; }
-  if (newQty === Number(item.current_qty)) return;
+  if (!Number.isFinite(newQty) || newQty < 0) { restore(); showToast('0 이상의 숫자로 입력해 주세요'); return; }
+  if (newQty === Number(el.defaultValue)) { el.value = el.defaultValue; return; }   // "3" → "3.0"
   const oldQty = Number(item.current_qty);
-  await db.from('items').update({ current_qty: newQty, updated_at: new Date().toISOString() }).eq('item_id', id);
-  item.current_qty = newQty;
-  _invalidateDepletionCache();
-  el.defaultValue = newQty;
-  // 재고 0 클래스 상태 갱신
-  el.classList.toggle('zero', newQty <= 0);
-  const card = document.getElementById('ic_' + id);
-  if (card) card.classList.toggle('zero', newQty <= 0);
-  // kitchen_operations에 재고 직접 수정 이력 기록
+  _invQtySaving.add(id);
+  let stage = 'update';
   try {
-    await db.from('kitchen_operations').insert({
+    const { error: uErr } = await db.from('items').update({ current_qty: newQty, updated_at: new Date().toISOString() }).eq('item_id', id);
+    if (uErr) throw uErr;
+    item.current_qty = newQty;
+    _invalidateDepletionCache();
+    el.defaultValue = String(newQty);
+    // 재고 0 클래스 상태 갱신
+    el.classList.toggle('zero', newQty <= 0);
+    const card = document.getElementById('ic_' + id);
+    if (card) card.classList.toggle('zero', newQty <= 0);
+    // kitchen_operations에 재고 직접 수정 이력 기록 (일반 수정 — 신뢰 재고 확인이 아니다)
+    stage = 'audit';
+    const { error: aErr } = await db.from('kitchen_operations').insert({
       store_id: SID, item_id: id, item_name: item.item_name,
       action_type: 'stock_check', quantity: newQty, unit: item.unit || '개',
       qty_before: oldQty, qty_after: newQty,
       input_method: 'inv_card_edit', raw_text: `재고 ${oldQty}→${newQty}`
     });
-  } catch (e) { /* 이력 실패는 무시 */ }
+    if (aErr) throw aErr;
+    stage = 'done';
+  } catch (e) {
+    console.warn(`[inv] 재고 수정 ${stage} 실패:`, e?.message);
+  } finally {
+    _invQtySaving.delete(id);
+  }
+  if (stage === 'update') {
+    // 재고 저장 실패: 메모리는 그대로, 입력칸은 마지막으로 아는 재고로 되돌린다. 다시 입력하면 재시도된다.
+    restore();
+    showToast(`${item.item_name}: 재고를 저장하지 못했습니다. 다시 입력해 주세요`, 3000);
+    return;
+  }
+  if (stage === 'audit') {
+    // 재고는 저장됐지만 수정 기록이 없다: 저장된 값을 다시 읽어 화면을 맞추고, 완료라고 말하지 않는다.
+    try {
+      const { data, error } = await db.from('items').select('current_qty').eq('item_id', id).maybeSingle();
+      if (!error && data && data.current_qty !== undefined) { item.current_qty = data.current_qty; restore(); }
+    } catch (_) { /* 다시 읽기 실패 — 아래 안내로 충분하다 */ }
+    showToast(`${item.item_name}: 재고는 ${item.current_qty}${item.unit||''}로 저장됐지만 수정 기록을 남기지 못했습니다`, 3500);
+    return;
+  }
   el.style.borderColor = 'var(--accent)';
   setTimeout(() => { el.style.borderColor = ''; }, 600);
   showToast(`${item.item_name}: ${oldQty}→${newQty}${item.unit||''}`);
@@ -6990,13 +7023,8 @@ let _devMode = localStorage.getItem('zk_dev_mode') === 'true';
   if (!logo) return;
   logo.onclick = (e) => {
     e.preventDefault();
-    // 즉시 홈 전환 — switchTab 우회, 동기 DOM만 조작 (데이터 로드 없음)
-    document.querySelectorAll('.tab').forEach(e=>e.classList.remove('active'));
-    document.querySelectorAll('.nav').forEach(e=>e.classList.remove('active'));
-    document.getElementById('tab-input').classList.add('active');
-    document.querySelector('.nav').classList.add('active');
-    const rp = document.getElementById('reviewPanel');
-    if (rp) rp.style.display = 'none';
+    // 홈 전환은 홈 탭 버튼과 같은 경로(switchTab)로 — 데이터 로드와 hash(#home)까지 같다.
+    switchTab('input', document.querySelector('.nav')).catch(err => console.error('[logo] 홈 전환 오류:', err));
     // 개발자 모드: 1.5초 내 5탭
     _devTapCount++;
     clearTimeout(_devTapTimer);
