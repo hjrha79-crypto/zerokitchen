@@ -3946,6 +3946,7 @@ async function renderOrder() {
     _orderRequests = (pendingRows || []).filter(r => Number(r.qty) > 0);
     // 전역 _orderedItemIds 갱신 (pending + ordered 품목)
     _orderedItemIds = new Set(_orderRequests.map(r => r.item_id));
+    await _loadOrderSupply();
     await _loadInventoryTrust();
     _renderOrderNeed();
     const _pendingItems = _orderRequests.filter(r => r.status === 'pending');
@@ -4139,13 +4140,7 @@ async function renderOrder() {
           <span>📦 입고 대기 (${_orderedRows.length})</span><span class="arrow">▼</span>
         </div>
         <div class="v4-receive-list">`;
-        for (const r of _orderedRows) {
-          html += `<div class="v4-receive-item">
-            <span class="v4-receive-name">${r.name}</span>
-            <span class="v4-receive-qty">${r.orderQty}${r.unit}</span>
-            <button class="v4-receive-btn" onclick="_tblReceive(${r.order_id})">입고</button>
-          </div>`;
-        }
+        for (const r of _orderedRows) html += _receiveItemHtml(r);
         html += `</div>`;
       }
       html += `</div>`; // .v4-card-body 닫기
@@ -4164,13 +4159,7 @@ async function renderOrder() {
         <span>📦 입고 대기 (${_orderedRows.length})</span><span class="arrow">▼</span>
       </div>
       <div class="v4-receive-list">`;
-      for (const r of _orderedRows) {
-        html += `<div class="v4-receive-item">
-          <span class="v4-receive-name">${r.name}</span>
-          <span class="v4-receive-qty">${r.orderQty}${r.unit}</span>
-          <button class="v4-receive-btn" onclick="_tblReceive(${r.order_id})">입고</button>
-        </div>`;
-      }
+      for (const r of _orderedRows) html += _receiveItemHtml(r);
       html += `</div></div></div>`;
     }
 
@@ -4559,6 +4548,7 @@ async function _tblDeleteRow(el) {
   const iid = parseInt(tr.dataset.iid);
   const oid = tr.dataset.oid ? parseInt(tr.dataset.oid) : null;
   console.log('[삭제] name:', name, 'iid:', iid, 'oid:', oid);
+  if (oid && _isVerifiedOrder(oid)) { await _cancelSupplyOrder(oid); return; }   // 확인된 주문은 서버 취소 경로로만
   if (!confirm(`"${name}" 삭제할까요?`)) return;
   if (oid) {
     const { error } = await db.from('order_requests')
@@ -5323,6 +5313,164 @@ function _receivingOutcome(res) {
   }
 }
 
+// ── 확인된 주문 공급 (Verified Open Supply) ──
+// 재고(current_qty)와 섞지 않는 별도 진실: "실제로 성립한 주문 중 아직 안 들어온 수량".
+// 판정·누적·남은 수량은 전부 서버(get_order_supply / get_open_supply)가 하고, 여기서는 읽고 보여 주기만 한다.
+// 쓰기는 서버 함수 한 번씩(주문 확인 / 부분 입고 / 주문 취소)이며 order_supply·order_receipts를 직접 쓰지 않는다.
+// 'ordered' 상태만으로는 확인된 주문이 아니다 — [주문 확인]을 거친 주문만 공급으로 센다.
+// 서버에 이 기능이 아직 없으면(함수 없음) 예전 입고 화면 그대로 둔다.
+let _orderSupply = new Map();     // order_id → get_order_supply 행
+let _openSupply = new Map();      // item_id → get_open_supply 행
+let _supplyAvailable = false;
+const _receiptKeys = new Map();   // order_id → 아직 결과를 모르는 부분 입고 요청 키 (재시도 시 같은 키 = 두 번 반영되지 않음)
+async function _loadOrderSupply() {
+  const next = new Map(), nextOpen = new Map();
+  let ok = false;
+  try {
+    const [o, s] = await Promise.all([
+      db.rpc('get_order_supply', { p_store_id: SID, p_item_id: null }),
+      db.rpc('get_open_supply', { p_store_id: SID, p_item_id: null }),
+    ]);
+    if (o?.error || s?.error) throw (o?.error || s?.error);
+    for (const r of o?.data || []) next.set(r.order_id, r);
+    for (const r of s?.data || []) nextOpen.set(r.item_id, r);
+    ok = true;
+  } catch (e) {
+    console.warn('[supply] 주문 공급 상태를 읽지 못했습니다 — 예전 입고 화면으로 둡니다:', e?.message);
+  }
+  _orderSupply = ok ? next : new Map();
+  _openSupply = ok ? nextOpen : new Map();
+  _supplyAvailable = ok;
+}
+function _isVerifiedOrder(orderId) { return !!_orderSupply.get(orderId)?.verified; }
+const _fmtQty = v => (v === null || v === undefined) ? '' : String(Number(v));
+// 품목 공급 상태 한 줄 (상태가 숫자보다 먼저): 모르면 총량을 말하지 않는다.
+function _openSupplyLabel(itemId, unit) {
+  const p = _openSupply.get(itemId);
+  if (!p) return '';
+  const u = unit || p.unit || '';
+  switch (p.open_supply_state) {
+    case 'NONE_CONFIRMED': return '진행 중 주문 없음(확인됨)';
+    case 'VERIFIED_OPEN': return `확인된 미입고 ${_fmtQty(p.known_healthy_open_qty)}${u}`;
+    case 'AT_RISK': return `미입고 ${_fmtQty(p.known_healthy_open_qty)}${u} · 도착 위험 ${_fmtQty(p.known_at_risk_open_qty)}${u}`;
+    case 'CONFLICT': return '공급 기록 확인 필요';
+    default: return Number(p.known_healthy_open_qty) > 0 || Number(p.known_at_risk_open_qty) > 0
+      ? `다른 주문 확인 안 됨 (확인된 것만 ${_fmtQty(Number(p.known_healthy_open_qty) + Number(p.known_at_risk_open_qty))}${u} 이상)`
+      : '다른 주문 확인 안 됨';
+  }
+}
+function _receiveItemHtml(r) {
+  const base = `<span class="v4-receive-name">${r.name}</span>`;
+  const sup = _supplyAvailable ? _orderSupply.get(r.order_id) : null;
+  if (!sup) {
+    return `<div class="v4-receive-item">${base}
+            <span class="v4-receive-qty">${r.orderQty}${r.unit}</span>
+            <button class="v4-receive-btn" onclick="_tblReceive(${r.order_id})">입고</button>
+          </div>`;
+  }
+  const btn = (fn, label, extra = '') => `<button class="v4-receive-btn" ${extra} onclick="${fn}(${r.order_id})">${label}</button>`;
+  const itemLine = _openSupplyLabel(r.item_id, r.unit);
+  let line = '', actions = '';
+  switch (sup.order_state) {
+    case 'UNVERIFIED_LEGACY':
+      line = '주문 확인 전 — 공급으로 세지 않음';
+      actions = btn('_confirmOrderSupply', '주문 확인') + btn('_tblReceive', '입고');
+      break;
+    case 'OPEN': case 'PARTIAL':
+      line = `확인된 주문 · 입고 ${_fmtQty(sup.accepted_qty)}/${_fmtQty(sup.ordered_qty)} · 남은 ${_fmtQty(sup.remaining_qty)}${r.unit}${sup.health === 'AT_RISK' ? ' · 도착 위험' : ''}`;
+      actions = btn('_receivePartial', '일부 입고') + btn('_tblReceive', '남은 전량 입고') + btn('_cancelSupplyOrder', '주문 취소', 'style="background:var(--surface2);color:var(--text)"');
+      break;
+    case 'UNIT_UNRESOLVED':
+      line = '단위가 바뀌어 확인 필요 — 공급으로 세지 않음';
+      break;
+    default:   // CONFLICT, 또는 이미 끝난 주문
+      line = sup.order_state === 'CONFLICT' ? `공급 기록 확인 필요 (${sup.conflict_reason || '충돌'})` : sup.order_state;
+  }
+  return `<div class="v4-receive-item" data-supply-oid="${r.order_id}" data-supply-state="${sup.order_state}" style="flex-wrap:wrap;gap:4px">${base}
+            <span class="v4-receive-qty">${r.orderQty}${r.unit}</span>
+            <span class="v4-supply-line" style="flex-basis:100%;font-size:12px;color:var(--muted)">${line}${itemLine ? ' · ' + itemLine : ''}</span>
+            <span style="display:flex;gap:4px">${actions}</span>
+          </div>`;
+}
+// 수동/전화/오프라인 주문: 사람이 "판매자에게 실제로 주문이 들어갔다"고 명시적으로 확인할 때만 확인된 주문이 된다.
+async function _confirmOrderSupply(orderId) {
+  const row = _orderRequests.find(r => r.id === orderId);
+  if (!row) return;
+  if (typeof confirm !== 'function' || !confirm(`${row.item_name} ${row.qty}${row.unit} — 판매자에게 실제로 주문이 들어갔나요?\n(전화·문자·온라인 주문 완료를 확인한 경우에만)`)) return;
+  const ref = (typeof prompt === 'function' ? prompt('주문번호가 있으면 입력하세요 (없으면 비워 두세요)', '') : '') || '';
+  let res;
+  try {
+    res = await db.rpc('confirm_order_supply', {
+      p_order_id: orderId, p_store_id: SID, p_verification: 'HUMAN_CONFIRMED', p_verified_by: 'web',
+      p_supply_source: _vendors.find(v => v.vendor_id === row.vendor_id)?.vendor_name || null,
+      p_external_order_ref: ref.trim() || null, p_evidence: '사람이 주문 완료를 확인', p_ordered_at: null });
+  } catch (e) { res = { data: null, error: e }; }
+  const code = res?.error ? null : res?.data?.code;
+  const msg = { CONFIRMED: `${row.item_name} 주문 확인됨`, ALREADY_CONFIRMED: '이미 확인된 주문입니다',
+    UNIT_UNRESOLVED: '발주 단위와 재고 단위가 달라 확인하지 못했습니다', NOT_CONFIRMABLE: '이 주문은 확인할 수 없는 상태입니다' }[code]
+    || '주문 확인을 저장하지 못했습니다. 다시 시도해 주세요';
+  showToast(msg, code === 'CONFIRMED' ? 2000 : 3000);
+  // "진행 중 주문 없음"은 기록이 없다는 이유로 정하지 않는다: 사람이 확인해 준 경우에만 남긴다(한 번, 선택).
+  if (code === 'CONFIRMED' && typeof confirm === 'function'
+      && confirm(`${row.item_name} — 이 주문 말고 아직 안 들어온 다른 주문은 없나요?\n(다른 주문이 있거나 모르면 "취소")`)) {
+    try {
+      await db.rpc('confirm_supply_coverage', { p_store_id: SID, p_item_id: row.item_id, p_source: 'HUMAN_CONFIRMED', p_authority: 'web', p_scope: 'ALL_OPEN_ORDERS' });
+    } catch (e) { console.warn('[supply] 진행 중 주문 확인 저장 실패:', e?.message); }
+  }
+  await renderOrder();
+}
+// 일부 입고: 실제로 받은 수량만. 같은 요청을 다시 보내도 서버가 한 번만 반영한다(요청 키).
+async function _receivePartial(orderId) {
+  const row = _orderRequests.find(r => r.id === orderId);
+  const sup = _orderSupply.get(orderId);
+  if (!row || !sup?.verified) return;
+  const raw = typeof prompt === 'function' ? prompt(`${row.item_name} — 실제로 받은 수량 (남은 ${_fmtQty(sup.remaining_qty)}${row.unit})`, '') : null;
+  if (raw === null) return;
+  const v = String(raw).trim();
+  if (!/^\d+(\.\d+)?$/.test(v) || Number(v) <= 0) { showToast('0보다 큰 숫자로 입력해 주세요'); return; }
+  const key = _receiptKeys.get(orderId) || ((typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${orderId}-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  _receiptKeys.set(orderId, key);
+  let res;
+  try {
+    res = await db.rpc('receive_order_supply', { p_order_id: orderId, p_store_id: SID, p_received_qty: Number(v),
+      p_idempotency_key: key, p_authority: 'web', p_source: 'PHYSICAL_RECEIPT' });
+  } catch (e) { res = { data: null, error: e }; }
+  if (res?.error || !res?.data?.code) {   // 결과를 모른다: 키를 남겨 두어 다시 눌러도 두 번 반영되지 않게 한다
+    showToast('입고 결과를 확인하지 못했습니다. 다시 눌러도 두 번 들어가지 않습니다', 3500);
+    return;
+  }
+  _receiptKeys.delete(orderId);
+  const d = res.data;
+  if (d.code === 'SUCCESS' || d.code === 'RECEIVED_WITH_CONFLICT') {
+    const item = _items.find(it => it.item_id === row.item_id);
+    if (item && d.qty_after != null && Number.isFinite(Number(d.qty_after))) item.current_qty = Number(d.qty_after);
+    _invalidateDepletionCache();
+    showToast(d.code === 'SUCCESS'
+      ? `${row.item_name} ${_fmtQty(d.received_qty)}${row.unit} 입고 (누적 ${_fmtQty(d.cumulative_received)}/${_fmtQty(d.ordered_qty)})`
+      : `${row.item_name} ${_fmtQty(d.received_qty)}${row.unit} 입고 — 주문보다 많이 받아 확인이 필요합니다`, 3000);
+  } else {
+    const msg = { ALREADY_RECORDED: '이미 기록된 입고입니다', STOCK_UNKNOWN: '현재 재고를 먼저 입력한 뒤 다시 입고해 주세요',
+      UNIT_MISMATCH: '발주 단위와 재고 단위가 달라 입고하지 못했습니다', CONFLICT: '끝난 주문이라 입고하지 않았습니다 — 확인이 필요합니다',
+      NOT_VERIFIED: '확인된 주문이 아니라 일부 입고를 할 수 없습니다', DATA_CONFLICT: '발주 데이터가 맞지 않아 입고하지 못했습니다' }[d.code]
+      || '입고 저장에 실패했습니다';
+    showToast(msg, 3000);
+  }
+  await renderOrder();
+}
+// 확인된 주문의 남은 수량 전체 취소. 이미 받은 수량(재고)은 그대로다.
+async function _cancelSupplyOrder(orderId) {
+  const row = _orderRequests.find(r => r.id === orderId);
+  if (!row || !_isVerifiedOrder(orderId)) return;
+  if (typeof confirm !== 'function' || !confirm(`${row.item_name} — 아직 안 들어온 수량의 주문을 취소할까요?\n이미 받은 수량은 재고에 그대로 남습니다.`)) return;
+  let res;
+  try {
+    res = await db.rpc('cancel_order_supply', { p_order_id: orderId, p_store_id: SID, p_reason: '사용자 취소', p_cancelled_by: 'web' });
+  } catch (e) { res = { data: null, error: e }; }
+  const code = res?.error ? null : res?.data?.code;
+  showToast(code === 'CANCELLED' ? `${row.item_name} 남은 주문 취소됨` : code === 'NOT_OPEN' ? '이미 끝난 주문입니다' : '주문 취소를 저장하지 못했습니다. 다시 시도해 주세요', 3000);
+  await renderOrder();
+}
+
 // 입고 완료: ordered → done + 재고 입고
 // 재고·이력·발주 상태 쓰기는 complete_order_receiving RPC가 한 트랜잭션으로 수행한다.
 // 여기서는 items / kitchen_operations / order_requests를 직접 쓰지 않는다.
@@ -5399,6 +5547,7 @@ function _coPick(choice) {
 async function cancelOrder(orderId) {
   const row = _orderRequests.find(r => r.id === orderId);
   if (!row) return;
+  if (_isVerifiedOrder(orderId)) return _cancelSupplyOrder(orderId);   // 확인된 주문은 서버 취소 경로로만
   // 선택지: 발주만 취소 / 품목도 삭제 / 닫기
   const choice = await new Promise(resolve => {
     const el = document.querySelector(`[data-row-oid="${orderId}"]`) || document.querySelector(`[data-row-iid="${row.item_id}"]`);
@@ -5442,6 +5591,7 @@ function _inlineEditOrderQty(span, orderId, unit) {
   if (span.querySelector('input')) return; // 이미 편집중
   const row = _orderRequests.find(r => r.id === orderId);
   if (!row) return;
+  if (_isVerifiedOrder(orderId)) { showToast('확인된 주문의 수량은 바꿀 수 없습니다 — 취소 후 새로 주문해 주세요', 3000); return; }
   const oldQty = Number(row.qty);
   const inp = document.createElement('input');
   inp.type = 'number'; inp.inputMode = 'decimal'; inp.step = 'any';
