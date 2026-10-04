@@ -3497,60 +3497,46 @@ async function _batchChangeVendor(currentVendorName, newVendorId, itemIds) {
   renderInventory();
 }
 
-// 삭제하면 안 되는 품목인가: 확인된 주문 공급·입고 원장 기록이 있으면 원장 보존을 위해 hard delete 금지.
-// 서버에 원장 테이블이 아직 없으면(기능 미설치) 기록도 없다. 그 밖에 확인하지 못하면 안전하게 삭제를 막는다.
+// 품목 삭제·중복 합치기는 서버 한 트랜잭션(delete_item_safely / merge_duplicate_items)으로만 한다:
+// 공급·입고 기록이 있는 품목은 거부되고, 어느 단계에서 실패해도 전부 되돌려져 반쯤 지워진 상태가 남지 않는다.
+// 이 앱이 여러 요청으로 나눠 지우던 예전 순서 삭제는 쓰지 않는다(서버에 함수가 없으면 아무것도 지우지 않는다).
 const _DELETE_HISTORY_MSG = '공급·입고 기록이 있는 품목이라 삭제할 수 없습니다 (기록 보존)';
-async function _itemDeleteBlocker(itemId) {
-  for (const table of ['order_supply', 'order_receipts']) {
-    let res;
-    try {
-      res = await db.from(table).select('item_id').eq('store_id', SID).eq('item_id', itemId).limit(1);
-    } catch (e) { res = { data: null, error: e }; }
-    const err = res?.error;
-    if (err) {
-      const missing = err.code === 'PGRST205' || err.code === '42P01' || /does not exist|Could not find the table/i.test(err.message || '');
-      if (missing) continue;
-      return '공급 기록을 확인하지 못해 삭제하지 않았습니다. 다시 시도해 주세요';
-    }
-    if ((res.data || []).length) return _DELETE_HISTORY_MSG;
-  }
-  return null;
+const _DELETE_UNAVAILABLE_MSG = '지금은 삭제·합치기를 할 수 없습니다 (서버 업데이트 필요) — 아무것도 바뀌지 않았습니다';
+
+// 품목 삭제 공통: 서버 한 트랜잭션 → 성공했을 때만 메모리에서 제거
+async function _deleteItemAndCleanup(itemId) {
+  let res;
+  try {
+    res = await db.rpc('delete_item_safely', { p_store_id: SID, p_item_id: itemId });
+  } catch (e) { res = { data: null, error: e }; }
+  const code = res?.error ? null : res?.data?.code;
+  console.log('[DELETE] item_id=', itemId, '→', code || res?.error?.message);
+  if (code === 'DELETED' || code === 'NOT_FOUND') { _items = _items.filter(x => x.item_id !== itemId); return; }
+  if (code === 'HISTORY_PRESERVED') throw new Error(_DELETE_HISTORY_MSG);
+  if (code === 'DELETE_FAILED') throw new Error('삭제하지 못했습니다 — 아무것도 지우지 않았습니다. 다시 시도해 주세요');
+  throw new Error(_DELETE_UNAVAILABLE_MSG);
 }
 
-// 품목 삭제 공통: 삭제 가능 여부 먼저 확인 → order_requests → … → items DELETE → 메모리 제거
-// 한 단계라도 실패하면 거기서 멈춘다(실패를 로그로만 넘기고 다음 데이터를 지우지 않는다).
-async function _deleteItemAndCleanup(itemId) {
-  console.log('[DELETE] 요청 item_id=', itemId);
-  const blocker = await _itemDeleteBlocker(itemId);
-  if (blocker) throw new Error(blocker);   // 아무것도 지우기 전에 멈춤
-
-  // 1) order_requests — 모든 status 삭제 (FK constraint 방지). 실패하면 아무것도 더 지우지 않는다.
-  const { data: orData, error: orErr } = await db.from('order_requests')
-    .delete().eq('store_id', SID).eq('item_id', itemId).select();
-  console.log('[DELETE] order_requests:', orErr ? `ERROR: ${orErr.message}` : `삭제 ${orData?.length || 0}건`);
-  if (orErr) throw new Error(/foreign key|violates/i.test(orErr.message || '') ? _DELETE_HISTORY_MSG : `발주 정리 실패: ${orErr.message}`);
-
-  // 2) daily_orders 삭제
-  const { error: doErr } = await db.from('daily_orders')
-    .delete().eq('store_id', SID).eq('item_id', itemId);
-  if (doErr) throw new Error(`daily_orders 정리 실패: ${doErr.message}`);
-
-  // 3) item_vendor_map 삭제
-  const { error: vmErr } = await db.from('item_vendor_map')
-    .delete().eq('item_id', itemId);
-  if (vmErr) throw new Error(`거래처 연결 정리 실패: ${vmErr.message}`);
-
-  // 4) kitchen_operations — item_id null 처리 (로그 보존)
-  const { error: koErr } = await db.from('kitchen_operations')
-    .update({ item_id: null }).eq('item_id', itemId);
-  if (koErr) throw new Error(`기록 연결 정리 실패: ${koErr.message}`);
-
-  // 5) items 삭제
-  const { data: delData, error: delErr } = await db.from('items').delete().eq('item_id', itemId).select();
-  console.log('[DELETE] items:', delErr ? `ERROR: ${delErr.message}` : `삭제 ${delData?.length || 0}건`);
-  if (delErr) throw new Error(`items 삭제 실패: ${delErr.message}`);
-
-  _items = _items.filter(x => x.item_id !== itemId);
+// 중복 품목 합치기/바꾸기: 대상 수량 변경과 나머지 삭제를 서버 한 트랜잭션으로. 실패하면 아무것도 바뀌지 않는다.
+async function _mergeItemsOnServer(primary, sources, mode, valueItemId = null) {
+  let res;
+  try {
+    res = await db.rpc('merge_duplicate_items', { p_store_id: SID, p_target_item_id: primary.item_id,
+      p_source_item_ids: sources.map(it => it.item_id), p_mode: mode, p_value_item_id: valueItemId });
+  } catch (e) { res = { data: null, error: e }; }
+  const code = res?.error ? null : res?.data?.code;
+  if (code === 'MERGED') {
+    const q = res.data.current_qty;
+    primary.current_qty = (q === null || q === undefined) ? null : Number(q);
+    const gone = new Set(sources.map(it => it.item_id));
+    _items = _items.filter(it => !gone.has(it.item_id));
+    for (const it of sources) if (it.item_name !== primary.item_name) _saveAlias(it.item_name, primary.item_name);
+    return { ok: true };
+  }
+  const msg = { HISTORY_PRESERVED: _DELETE_HISTORY_MSG, UNIT_MISMATCH: '단위가 달라 합치지 않았습니다',
+    STOCK_UNKNOWN: '재고를 모르는 품목이 있어 합치지 않았습니다 (모름은 0이 아닙니다)',
+    MERGE_FAILED: '합치지 못했습니다 — 아무것도 바뀌지 않았습니다' }[code] || _DELETE_UNAVAILABLE_MSG;
+  return { ok: false, msg };
 }
 
 async function deleteInvItem(id, name) {
@@ -4746,26 +4732,9 @@ async function _mergeDup(nameKey) {
     showToast(`${primary.item_name}: 단위가 다릅니다 (${items.map(it=>it.unit||'개').join('/')}). 수동으로 확인해 주세요.`);
     return;
   }
-  // 지울 품목 중 하나라도 삭제할 수 없으면 합치지 않는다 (수량만 합쳐지고 중복이 남는 반쪽 처리 금지)
-  for (let i = 1; i < items.length; i++) {
-    const blocker = await _itemDeleteBlocker(items[i].item_id);
-    if (blocker) { showToast(`${items[i].item_name}: ${blocker}`, 3500); return; }
-  }
-  const totalQty = items.reduce((s, it) => s + Number(it.current_qty), 0);
-  await db.from('items').update({
-    current_qty: totalQty, updated_at: new Date().toISOString()
-  }).eq('item_id', primary.item_id);
-  primary.current_qty = totalQty;
-
-  for (let i = 1; i < items.length; i++) {
-    // 삭제되는 품목명이 primary와 다르면 alias 저장
-    if (items[i].item_name !== primary.item_name) {
-      _saveAlias(items[i].item_name, primary.item_name);
-    }
-    await _deleteItemAndCleanup(items[i].item_id);
-  }
-
-  showToast(`${primary.item_name} 합침 → ${totalQty}${primary.unit || ''}`);
+  const r = await _mergeItemsOnServer(primary, items.slice(1), 'SUM');
+  if (!r.ok) { showToast(`${primary.item_name}: ${r.msg}`, 3500); return; }
+  showToast(`${primary.item_name} 합침 → ${primary.current_qty}${primary.unit || ''}`);
   renderInventory();
   // 패널 업데이트
   _showDupCleanup();
@@ -4782,22 +4751,10 @@ async function _replaceDup(nameKey) {
   const items = nameMap[nameKey];
   if (!items || items.length < 2) return;
   const primary = items[0];
-  const latestQty = items[items.length - 1].current_qty;
-  for (let i = 1; i < items.length; i++) {
-    const blocker = await _itemDeleteBlocker(items[i].item_id);
-    if (blocker) { showToast(`${items[i].item_name}: ${blocker}`, 3500); return; }
-  }
-  // primary를 최신 수량으로 업데이트
-  await db.from('items').update({ current_qty: latestQty, updated_at: new Date().toISOString() }).eq('item_id', primary.item_id);
-  primary.current_qty = latestQty;
-  // 나머지 삭제
-  for (let i = 1; i < items.length; i++) {
-    if (items[i].item_name !== primary.item_name) {
-      _saveAlias(items[i].item_name, primary.item_name);
-    }
-    await _deleteItemAndCleanup(items[i].item_id);
-  }
-  showToast(`${primary.item_name} 바꾸기 → ${latestQty}${primary.unit || ''}`);
+  const latest = items[items.length - 1];
+  const r = await _mergeItemsOnServer(primary, items.slice(1), 'REPLACE', latest.item_id);
+  if (!r.ok) { showToast(`${primary.item_name}: ${r.msg}`, 3500); return; }
+  showToast(`${primary.item_name} 바꾸기 → ${primary.current_qty}${primary.unit || ''}`);
   renderInventory();
   _showDupCleanup();
 }
@@ -4815,21 +4772,8 @@ async function _mergeAllDups() {
     const primary = items[0];
     const sameUnit = items.every(it => (it.unit || '') === (primary.unit || ''));
     if (!sameUnit) { continue; } // 단위 다르면 건너뜀
-    let blocked = false;
-    for (let i = 1; i < items.length && !blocked; i++) blocked = !!(await _itemDeleteBlocker(items[i].item_id));
-    if (blocked) continue;       // 기록 보존 품목이 섞인 그룹은 건드리지 않음
-    const totalQty = items.reduce((s, it) => s + Number(it.current_qty), 0);
-    await db.from('items').update({
-      current_qty: totalQty, updated_at: new Date().toISOString()
-    }).eq('item_id', primary.item_id);
-    primary.current_qty = totalQty;
-    for (let i = 1; i < items.length; i++) {
-      if (items[i].item_name !== primary.item_name) {
-        _saveAlias(items[i].item_name, primary.item_name);
-      }
-      await _deleteItemAndCleanup(items[i].item_id);
-    }
-    count++;
+    const r = await _mergeItemsOnServer(primary, items.slice(1), 'SUM');
+    if (r.ok) count++;            // 실패한 그룹은 서버에서 전부 되돌려졌다 (반쪽 합치기 없음)
   }
   showToast(`${count}종 중복 품목 정리 완료`);
   renderInventory();
@@ -5352,9 +5296,9 @@ function _receivingOutcome(res) {
 // ── 확인된 주문 공급 (Verified Open Supply) ──
 // 재고(current_qty)와 섞지 않는 별도 진실: "실제로 성립한 주문 중 아직 안 들어온 수량".
 // 판정·누적·남은 수량은 전부 서버(get_order_supply / get_open_supply)가 하고, 이 앱은 읽고 보여 주기만 한다.
-// 주문 확인·부분 입고·취소·도착 위험·"진행 중 주문 없음" 확인은 신뢰된 서버 경로(service_role) 전용이다 —
+// 주문 확인·입고(전체·부분)·취소·도착 위험·"진행 중 주문 없음" 확인은 신뢰된 서버 경로(service_role) 전용이다 —
 // 이 앱은 사람/매장을 서버가 확인할 수 있는 로그인 정보가 없어서(공개 키만 사용) 그 기록을 쓰지 않는다.
-// 이 앱이 하는 입고는 예전 그대로의 [입고]/[남은 전량 입고](complete_order_receiving) 하나뿐이다.
+// 서버에 이 기능이 있으면 입고 버튼도 없다(읽기 전용). 기능이 없는 예전 서버에서만 예전 [입고]가 남는다.
 // 'ordered' 상태만으로는 확인된 주문이 아니다. 서버에 이 기능이 아직 없으면 예전 입고 화면 그대로 둔다.
 let _orderSupply = new Map();     // order_id → get_order_supply 행
 let _openSupply = new Map();      // item_id → get_open_supply 행
@@ -5380,6 +5324,7 @@ async function _loadOrderSupply() {
 }
 function _isVerifiedOrder(orderId) { return !!_orderSupply.get(orderId)?.verified; }
 const _VERIFIED_ORDER_LOCKED_MSG = '확인된 주문은 앱에서 취소·수정할 수 없습니다 (확인된 주문 관리 경로 필요)';
+const _RECEIVE_LOCKED_MSG = '입고는 신뢰된 관리 경로에서만 기록합니다 (앱 입고 비활성)';
 const _fmtQty = v => (v === null || v === undefined) ? '' : String(Number(v));
 // 같은 품목 주문이 여러 건일 때 구분할 최소 정보: 주문 번호(order id)와 주문 시각.
 function _orderIdentity(r) {
@@ -5405,34 +5350,28 @@ function _openSupplyLabel(itemId, unit) {
 // 입고 대기 한 줄 = 실제 주문 하나(order id). 버튼은 이 주문 id만 대상으로 한다.
 function _receiveItemHtml(r) {
   const base = `<span class="v4-receive-name">${r.name}</span>`;
-  const sup = _supplyAvailable ? _orderSupply.get(r.order_id) : null;
-  if (!sup) {
+  if (!_supplyAvailable) {
     return `<div class="v4-receive-item" data-order-id="${r.order_id}">${base}
             <span class="v4-receive-qty">${r.orderQty}${r.unit}</span>
             <button class="v4-receive-btn" onclick="_tblReceive(${r.order_id})">입고</button>
           </div>`;
   }
+  // 서버에 확인된 주문 공급이 있으면 이 앱은 읽기만 한다: 버튼 없이 상태만.
+  const sup = _orderSupply.get(r.order_id);
   const itemLine = _openSupplyLabel(r.item_id, r.unit);
-  let line = '', action = '';
-  switch (sup.order_state) {
-    case 'UNVERIFIED_LEGACY':
-      line = '주문 확인 전 — 공급으로 세지 않음';
-      action = `<button class="v4-receive-btn" onclick="_tblReceive(${r.order_id})">입고</button>`;
-      break;
+  let line;
+  switch (sup?.order_state) {
+    case 'UNVERIFIED_LEGACY': line = '주문 확인 전 — 공급으로 세지 않음'; break;
     case 'OPEN': case 'PARTIAL':
       line = `확인된 주문 · 입고 ${_fmtQty(sup.accepted_qty)}/${_fmtQty(sup.ordered_qty)} · 남은 ${_fmtQty(sup.remaining_qty)}${r.unit}${sup.health === 'AT_RISK' ? ' · 도착 위험' : ''}`;
-      action = `<button class="v4-receive-btn" onclick="_tblReceive(${r.order_id})">남은 전량 입고</button>`;
       break;
-    case 'UNIT_UNRESOLVED':
-      line = '단위가 바뀌어 확인 필요 — 공급으로 세지 않음';
-      break;
-    default:   // CONFLICT, 또는 이미 끝난 주문
-      line = sup.order_state === 'CONFLICT' ? `공급 기록 확인 필요 (${sup.conflict_reason || '충돌'})` : sup.order_state;
+    case 'UNIT_UNRESOLVED': line = '단위가 바뀌어 확인 필요 — 공급으로 세지 않음'; break;
+    case undefined: line = '공급 상태 확인 중'; break;
+    default: line = sup.order_state === 'CONFLICT' ? `공급 기록 확인 필요 (${sup.conflict_reason || '충돌'})` : sup.order_state;
   }
-  return `<div class="v4-receive-item" data-order-id="${r.order_id}" data-supply-oid="${r.order_id}" data-supply-state="${sup.order_state}" style="flex-wrap:wrap;gap:4px">${base}
+  return `<div class="v4-receive-item" data-order-id="${r.order_id}" data-supply-oid="${r.order_id}" data-supply-state="${sup?.order_state || ''}" style="flex-wrap:wrap;gap:4px">${base}
             <span class="v4-receive-qty">${r.orderQty}${r.unit}</span>
-            <span class="v4-supply-line" style="flex-basis:100%;font-size:12px;color:var(--muted)">${_orderIdentity(r)} · ${line}${itemLine ? ' · ' + itemLine : ''}</span>
-            <span style="display:flex;gap:4px">${action}</span>
+            <span class="v4-supply-line" style="flex-basis:100%;font-size:12px;color:var(--muted)">${_orderIdentity(r)} · ${line}${itemLine ? ' · ' + itemLine : ''} · ${_RECEIVE_LOCKED_MSG}</span>
           </div>`;
 }
 
@@ -5442,12 +5381,14 @@ function _receiveItemHtml(r) {
 async function markReceived(orderId) {
   const row = _orderRequests.find(r => r.id === orderId);
   if (!row) return;
+  if (_supplyAvailable) { showToast(_RECEIVE_LOCKED_MSG, 3500); return; }   // 신뢰된 경로 전용 — 앱에서 보내지 않음
   let res;
   try {
     res = await db.rpc('complete_order_receiving', { p_order_id: orderId, p_store_id: SID });
   } catch (e) {
     res = { data: null, error: e };
   }
+  if (res?.error && /permission denied|42501/i.test(`${res.error.message || ''} ${res.error.code || ''}`)) { showToast(_RECEIVE_LOCKED_MSG, 3500); return; }
   const out = _receivingOutcome(res);
   if (!out.done) { showToast(out.message, 3000); return; }
   const item = out.ok ? _items.find(it => it.item_id === row.item_id) : null;

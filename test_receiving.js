@@ -83,6 +83,10 @@ function makeEnv(rpcAnswer, opts = {}) {
   const _invalidateDepletionCache = () => {};
   const _renderOrderNeed = () => {}; // home shortage card redraw (read-only, see test_order_need.js)
   const _onOrderPatternUpdate = () => { pattern.calls++; };
+  // server without Verified Open Supply: the app keeps its old receiving (with the feature it sends
+  // nothing — that side is covered by test_open_supply.js)
+  const _supplyAvailable = false;
+  const _RECEIVE_LOCKED_MSG = '입고는 신뢰된 관리 경로에서만 기록합니다 (앱 입고 비활성)';
   // eslint-disable-next-line no-eval
   const _receivingOutcome = eval(asExpr(SRC_outcome, '_receivingOutcome'));
   // eslint-disable-next-line no-eval
