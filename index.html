@@ -4624,6 +4624,9 @@ function _dupCleanupClickHandler(e) {
   else if (action === 'close')     _closeDupCleanup();
 }
 
+// 중복 정리 카드의 수량 표시: 재고 모름(null)은 0이 아니다 — "재고 모름", 아는 0은 "0".
+function _dupQtyText(v, unit) { return _isKnownQty(v) ? `${Number(v)}${unit}` : '재고 모름'; }
+
 async function _showDupCleanup() {
   const nameMap = {};
   _items.forEach(it => {
@@ -4666,7 +4669,7 @@ async function _showDupCleanup() {
     const _normalizeUnit = u => (u || '').trim().toLowerCase() || '개';
     const sameUnit = items.every(it => _normalizeUnit(it.unit) === _normalizeUnit(items[0].unit));
     const unit = items[0].unit || '개';
-    const detail = items.map(it => `${Number(it.current_qty)}${it.unit || '개'}`).join(' + ');
+    const detail = items.map(it => _dupQtyText(it.current_qty, it.unit || '개')).join(' + ');
     console.log(`[중복정리] "${name}" 단위:`, items.map(it => JSON.stringify(it.unit)), '→ sameUnit:', sameUnit);
     const keyAttr = _escAttr(key);
     if (!sameUnit) {
@@ -4680,14 +4683,16 @@ async function _showDupCleanup() {
         </div>
       </div>`;
     }
-    const totalQty = items.reduce((s, it) => s + Number(it.current_qty), 0);
+    // 재고 모름이 하나라도 있으면 합계도 모른다 (0으로 더하지 않는다). 최종 판단은 서버(merge_duplicate_items)가 한다.
+    const totalText = items.every(it => _isKnownQty(it.current_qty))
+      ? `${items.reduce((s, it) => s + Number(it.current_qty), 0)}${unit}` : '재고 모름';
     const latestQty = items[items.length - 1].current_qty;
     return `<div data-dup-card data-dup-key="${keyAttr}" style="padding:10px 0;border-bottom:1px solid var(--border)">
       <div style="font-size:14px;font-weight:600">${name}</div>
-      <div style="font-size:12px;color:var(--dim);margin:4px 0">${detail} = ${totalQty}${unit}</div>
+      <div style="font-size:12px;color:var(--dim);margin:4px 0">${detail} = ${totalText}</div>
       <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
-        <button type="button" class="dup-btn-merge"     data-dup-action="merge"   data-dup-key="${keyAttr}" style="font-size:13px;padding:10px 14px;width:100%">더하기 (${totalQty}${unit})</button>
-        <button type="button" class="dup-btn-overwrite" data-dup-action="replace" data-dup-key="${keyAttr}" style="font-size:13px;padding:10px 14px;width:100%">바꾸기 (${latestQty}${unit})</button>
+        <button type="button" class="dup-btn-merge"     data-dup-action="merge"   data-dup-key="${keyAttr}" style="font-size:13px;padding:10px 14px;width:100%">더하기 (${totalText})</button>
+        <button type="button" class="dup-btn-overwrite" data-dup-action="replace" data-dup-key="${keyAttr}" style="font-size:13px;padding:10px 14px;width:100%">바꾸기 (${_dupQtyText(latestQty, unit)})</button>
         <button type="button" class="dup-btn-replace"   data-dup-action="keep"                              style="font-size:13px;padding:10px 14px;width:100%">유지</button>
       </div>
     </div>`;
