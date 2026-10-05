@@ -167,9 +167,13 @@ const SIM = [item(174, '파인애플', 2, 6, '캔'), item(1, '우유', 1, 3, '�
   const falseAllGood = HTML.includes('모든 재고가 충분합니다');
   check('H8 notification / recommendation / order table not labelled as shortage', !recoAsNeed && !notifAsNeed && !falseAllGood && HTML.includes('추천 (재고 0·소진 예측 기준)'),
     `recoAsNeed=${recoAsNeed} notifAsNeed=${notifAsNeed} falseAllGood=${falseAllGood}`); }
-// H9  the card is on Home, above the notification, recommendation and order table
+// H9  (Agent Home V0.1) Home top = "오늘 할 일"; this need card is the folded detail below the order table.
+//     The separate reminder / recommendation cards are no longer on Home (their signals feed "오늘 할 일").
 { const pos = id => HTML.indexOf(`id="${id}"`);
-  check('H9 card sits at the top of Home', pos('orderNeedCard') > pos('tab-input') && pos('orderNeedCard') < pos('v3NotifContainer') && pos('v3NotifContainer') < pos('suggestBar') && pos('suggestBar') < pos('homeOrderSection'), ''); }
+  const home = HTML.slice(pos('tab-input'), HTML.indexOf('<!-- 재고탭 -->'));
+  check('H9 Home: 오늘 할 일 on top, order table, then this card folded in details', pos('agentHome') > pos('tab-input') && pos('agentHome') < pos('homeOrderSection')
+    && pos('homeOrderSection') < pos('homeDetails') && pos('homeDetails') < pos('orderNeedCard') && /<details class="home-details" id="homeDetails">/.test(home)
+    && !home.includes('id="v3NotifContainer"') && !home.includes('id="suggestBar"'), ''); }
 
 console.log(`\nDB Write: 0 (no client, no network)`);
 console.log(`RESULT: ${pass} PASS / ${fail} FAIL (of ${total})`);

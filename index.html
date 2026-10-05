@@ -545,6 +545,32 @@ tr.v4-ordered{background:rgba(59,130,246,.04) !important}
 tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 /* 빈 행 안내 */
 .v4-empty-hint{text-align:center;padding:24px 16px;color:var(--muted);font-size:13px}
+/* Agent Home — 오늘 할 일 */
+.agent-home{background:#fff;border-radius:16px;padding:14px 14px 8px;box-shadow:0 1px 4px rgba(0,0,0,.06);margin-bottom:10px}
+.agent-sum{font-size:18px;font-weight:800;color:var(--text);margin-bottom:10px}
+.agent-sum.agent-none{font-size:16px;color:var(--order-green);margin-bottom:4px}
+.agent-card{display:flex;gap:10px;align-items:center;justify-content:space-between;padding:11px 12px;border-radius:12px;background:var(--surface2);margin-bottom:8px;border-left:4px solid var(--muted)}
+.agent-card.agent-receive_pending{border-left-color:var(--accent)}
+.agent-card.agent-order_now{border-left-color:var(--suggest-bar)}
+.agent-card.agent-check_stock{border-left-color:var(--warn)}
+.agent-card.agent-wait_existing_order{border-left-color:var(--muted)}
+.agent-card.agent-critical{border-left-color:var(--red);background:#fdecea}
+.agent-card.agent-compact{padding:8px 10px;background:#f6f8f6}
+.agent-main{min-width:0;flex:1}
+.agent-title{font-size:15px;font-weight:700;color:var(--text);word-break:keep-all}
+.agent-compact .agent-title{font-size:14px;font-weight:600}
+.agent-reason{font-size:12px;color:var(--dim);margin-top:3px;line-height:1.45;word-break:keep-all}
+.agent-note{font-size:12px;color:var(--warn);margin-top:4px}
+.agent-acts{display:flex;flex-direction:column;gap:4px;flex-shrink:0}
+.agent-btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap}
+.agent-check_stock .agent-btn{background:var(--warn)}
+.agent-btn-sub{background:none;border:1px solid var(--border);border-radius:8px;padding:5px 10px;font-size:12px;color:var(--dim);font-family:inherit;cursor:pointer;white-space:nowrap}
+.agent-more{margin:2px 0 8px}
+.agent-more summary,.home-details summary{font-size:13px;color:var(--dim);cursor:pointer;padding:6px 2px}
+.agent-sub-hdr{font-size:12px;font-weight:700;color:var(--muted);margin:10px 0 6px}
+.home-details{margin:4px 0 10px;padding:0 4px}
+.home-sheet-empty{padding:10px 16px}
+.agent-focus{outline:3px solid var(--warn);outline-offset:2px;transition:outline .2s}
 
 /* ── v4 입고 대기 접기 ── */
 .v4-receive-bar{padding:12px 16px;display:flex;align-items:center;justify-content:space-between;cursor:pointer;border-top:1px solid #f0f0ec;user-select:none}
@@ -622,7 +648,6 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 <div class="hdr">
   <span class="logo" id="logoBtn" style="cursor:pointer">ZeroKitchen</span>
   <div class="store-tabs" id="storeTabs"><span class="store-nm" id="storeNm">로딩 중...</span></div>
-  <button class="api-key-btn" id="apiKeyBtn" onclick="_toggleApiKeyPopup()" title="API 키 설정">⚙<span class="api-key-dot" id="apiKeyDot"></span></button>
   <div class="navs">
     <span class="home-clock" id="homeClock"></span>
     <button class="nav active" onclick="switchTab('input',this)">홈</button>
@@ -647,20 +672,20 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 
 <!-- 홈탭 (발주 체크리스트 + 입력) -->
 <div id="tab-input" class="tab active">
-  <!-- [최상단] 현재 부족(OrderNeed) 카드: 재고·목표만으로 계산. 알림·추천·등록된 발주와 다른 의미 -->
-  <div id="orderNeedCard"></div>
+  <!-- [최상단] 오늘 할 일 (Agent Home): 품목마다 결정 하나, 우선순위 순. 부족·주기 알림·추천·입고 대기를 여기서 하나로 말한다 -->
+  <div id="agentHome"></div>
 
-  <!-- [v3] 발주 알림 카드 -->
-  <div id="v3NotifContainer" style="display:none; margin:8px 12px;"></div>
-
-  <!-- [상단] 추천 공지바 -->
-  <div id="suggestBar"></div>
-
-  <!-- [중단] 오늘의 발주 표 카드 -->
+  <!-- [중단] 오늘의 발주 표 카드 (발주표 = 담아 둔 주문 + 입고 대기 상세) -->
   <div id="homeOrderSection">
     <div id="writerPendingBar" style="display:none"></div>
     <div id="orderList"><div class="no-item">로딩 중...</div></div>
   </div>
+
+  <!-- [하단, 접힘] 재고·목표 상세 (현재 − 목표 계산표). 판단은 위 "오늘 할 일"이 한다 -->
+  <details class="home-details" id="homeDetails">
+    <summary>재고·목표 자세히 보기</summary>
+    <div id="orderNeedCard"></div>
+  </details>
 
   <!-- [채팅] 카톡 스타일 채팅 영역 -->
   <div class="v4-chat-area" id="chatArea">
@@ -723,6 +748,11 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
   <div class="card" id="writerAuthCard">
     <div class="card-title">입고 기록 로그인</div>
     <div id="writerAuthBody" style="font-size:13px;color:var(--dim)">확인 중…</div>
+  </div>
+  <!-- AI 입력 설정 (헤더에서 옮김: 사장님 화면에는 개발용 표시를 두지 않는다) -->
+  <div class="card">
+    <div class="card-title">여러 품목 한 번에 입력 (AI)</div>
+    <button class="btn-run" style="width:100%;background:var(--surface2);color:var(--dim)" id="apiKeyBtn" onclick="_toggleApiKeyPopup()">AI 키 설정 <span class="api-key-dot" id="apiKeyDot"></span></button>
   </div>
   <!-- 일일 현장 관찰 -->
   <div class="card">
@@ -1077,6 +1107,8 @@ function _clearStoreContext() {
     showToast(`매장을 바꿔 재고 점검을 마쳤습니다 — 센 품목 ${n}개는 저장됨`, 3500);
   }
   const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+  _agentCycle = new Map();
+  set('agentHome', '');
   set('orderNeedCard', '');
   set('suggestBar', '');
   set('resList', '');
@@ -4071,6 +4103,239 @@ function _renderOrderNeed() {
   if (skipped) html += `<div class="need-note">목표 재고가 없는 ${skipped}개 품목은 판단하지 않았습니다</div>`;
   html += `</div>`;
   el.innerHTML = html;
+  if (typeof _renderAgentHome === 'function') _renderAgentHome();   // 홈 최상단 "오늘 할 일"도 같은 판정으로 다시 그린다
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Agent Home — "오늘 할 일": 여러 카드(부족·주기 알림·추천·발주표·입고 대기)가 각자 말하던 것을
+// 품목마다 결정 하나로 모아 우선순위 목록으로 보여 준다. 새 판정을 만들지 않는다:
+//   부족/확인 필요 = _admittedNeedOf (신뢰 재고 Gate), 주문 중 = get_order_supply / get_open_supply (서버 projection),
+//   발주표 = order_requests pending, 주기 알림 = checkOrderNotifications (참고 신호로만).
+// 화면 문구에는 내부 상태 이름을 쓰지 않는다. 그리기만 하고 아무것도 저장하지 않는다.
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+const AGENT_PRIORITY = { RECEIVE_PENDING: 1, ORDER_NOW: 2, CHECK_STOCK: 3, WAIT_EXISTING_ORDER: 4, NO_ACTION: 5 };
+const AGENT_MAX_CHECKS = 3;
+let _agentCycle = new Map();   // item_id → 주기 알림 후보 (현재 매장, 참고 신호)
+const _AGENT_SOURCE_LABEL = { COUPANG: '쿠팡', SIKBOM: '식봄' };
+const _agentEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const _agentNum = v => String(Number(Number(v).toFixed(3)));
+
+// ctx: { storeId, items, needOf, orderRequests, orderSupply, openSupply, supplyAvailable, writerReady, cycle, vendors }
+// → { storeId, primary, moreChecks, waiting } — 품목 하나에 결정 하나.
+function deriveAgentActions(ctx) {
+  const out = [];
+  const reqs = (ctx.orderRequests || []).filter(r => Number(r.qty) > 0);
+  const known = new Set();
+  const vendorName = id => (ctx.vendors || []).find(v => v.vendor_id === id)?.vendor_name || '';
+  const decide = (id, name, unit, it) => {
+    known.add(id);
+    const u = unit || '';
+    const mine = reqs.filter(r => r.item_id === id);
+    const pending = mine.find(r => r.status === 'pending');
+    const ordered = mine.filter(r => r.status === 'ordered');
+    const supOf = r => ctx.supplyAvailable ? ctx.orderSupply.get(r.id) : null;
+    const open = ordered.map(r => ({ r, sup: supOf(r) })).filter(x => x.sup && (x.sup.order_state === 'OPEN' || x.sup.order_state === 'PARTIAL'));
+    const unverified = ordered.filter(r => !open.some(x => x.r.id === r.id) && supOf(r)?.order_state !== 'CONFLICT');
+    const proj = ctx.supplyAvailable ? ctx.openSupply.get(id) : null;
+    const conflict = proj?.open_supply_state === 'CONFLICT' || ordered.some(r => supOf(r)?.order_state === 'CONFLICT');
+    const need = it ? ctx.needOf(it) : { state: 'NO_TARGET', qty: 0 };
+    const cycle = ctx.cycle?.has(id);
+    const base = { item_id: id, store_id: ctx.storeId, name, unit: u, current_qty: need.current ?? null, required_qty: null,
+      open_supply_remaining: null, supplier: '', critical: false, primary_action: null, secondary_action: null, note: null,
+      source_refs: [...mine.map(r => `order_requests:${r.id}`), ...(proj ? ['get_open_supply'] : []), ...(cycle ? ['order_cycle'] : [])] };
+    const act = (type, o) => out.push({ ...base, type, priority: AGENT_PRIORITY[type], ...o });
+    const showOrder = oid => ({ label: '주문 상태 보기', call: `_agentShowOrder(${oid})` });
+
+    // 1) 주문 기록이 서로 다르면 다른 판단보다 먼저 확인을 받는다
+    if (conflict) {
+      return act('WAIT_EXISTING_ORDER', { critical: true, todo: true, title: `${name} 주문 기록을 확인해 주세요`,
+        reason: '기록이 서로 달라 확인이 필요해요 — 확인 전에는 추가 주문하지 마세요', primary_action: ordered.length ? showOrder(ordered[0].id) : null });
+    }
+    // 2) 확인된 주문이 남아 있다: 입고 대기 (부족분을 다 채우지 못하면 모자라는 만큼만 주문)
+    if (open.length) {
+      const rem = open.reduce((s, x) => s + Number(x.sup.remaining_qty || 0), 0);
+      const atRisk = open.some(x => x.sup.health === 'AT_RISK') || proj?.open_supply_state === 'AT_RISK';
+      const src = open.map(x => vendorName(x.r.vendor_id) || _AGENT_SOURCE_LABEL[x.sup.supply_source] || '').find(Boolean) || '';
+      if (need.state === 'NEEDED' && rem < need.qty) {
+        const q = Number((need.qty - rem).toFixed(10));
+        return act('ORDER_NOW', { todo: true, required_qty: q, open_supply_remaining: rem, supplier: src,
+          title: `${name} ${_agentNum(q)}${u} 더 주문하세요`,
+          reason: `현재 ${_agentNum(need.current)}${u} · 목표 ${_agentNum(need.target)}${u} · 이미 ${_agentNum(rem)}${u} 주문 중`,
+          primary_action: pending ? { label: '발주표 보기', call: `_agentShowOrderSheet(${id})` } : { label: '주문 준비', call: `_agentPrepareOrder(${id})` } });
+      }
+      const one = open.length === 1 ? open[0] : null;
+      const partial = one && Number(one.sup.accepted_qty) > 0;
+      const why = [`주문 확인됨${src ? ' · ' + src : ''}`,
+        one ? (partial ? `주문 ${_agentNum(one.sup.ordered_qty)}${u} 중 ${_agentNum(one.sup.accepted_qty)}${u} 받음` : `주문 ${_agentNum(one.sup.ordered_qty)}${u}`) : `주문 ${open.length}건`];
+      if (atRisk) why.push('늦어지고 있어요');
+      if (need.state === 'NEEDED' || need.state === 'SUFFICIENT' || cycle) why.push('추가 주문하지 마세요');
+      const ready = !!ctx.writerReady;
+      return act(ready ? 'RECEIVE_PENDING' : 'WAIT_EXISTING_ORDER', {
+        todo: ready, critical: atRisk, open_supply_remaining: rem, supplier: src,
+        title: `${name} ${_agentNum(rem)}${u} 입고 대기`, reason: why.join(' · '),
+        primary_action: ready ? (one ? { label: '받았어요', call: `_writerFullReceipt(${one.r.id})` } : { label: '입고 처리', call: `_agentShowOrder(${open[0].r.id})` }) : showOrder(open[0].r.id),
+        secondary_action: ready && one ? { label: '일부만 받았어요', call: `_writerPartialReceipt(${one.r.id})` } : null,
+        note: ready ? null : { text: '입고 기록을 하려면 로그인해 주세요', call: '_agentGoLogin()' } });
+    }
+    // 3) 주문했다는 기록은 있지만 확인되지 않은 주문: 추가 주문을 권하지 않는다
+    if (unverified.length) {
+      const r = unverified[0];
+      return act('WAIT_EXISTING_ORDER', { todo: false, title: `${name} 주문 중`,
+        reason: `${_agentNum(r.qty)}${r.unit || u} 주문했다고 기록됨${ctx.supplyAvailable ? ' · 주문 확인 전' : ''} — 추가 주문하지 마세요`,
+        primary_action: showOrder(r.id) });
+    }
+    // 4) 현재 수량을 믿을 수 없으면 주문 판단보다 확인이 먼저다 (주문 추천을 함께 내지 않는다)
+    if (need.state === 'NEEDS_VERIFICATION' || need.state === 'UNKNOWN') {
+      const why = [need.state === 'UNKNOWN'
+        ? `현재 수량을 몰라 주문 판단을 미뤘어요 (목표 ${_agentNum(need.target)}${u})`
+        : `최근 수량이 확실하지 않아 주문 판단을 미뤘어요 (앱에 적힌 수량 ${_agentNum(need.recorded)}${u} · 목표 ${_agentNum(need.target)}${u})`];
+      if (cycle) why.push('평소 주문 주기가 됐어요');
+      if (pending) why.push(`발주표에 ${_agentNum(pending.qty)}${pending.unit || u} 담겨 있어요 — 주문 전에 확인하세요`);
+      const rec = need.state === 'UNKNOWN' ? null : Number(need.recorded);
+      const score = (pending ? 4 : 0) + (cycle ? 3 : 0) + (rec !== null && rec <= 0 ? 2 : 0) + (rec === null || rec < need.target ? 1 : 0);
+      return act('CHECK_STOCK', { todo: true, title: `${name} 현재 수량을 확인하세요`, reason: why.join(' · '),
+        _rank: [-score, rec === null ? -1 : rec / need.target, name], primary_action: { label: '재고 확인', call: `_agentCountItem(${id})` } });
+    }
+    // 5) 확인된 재고로 부족: 주문 (다른 주문이 없다고 확인된 경우에만 단정한다)
+    if (need.state === 'NEEDED') {
+      const sure = ctx.supplyAvailable && proj?.open_supply_state === 'NONE_CONFIRMED';
+      const why = `현재 ${_agentNum(need.current)}${u} · 목표 ${_agentNum(need.target)}${u}` +
+        (sure ? ' · 주문 중 없음' : ' · 다른 주문은 확인되지 않았어요 — 이미 시켰다면 추가 주문하지 마세요') +
+        (pending ? ` · 발주표에 ${_agentNum(pending.qty)}${pending.unit || u} 담겨 있어요` : '');
+      return act('ORDER_NOW', { todo: true, required_qty: need.qty, open_supply_remaining: 0,
+        title: sure ? `${name} ${_agentNum(need.qty)}${u} 주문하세요` : `${name} ${_agentNum(need.qty)}${u} 주문이 필요해요`, reason: why,
+        _rank: [-(need.qty / need.target), name],
+        primary_action: pending ? { label: '발주표 보기', call: `_agentShowOrderSheet(${id})` } : { label: '주문 준비', call: `_agentPrepareOrder(${id})` } });
+    }
+    // 6) 발주표에 담아 둔 품목: 아직 보내지 않은 주문이다 (홈과 발주표가 서로 다른 말을 하지 않게)
+    if (pending) {
+      return act('ORDER_NOW', { todo: true, required_qty: Number(pending.qty), title: `${name} ${_agentNum(pending.qty)}${pending.unit || u} 주문하세요`,
+        reason: '발주표에 담아 둔 품목이에요', _rank: [1, name], primary_action: { label: '발주표 보기', call: `_agentShowOrderSheet(${id})` } });
+    }
+  };
+  for (const it of ctx.items || []) decide(it.item_id, it.item_name, it.unit, it);
+  for (const r of reqs) if (!known.has(r.item_id)) decide(r.item_id, r.item_name, r.unit, null);
+
+  const cmp = (a, b) => {
+    if (a.critical !== b.critical) return a.critical ? -1 : 1;
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    const x = a._rank || [a.name], y = b._rank || [b.name];
+    for (let i = 0; i < Math.max(x.length, y.length); i++) {
+      if (x[i] === y[i]) continue;
+      return typeof x[i] === 'number' && typeof y[i] === 'number' ? x[i] - y[i] : String(x[i]).localeCompare(String(y[i]), 'ko');
+    }
+    return 0;
+  };
+  out.sort(cmp);
+  const checks = out.filter(a => a.type === 'CHECK_STOCK');
+  const shownChecks = new Set(checks.slice(0, AGENT_MAX_CHECKS));
+  const primary = out.filter(a => a.todo && (a.type !== 'CHECK_STOCK' || shownChecks.has(a)));
+  const moreChecks = checks.filter(a => !shownChecks.has(a));
+  const waiting = out.filter(a => !a.todo);
+  return { storeId: ctx.storeId, primary, moreChecks, waiting };
+}
+
+function _agentContext() {
+  return { storeId: SID, items: _items, needOf: _admittedNeedOf, orderRequests: _orderRequests, orderSupply: _orderSupply,
+    openSupply: _openSupply, supplyAvailable: _supplyAvailable, writerReady: _writerReady, cycle: _agentCycle, vendors: _vendors };
+}
+
+function _agentCardHtml(a, compact) {
+  const btn = (x, cls) => x ? `<button class="${cls}" onclick="${x.call}">${_agentEsc(x.label)}</button>` : '';
+  const note = a.note ? `<div class="agent-note">${_agentEsc(a.note.text)} <a href="#" onclick="event.preventDefault();${a.note.call}">로그인</a></div>` : '';
+  return `<div class="agent-card agent-${a.type.toLowerCase()}${a.critical ? ' agent-critical' : ''}${compact ? ' agent-compact' : ''}" data-agent-iid="${a.item_id}" data-agent-type="${a.type}">
+    <div class="agent-main"><div class="agent-title">${_agentEsc(a.title)}</div><div class="agent-reason">${_agentEsc(a.reason)}</div>${note}</div>
+    <div class="agent-acts">${btn(a.primary_action, 'agent-btn')}${btn(a.secondary_action, 'agent-btn-sub')}</div></div>`;
+}
+
+// 홈 최상단 "오늘 할 일". 현재 매장(SID) 상태만 읽는다 — 매장을 바꾸면 _clearStoreContext가 비우고 새 매장 데이터로 다시 그린다.
+function _renderAgentHome() {
+  const el = document.getElementById('agentHome');
+  if (!el) return;
+  if (!(_items || []).length && !(_orderRequests || []).length) { el.innerHTML = ''; return; }
+  const { primary, moreChecks, waiting } = deriveAgentActions(_agentContext());
+  let html = `<div class="agent-home">`;
+  html += primary.length
+    ? `<div class="agent-sum">오늘 할 일 ${primary.length}개</div>`
+    : `<div class="agent-sum agent-none">오늘은 바로 처리할 일이 없습니다.</div>`;
+  html += primary.map(a => _agentCardHtml(a, false)).join('');
+  if (moreChecks.length) {
+    html += `<details class="agent-more"><summary>재고 확인이 필요한 품목 ${moreChecks.length}개 더 있음</summary>${moreChecks.map(a => _agentCardHtml(a, true)).join('')}</details>`;
+  }
+  if (waiting.length) {
+    html += `<div class="agent-sub-hdr">주문 중 — 추가 주문하지 않아도 돼요</div>${waiting.map(a => _agentCardHtml(a, true)).join('')}`;
+  }
+  html += `</div>`;
+  el.innerHTML = html;
+}
+
+// 주기 알림 후보를 "오늘 할 일"의 참고 신호로만 읽는다 (읽기 전용, 현재 매장 기준, 늦은 응답은 버림).
+async function _loadAgentCycle() {
+  const ep = _storeEpoch, sid = SID;
+  let next = new Map();
+  try { for (const c of (await checkOrderNotifications(sid)) || []) next.set(c.item_id, c); }
+  catch (e) { console.warn('[agent] 주기 알림을 읽지 못했습니다:', e?.message); next = new Map(); }
+  if (_storeChanged(ep)) return;
+  _agentCycle = next;
+  _renderAgentHome();
+}
+
+// [주문 준비]: 기존 발주표(order_requests pending)에 담는다 — 중복 방지 경로(_insertOrderIfNotDup) 그대로. 주문을 보내지는 않는다.
+async function _agentPrepareOrder(itemId) {
+  const ep = _storeEpoch, sid = SID;
+  const a = deriveAgentActions(_agentContext()).primary.find(x => x.item_id === itemId && x.type === 'ORDER_NOW');
+  const it = (_items || []).find(i => i.item_id === itemId);
+  if (!a || !it || !(Number(a.required_qty) > 0)) { showToast('지금은 주문 준비할 수 없어요 — 화면을 새로 고쳐 주세요', 3000); return; }
+  const row = { store_id: sid, item_id: itemId, item_name: it.item_name, qty: a.required_qty, status: 'pending' };
+  if (it.unit) row.unit = it.unit;
+  const res = await _insertOrderIfNotDup(row);
+  if (_storeChanged(ep)) return;
+  if (res?.error) { showToast('발주표에 담지 못했습니다 — 다시 시도해 주세요', 3000); return; }
+  showToast(res?.skipped ? `${it.item_name}은(는) 이미 발주표·주문에 있어요` : `${it.item_name} ${_agentNum(a.required_qty)}${it.unit || ''} 발주표에 담았어요`, 2500);
+  await renderOrder();
+  if (_storeChanged(ep)) return;
+  _agentShowOrderSheet(itemId);
+}
+
+// [발주표 보기]: 접혀 있으면 펴고 그 품목 줄로 이동
+function _agentShowOrderSheet(itemId) {
+  const body = document.getElementById('orderCardBody');
+  if (body && body.classList.contains('collapsed')) {
+    body.classList.remove('collapsed'); _homeTableCollapsed = false;
+    document.querySelector('.v4-fold-arrow')?.classList.remove('up');
+  }
+  const row = document.querySelector(`#otBody tr[data-iid="${itemId}"]`) || document.getElementById('homeOrderSection');
+  _agentFocus(row);
+}
+
+// [주문 상태 보기] / [입고 처리]: 입고 대기 목록을 펼치고 그 주문으로 이동 (기록 버튼은 그 목록의 신뢰된 기록 경로)
+function _agentShowOrder(orderId) {
+  const list = document.querySelector('.v4-receive-list');
+  if (list && !list.classList.contains('open')) { list.classList.add('open'); list.previousElementSibling?.querySelector('.arrow')?.classList.add('open'); }
+  _agentFocus(document.querySelector(`.v4-receive-item[data-order-id="${orderId}"]`) || document.getElementById('homeOrderSection'));
+}
+
+// [재고 확인]: 기존 재고 점검(Count Mode)으로 연결하고 그 품목을 보여 준다. 새 저장 경로를 만들지 않는다.
+async function _agentCountItem(itemId) {
+  const nav = [...document.querySelectorAll('.nav')].find(b => b.textContent.trim() === '재고');
+  const s = document.getElementById('invSearch'); if (s) s.value = '';
+  const f = document.getElementById('invFilter'); if (f) f.value = 'all';
+  if (nav) await switchTab('inventory', nav);
+  if (!_countMode) _startCountMode(); else renderInventory();
+  _agentFocus(document.getElementById(`ic_${itemId}`));
+}
+
+function _agentGoLogin() {
+  const nav = [...document.querySelectorAll('.nav')].find(b => b.textContent.trim() === '설정');
+  if (nav) switchTab('settings', nav);
+  _agentFocus(document.getElementById('writerAuthCard'));
+}
+
+function _agentFocus(el) {
+  if (!el) return;
+  el.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
+  el.classList?.add('agent-focus');
+  setTimeout(() => el.classList?.remove('agent-focus'), 2500);
 }
 
 // 스크롤 위치 보존 renderOrder 래퍼
@@ -4105,6 +4370,7 @@ async function renderOrder() {
     await _loadInventoryTrust();
     if (_storeChanged(ep)) return;
     _renderOrderNeed();
+    _loadAgentCycle();   // 주기 알림은 "오늘 할 일"의 참고 신호로만 읽는다 (별도 카드 없음)
     const _pendingItems = _orderRequests.filter(r => r.status === 'pending');
     const _orderedItems = _orderRequests.filter(r => r.status === 'ordered');
 
@@ -4277,9 +4543,9 @@ async function renderOrder() {
       suggestBar.innerHTML = '';
     }
 
-    // [중단] 표 카드
+    // [중단] 표 카드 — 발주표 = 담아 둔(pending) 주문만. 무엇을 담을지는 위 "오늘 할 일"이 말한다.
     let html = '';
-    if (_pendingRows.length || _chipItems.length) {
+    if (_pendingRows.length) {
       html += `<div class="v4-card">
         <div class="v4-card-hdr" onclick="_toggleOrderFold(this)"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span><span class="v4-fold-arrow">▲</span></span><button class="v4-copy-btn" onclick="event.stopPropagation();_copyAllMerged()">발주하기</button></div>
         <div class="v4-card-body" id="orderCardBody"><table class="v4-table">
@@ -4287,11 +4553,7 @@ async function renderOrder() {
         <thead><tr>
           <th class="v4-name">품목</th><th>재고</th><th>발주</th><th>✓</th><th></th>
         </tr></thead><tbody id="otBody">`;
-      if (_pendingRows.length) {
-        for (const r of _pendingRows) html += _renderTableRow(r);
-      } else {
-        html += `<tr><td colspan="5" class="v4-empty-hint">추천을 탭하거나 아래에서 입력하세요</td></tr>`;
-      }
+      for (const r of _pendingRows) html += _renderTableRow(r);
       html += `</tbody></table>`;
 
       // 입고 대기 섹션
@@ -4306,15 +4568,12 @@ async function renderOrder() {
       html += `</div>`; // .v4-card-body 닫기
       html += `</div>`; // .v4-card 닫기
     } else if (!_orderedRows.length) {
-      html = `<div class="v4-card"><div class="v4-all-good">
-        <div class="icon">✅</div>
-        <div class="title">등록된 발주가 없습니다</div>
-      </div></div>`;
+      html = `<div class="v4-empty-hint home-sheet-empty">발주표가 비어 있어요 — "오늘 할 일"의 [주문 준비]나 아래 입력으로 담을 수 있어요</div>`;
     } else {
       // pending 없고 ordered만 있는 경우
       html += `<div class="v4-card">
         <div class="v4-card-hdr" onclick="_toggleOrderFold(this)"><span>📋 오늘의 발주 <span id="orderCount" style="font-size:13px;font-weight:600;color:var(--dim);margin-left:4px"></span><span class="v4-fold-arrow">▲</span></span><button class="v4-copy-btn" onclick="event.stopPropagation();_copyAllMerged()">발주하기</button></div>
-        <div class="v4-card-body" id="orderCardBody"><div class="v4-empty-hint">추천을 탭하거나 아래에서 입력하세요</div>`;
+        <div class="v4-card-body" id="orderCardBody"><div class="v4-empty-hint">발주표가 비어 있어요 — "오늘 할 일"의 [주문 준비]나 아래 입력으로 담을 수 있어요</div>`;
       html += `<div class="v4-receive-bar" onclick="this.querySelector('.arrow').classList.toggle('open');this.nextElementSibling.classList.toggle('open')">
         <span>📦 입고 대기 (${_orderedRows.length})</span><span class="arrow">▼</span>
       </div>
@@ -4339,9 +4598,11 @@ async function renderOrder() {
     // 칩 데이터 전역 저장
     window._chipData = _chipItems;
 
-    // 소진 예측: 백그라운드 → 추가 칩 생성
-    console.log('[소진예측] 호출 직전, _seenIds:', [..._seenIds]);
-    _loadDepletionAsync(_seenIds, _cancelledItemIds);
+    // "오늘 할 일"을 새로 읽은 품목·발주 기준으로 다시 그린다
+    _renderAgentHome();
+
+    // 소진 예측 추천 칩: 추천 칩 영역이 있는 화면에서만 (홈은 "오늘 할 일"이 대신한다 — 신뢰 재고 판정과 따로 말하지 않게)
+    if (document.getElementById('suggestBar')) _loadDepletionAsync(_seenIds, _cancelledItemIds);
   } catch(e) {
     if (_storeChanged(ep)) return;
     list.innerHTML = `<div class="no-item">오류: ${e.message}</div>`;
