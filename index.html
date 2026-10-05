@@ -560,6 +560,20 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 .agent-title{font-size:15px;font-weight:700;color:var(--text);word-break:keep-all}
 .agent-compact .agent-title{font-size:14px;font-weight:600}
 .agent-reason{font-size:12px;color:var(--dim);margin-top:3px;line-height:1.45;word-break:keep-all}
+.agent-order-line{font-size:13px;font-weight:600;color:var(--text);margin-top:3px;word-break:keep-all}
+.agent-delivery-line{font-size:12px;font-weight:600;color:var(--accent);margin-top:2px;word-break:keep-all}
+.agent-delivery-line.delayed{color:var(--warn)}
+.agent-links{display:flex;gap:10px;margin-top:3px}
+.agent-link{font-size:12px;color:var(--dim);text-decoration:underline}
+.agent-ext{margin-top:8px;text-align:right}
+.zk-form-overlay{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-end;justify-content:center;z-index:1000}
+.zk-form{background:#fff;width:100%;max-width:520px;border-radius:16px 16px 0 0;padding:16px;max-height:90vh;overflow:auto;box-sizing:border-box}
+.zk-form-title{font-size:14px;font-weight:700;color:var(--text);margin-bottom:12px;line-height:1.5}
+.zk-form-row{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--dim);margin-bottom:10px}
+.zk-form-row select,.zk-form-row input{font-size:15px;padding:9px 10px;border:1px solid var(--border);border-radius:8px;font-family:inherit;width:100%;box-sizing:border-box}
+.zk-form-check{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--text);margin:6px 0 10px}
+.zk-form-msg{font-size:12px;color:var(--warn);min-height:16px}
+.zk-form-acts{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
 .agent-note{font-size:12px;color:var(--warn);margin-top:4px}
 .agent-acts{display:flex;flex-direction:column;gap:4px;flex-shrink:0}
 .agent-btn{background:var(--accent);color:#fff;border:none;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:700;font-family:inherit;cursor:pointer;white-space:nowrap}
@@ -1098,7 +1112,7 @@ function _renderStoreTabs() {
 function _clearStoreContext() {
   _items = []; _vendors = []; _orderRequests = [];
   _dismissedItemIds = new Set(); _orderedItemIds = new Set(); _storeAliases = [];
-  _itemTrust = new Map(); _orderSupply = new Map(); _openSupply = new Map();
+  _itemTrust = new Map(); _orderSupply = new Map(); _openSupply = new Map(); _orderDelivery = new Map();
   _draftItems = [];
   window._v4TableRows = []; window._textOrderCache = [];
   if (_countMode) {   // 센 품목은 품목마다 이미 저장됐다. 이전 매장의 점검 표시는 새 매장으로 넘기지 않는다
@@ -4116,7 +4130,9 @@ function _renderOrderNeed() {
 const AGENT_PRIORITY = { RECEIVE_PENDING: 1, ORDER_NOW: 2, CHECK_STOCK: 3, WAIT_EXISTING_ORDER: 4, NO_ACTION: 5 };
 const AGENT_MAX_CHECKS = 3;
 let _agentCycle = new Map();   // item_id → 주기 알림 후보 (현재 매장, 참고 신호)
-const _AGENT_SOURCE_LABEL = { COUPANG: '쿠팡', SIKBOM: '식봄' };
+// 주문처 표시 이름: 서버 supply_source_codes(정규 코드)와 같은 목록. 저장되는 것은 코드뿐이다.
+const _AGENT_SOURCE_LABEL = { COUPANG: '쿠팡', SIKBOM: '식봄', NAVER: '네이버', CJ_FRESHWAY: 'CJ프레시웨이', CUCINA_FOOD: '쿠치나푸드', DONGYANG_PACK: '동양팩', PAX_FOOD: '팍스푸드', BAEMIN_MART: '배민상회' };
+const _DELIVERY_LABEL = { PREPARING: '배송 준비 중', IN_TRANSIT: '배송 중', DELIVERED: '배송 완료 · 실제 받았는지 확인해 주세요' };
 const _agentEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const _agentNum = v => String(Number(Number(v).toFixed(3)));
 
@@ -4132,6 +4148,32 @@ function _draftAge(createdAt, now = new Date()) {
   return { days, label };
 }
 
+// 확인된 주문의 주문처 = 서버 공급 기록의 정규 주문처(supply_source)뿐이다. 발주표·주문 기록의 거래처(vendor_id)나
+// 품목 기본 거래처는 실제 주문처 증거가 아니므로 쓰지 않는다. 없으면 ''(화면에는 "주문처 미확인").
+function _agentOrderSupplier(sup) {
+  return _AGENT_SOURCE_LABEL[sup?.supply_source] || '';
+}
+
+// 실제 주문 시각 / 도착 예정 (한국 시간). 값이 없으면 아무것도 말하지 않는다.
+function _fmtKst(v) {
+  const d = v ? new Date(v) : null;
+  if (!d || isNaN(d)) return '';
+  const p = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })
+    .formatToParts(d).reduce((a, x) => (a[x.type] = x.value, a), {});
+  return `${Number(p.month)}월 ${Number(p.day)}일 ${p.hour}:${p.minute}`;
+}
+
+// 배송 한 줄: 서버 배송 기록(get_order_delivery)에 있는 것만. 배송 완료는 입고가 아니다 (받았다고 기록해야 재고에 반영).
+function _agentDeliveryLine(d) {
+  if (!d) return '';
+  const parts = [];
+  if (d.delivery_status && _DELIVERY_LABEL[d.delivery_status]) parts.push(_DELIVERY_LABEL[d.delivery_status]);
+  if (d.is_delayed === true) parts.push('배송이 지연되고 있어요');
+  if (d.expected_arrival_at && d.delivery_status !== 'DELIVERED') parts.push(`도착 예정 ${_fmtKst(d.expected_arrival_at)}`);
+  if (d.delivery_conflict) parts.push('배송 기록이 서로 달라요 — 확인이 필요해요');
+  return parts.join(' · ');
+}
+
 // ctx: { storeId, items, needOf, orderRequests, orderSupply, openSupply, supplyAvailable, writerReady, cycle, vendors, now }
 // → { storeId, primary, moreChecks, waiting, drafts } — 품목 하나에 결정 하나.
 // 발주표(pending order_requests) = 예전에 담아 둔 주문 후보(draft)일 뿐이다: 현재 주문 필요를 만들지도, 바꾸지도,
@@ -4141,7 +4183,6 @@ function deriveAgentActions(ctx) {
   const now = ctx.now || new Date();
   const reqs = (ctx.orderRequests || []).filter(r => Number(r.qty) > 0);
   const known = new Set();
-  const vendorName = id => (ctx.vendors || []).find(v => v.vendor_id === id)?.vendor_name || '';
   const decide = (id, name, unit, it) => {
     known.add(id);
     const u = unit || '';
@@ -4164,10 +4205,28 @@ function deriveAgentActions(ctx) {
     const need = it ? ctx.needOf(it) : { state: 'NO_TARGET', qty: 0 };
     const cycle = ctx.cycle?.has(id);
     const base = { item_id: id, store_id: ctx.storeId, name, unit: u, current_qty: need.current ?? null, required_qty: null,
-      open_supply_remaining: null, supplier: '', critical: false, primary_action: null, secondary_action: null, note: null,
+      open_supply_remaining: null, supplier: '', orders: [], critical: false, primary_action: null, secondary_action: null, note: null,
       source_refs: [...mine.map(r => `order_requests:${r.id}`), ...(proj ? ['get_open_supply'] : []), ...(cycle ? ['order_cycle'] : [])] };
     const act = (type, o) => out.push({ ...base, type, priority: AGENT_PRIORITY[type], ...o });
     const showOrder = oid => ({ label: '주문 상태 보기', call: `_agentShowOrder(${oid})` });
+    // 확인된 주문 한 건 = 한 줄: 주문처 · 주문 수량 · 받은 수량 · 남은 수량 (+ 실제 주문 시각 · 주문번호 — 아는 경우만),
+    // 그리고 배송 한 줄 (서버 배송 기록이 있을 때만). 서버가 준 값만 쓴다 — 모르는 것은 만들지 않는다
+    // (발주표에 담은 시각·주문 기록을 만든 시각은 주문 시각이 아니다).
+    const orderInfo = x => {
+      const supplier = _agentOrderSupplier(x.sup);
+      const rq = Number(x.sup.remaining_qty || 0), aq = Number(x.sup.accepted_qty || 0);
+      const oq = Number.isFinite(Number(x.sup.ordered_qty)) && x.sup.ordered_qty !== null ? Number(x.sup.ordered_qty) : rq + aq;
+      let line = `${supplier || '주문처 미확인'} · ` + (aq > 0
+        ? `주문 ${_agentNum(oq)}${u} 중 ${_agentNum(aq)}${u} 받음 · ${_agentNum(rq)}${u} 남음` : `${_agentNum(oq)}${u} 주문 확인됨`);
+      if (x.sup.ordered_at) line += ` · ${_fmtKst(x.sup.ordered_at)} 주문`;
+      if (x.sup.external_order_ref) line += ` · 주문번호 ${x.sup.external_order_ref}`;
+      const d = ctx.delivery ? ctx.delivery.get(x.r.id) : null;
+      return { order_id: x.r.id, supplier, ordered_qty: oq, received_qty: aq, remaining_qty: rq, needs_check: x.sup.health === 'AT_RISK',
+        delivery_status: d?.delivery_status || null, delayed: d?.is_delayed === true, expected_arrival_at: d?.expected_arrival_at || null,
+        external_order_url: d?.external_order_url || null, delivery_line: _agentDeliveryLine(d),
+        can_update_delivery: !!ctx.writerReady && (ctx.writerCaps || []).includes('UPDATE_ORDER_DELIVERY'),
+        line: open.length > 1 ? `${line} · 주문 기록 #${x.r.id}` : line };
+    };
 
     // 1) 주문 기록이 서로 다르면 다른 판단보다 먼저 확인을 받는다
     if (conflict) {
@@ -4177,35 +4236,55 @@ function deriveAgentActions(ctx) {
     // 2) 확인된 주문이 남아 있다: 입고 대기 (부족분을 다 채우지 못하면 모자라는 만큼만 주문)
     if (open.length) {
       const rem = open.reduce((s, x) => s + Number(x.sup.remaining_qty || 0), 0);
+      // 서버 health=AT_RISK는 "확인이 필요한 주문"이지 배송 지연이 아니다. 지연은 배송 기록(is_delayed=true)일 때만 말한다.
       const atRisk = open.some(x => x.sup.health === 'AT_RISK') || proj?.open_supply_state === 'AT_RISK';
-      const src = open.map(x => vendorName(x.r.vendor_id) || _AGENT_SOURCE_LABEL[x.sup.supply_source] || '').find(Boolean) || '';
+      const orders = open.map(orderInfo);
+      const delayed = orders.some(o => o.delayed);
+      const delivered = orders.some(o => o.delivery_status === 'DELIVERED');
+      const sellers = [...new Set(orders.map(o => o.supplier))];
+      const src = sellers.length === 1 ? sellers[0] : '';
+      // 이 품목의 진행 주문이 이것뿐이라고 서버가 정한 경우에만 "더 주문하세요"로 단정한다
+      const total = proj?.open_supply_state === 'VERIFIED_OPEN' || proj?.open_supply_state === 'AT_RISK';
       if (need.state === 'NEEDED' && rem < need.qty) {
         const q = Number((need.qty - rem).toFixed(10));
-        return act('ORDER_NOW', { todo: true, required_qty: q, open_supply_remaining: rem, supplier: src,
-          title: `${name} ${_agentNum(q)}${u} 더 주문하세요`,
-          reason: `현재 ${_agentNum(need.current)}${u} · 목표 ${_agentNum(need.target)}${u} · 이미 ${_agentNum(rem)}${u} 주문 중` + draftLine(q),
+        return act('ORDER_NOW', { todo: true, required_qty: q, open_supply_remaining: rem, supplier: src, orders,
+          title: total ? `${name} ${_agentNum(q)}${u} 더 주문하세요` : `${name} ${_agentNum(q)}${u} 더 주문이 필요해요`,
+          reason: `현재 ${_agentNum(need.current)}${u} · 목표 ${_agentNum(need.target)}${u} · 이미 ${_agentNum(rem)}${u} 주문 중`
+            + (total ? '' : ' · 그 밖에 확인된 주문 없음') + draftLine(q),
           primary_action: pending ? { label: '발주표 보기', call: `_agentShowOrderSheet(${id})` } : { label: '주문 준비', call: `_agentPrepareOrder(${id})` } });
       }
       const one = open.length === 1 ? open[0] : null;
-      const partial = one && Number(one.sup.accepted_qty) > 0;
-      const why = [`주문 확인됨${src ? ' · ' + src : ''}`,
-        one ? (partial ? `주문 ${_agentNum(one.sup.ordered_qty)}${u} 중 ${_agentNum(one.sup.accepted_qty)}${u} 받음` : `주문 ${_agentNum(one.sup.ordered_qty)}${u}`) : `주문 ${open.length}건`];
-      if (atRisk) why.push('늦어지고 있어요');
-      if (need.state === 'NEEDED' || need.state === 'SUFFICIENT' || cycle) why.push('추가 주문하지 마세요');
+      const partial = orders.some(o => o.received_qty > 0);
+      // 현재 수량을 믿을 수 없으면 "추가 주문 불필요"도 "더 주문"도 말하지 않는다: 주문 중인 사실만 보여 주고 재고 확인을 권한다
+      const unsure = need.state === 'NEEDS_VERIFICATION' || need.state === 'UNKNOWN';
+      const why = [need.state === 'NEEDED' ? `${src ? src + '에서 ' : ''}${_agentNum(rem)}${u} 주문 중이라 추가 주문하지 않아도 돼요`
+        : unsure ? '현재 수량을 확인하면 더 주문할지 알려 드릴게요'
+        : cycle ? '평소 주문 주기지만 이미 주문 중이에요 — 추가 주문하지 마세요' : '받았다고 기록하면 재고에 반영돼요'];
+      if (delivered) why.unshift('배송 완료 표시는 입고가 아니에요 — 받았다고 기록해야 재고에 반영돼요');
+      if (delayed) why.push('배송이 지연되고 있어요');
+      if (atRisk) why.push('이 주문은 확인이 필요해요');
       const ready = !!ctx.writerReady;
       return act(ready ? 'RECEIVE_PENDING' : 'WAIT_EXISTING_ORDER', {
-        todo: ready, critical: atRisk, open_supply_remaining: rem, supplier: src,
-        title: `${name} ${_agentNum(rem)}${u} 입고 대기`, reason: why.join(' · '),
+        todo: ready, critical: atRisk || delayed, open_supply_remaining: rem, supplier: src, orders,
+        title: delivered ? `${name} 배송 완료 — 받았는지 확인해 주세요`
+          : partial ? `${name} ${_agentNum(rem)}${u} 입고 대기` : need.state === 'NEEDED' ? `${name} 추가 주문하지 마세요` : `${name} ${_agentNum(rem)}${u} 주문 중`,
+        reason: why.join(' · '),
         primary_action: ready ? (one ? { label: '받았어요', call: `_writerFullReceipt(${one.r.id})` } : { label: '입고 처리', call: `_agentShowOrder(${open[0].r.id})` }) : showOrder(open[0].r.id),
-        secondary_action: ready && one ? { label: '일부만 받았어요', call: `_writerPartialReceipt(${one.r.id})` } : null,
+        secondary_action: ready ? (one ? { label: '일부만 받았어요', call: `_writerPartialReceipt(${one.r.id})` } : null)
+          : (unsure ? { label: '재고 확인', call: `_agentCountItem(${id})` } : null),
         note: ready ? null : { text: '입고 기록을 하려면 로그인해 주세요', call: '_agentGoLogin()' } });
     }
-    // 3) 주문했다는 기록은 있지만 확인되지 않은 주문: 추가 주문을 권하지 않는다
+    // 3) 주문했다는 기록은 있지만 확인되지 않은 주문: 확인된 주문으로 세지도, 추가 주문을 권하지도 않는다.
+    //    로그인한 운영자는 여기서 바로 실제 주문을 확인할 수 있다 (기존 신뢰 기록 경로).
     if (unverified.length) {
       const r = unverified[0];
-      return act('WAIT_EXISTING_ORDER', { todo: false, title: `${name} 주문 중`,
-        reason: `${_agentNum(r.qty)}${r.unit || u} 주문했다고 기록됨${ctx.supplyAvailable ? ' · 주문 확인 전' : ''} — 추가 주문하지 마세요`,
-        primary_action: showOrder(r.id) });
+      const legacy = ctx.supplyAvailable && supOf(r)?.order_state === 'UNVERIFIED_LEGACY';
+      const canConfirm = legacy && !!ctx.writerReady;
+      return act('WAIT_EXISTING_ORDER', { todo: false, title: ctx.supplyAvailable ? `${name} 주문 확인이 필요해요` : `${name} 주문 중`,
+        reason: `${_agentNum(r.qty)}${r.unit || u} 주문했다고 기록됨${ctx.supplyAvailable ? ' · 실제 주문은 아직 확인되지 않았어요' : ''} — 추가 주문하지 마세요`,
+        primary_action: canConfirm ? { label: '실제로 주문했어요', call: `_agentConfirmOrder(${r.id})` } : showOrder(r.id),
+        secondary_action: canConfirm ? showOrder(r.id) : null,
+        note: legacy && !canConfirm ? { text: '주문 확인을 기록하려면 로그인해 주세요', call: '_agentGoLogin()' } : null });
     }
     // 4) 현재 수량을 믿을 수 없으면 주문 판단보다 확인이 먼저다 (주문 추천을 함께 내지 않는다)
     if (need.state === 'NEEDS_VERIFICATION' || need.state === 'UNKNOWN') {
@@ -4221,9 +4300,10 @@ function deriveAgentActions(ctx) {
     }
     // 5) 확인된 재고로 부족: 주문 (다른 주문이 없다고 확인된 경우에만 단정한다)
     if (need.state === 'NEEDED') {
+      // 주문 기록이 없다는 것만으로 "주문 없음"이라고 하지 않는다: 없다고 확인된 경우 / 확인된 것이 없는 경우 / 읽지 못한 경우를 나눈다
       const sure = ctx.supplyAvailable && proj?.open_supply_state === 'NONE_CONFIRMED';
       const why = `현재 ${_agentNum(need.current)}${u} · 목표 ${_agentNum(need.target)}${u}` +
-        (sure ? ' · 주문 중 없음' : ' · 다른 주문은 확인되지 않았어요 — 이미 시켰다면 추가 주문하지 마세요') + draftLine(need.qty);
+        (sure ? ' · 현재 확인된 주문 없음 · 진행 중인 주문이 없다고 확인됨' : ctx.supplyAvailable ? ' · 현재 확인된 주문 없음' : ' · 주문 여부를 확인할 수 없어요') + draftLine(need.qty);
       return act('ORDER_NOW', { todo: true, required_qty: need.qty, open_supply_remaining: 0,
         title: sure ? `${name} ${_agentNum(need.qty)}${u} 주문하세요` : `${name} ${_agentNum(need.qty)}${u} 주문이 필요해요`, reason: why,
         _rank: [-(need.qty / need.target), name],
@@ -4260,14 +4340,30 @@ function deriveAgentActions(ctx) {
 
 function _agentContext() {
   return { storeId: SID, items: _items, needOf: _admittedNeedOf, orderRequests: _orderRequests, orderSupply: _orderSupply,
-    openSupply: _openSupply, supplyAvailable: _supplyAvailable, writerReady: _writerReady, cycle: _agentCycle, vendors: _vendors };
+    openSupply: _openSupply, supplyAvailable: _supplyAvailable, writerReady: _writerReady, cycle: _agentCycle, vendors: _vendors,
+    delivery: _orderDelivery, writerCaps: _writerCaps };
+}
+
+// 판매처 주문 페이지 링크는 안전한 https 주소일 때만 (서버도 같은 규칙으로 저장한다)
+function _safeOrderUrl(u) {
+  if (typeof u !== 'string' || u.length > 300 || /[?#@\s]/.test(u) || !u.startsWith('https://')) return false;
+  try { const x = new URL(u); return x.protocol === 'https:' && !x.username && !x.password && /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(x.hostname); } catch { return false; }
 }
 
 function _agentCardHtml(a, compact) {
   const btn = (x, cls) => x ? `<button class="${cls}" onclick="${x.call}">${_agentEsc(x.label)}</button>` : '';
   const note = a.note ? `<div class="agent-note">${_agentEsc(a.note.text)} <a href="#" onclick="event.preventDefault();${a.note.call}">로그인</a></div>` : '';
+  const orders = (a.orders || []).map(o => {
+    const links = [
+      o.external_order_url && _safeOrderUrl(o.external_order_url)
+        ? `<a class="agent-link" href="${_agentEsc(o.external_order_url)}" target="_blank" rel="noopener noreferrer">판매처에서 보기</a>` : '',
+      o.can_update_delivery ? `<a class="agent-link" href="#" onclick="event.preventDefault();_agentDeliveryUpdate(${o.order_id})">배송 상태 기록</a>` : ''].filter(Boolean).join(' ');
+    return `<div class="agent-order-line" data-agent-order="${o.order_id}">${_agentEsc(o.line)}</div>`
+      + (o.delivery_line ? `<div class="agent-delivery-line${o.delayed ? ' delayed' : ''}" data-agent-delivery="${o.order_id}">${_agentEsc(o.delivery_line)}</div>` : '')
+      + (links ? `<div class="agent-links">${links}</div>` : '');
+  }).join('');
   return `<div class="agent-card agent-${a.type.toLowerCase()}${a.critical ? ' agent-critical' : ''}${compact ? ' agent-compact' : ''}" data-agent-iid="${a.item_id}" data-agent-type="${a.type}">
-    <div class="agent-main"><div class="agent-title">${_agentEsc(a.title)}</div><div class="agent-reason">${_agentEsc(a.reason)}</div>${note}</div>
+    <div class="agent-main"><div class="agent-title">${_agentEsc(a.title)}</div>${orders}<div class="agent-reason">${_agentEsc(a.reason)}</div>${note}</div>
     <div class="agent-acts">${btn(a.primary_action, 'agent-btn')}${btn(a.secondary_action, 'agent-btn-sub')}</div></div>`;
 }
 
@@ -4286,7 +4382,7 @@ function _renderAgentHome() {
     html += `<details class="agent-more"><summary>재고 확인이 필요한 품목 ${moreChecks.length}개 더 있음</summary>${moreChecks.map(a => _agentCardHtml(a, true)).join('')}</details>`;
   }
   if (waiting.length) {
-    html += `<div class="agent-sub-hdr">주문 중 — 추가 주문하지 않아도 돼요</div>${waiting.map(a => _agentCardHtml(a, true)).join('')}`;
+    html += `<div class="agent-sub-hdr">주문 · 입고 대기</div>${waiting.map(a => _agentCardHtml(a, true)).join('')}`;
   }
   if (drafts.length) {   // 오늘 할 일 수에 넣지 않는다: 예전에 담아 둔 후보는 주문 지시가 아니다
     const oldest = drafts[0].age.label;
@@ -4294,6 +4390,10 @@ function _renderAgentHome() {
       <div class="agent-main"><div class="agent-title">발주표에 지금 주문할 필요가 확인되지 않은 항목 ${drafts.length}개가 있어요</div>
       <div class="agent-reason">예전에 담아 둔 항목은 주문 지시가 아니에요 · 가장 오래된 항목: ${_agentEsc(oldest)} · 보내기 전에 품목과 수량을 확인하세요</div></div>
       <div class="agent-acts"><button class="agent-btn-sub" onclick="_agentShowOrderSheet(0)">발주표 보기</button></div></div>`;
+  }
+  // 앱 밖(쿠팡·식봄 등)에서 직접 한 주문을 기록: 로그인한 운영자 + 서버가 그 기능을 지원할 때만
+  if (_writerReady && (_writerCaps || []).includes('CREATE_AND_CONFIRM_ORDER')) {
+    html += `<div class="agent-ext"><button class="agent-btn-sub" onclick="_agentRegisterExternalOrder()">다른 곳에서 이미 주문한 것 등록</button></div>`;
   }
   html += `</div>`;
   el.innerHTML = html;
@@ -4343,6 +4443,122 @@ function _agentShowOrder(orderId) {
   const list = document.querySelector('.v4-receive-list');
   if (list && !list.classList.contains('open')) { list.classList.add('open'); list.previousElementSibling?.querySelector('.arrow')?.classList.add('open'); }
   _agentFocus(document.querySelector(`.v4-receive-item[data-order-id="${orderId}"]`) || document.getElementById('homeOrderSection'));
+}
+
+// [실제로 주문했어요]: 사람이 실제 주문을 확인하는 기존 신뢰 기록 경로(CONFIRM_ORDER) 그대로 — 새 저장 경로가 아니다.
+// 무엇을 확인하는지(주문 기록 번호·품목·수량)를 보여 준 뒤에만 보낸다. 발주표에 담기만 한 항목은 대상이 아니다.
+async function _agentConfirmOrder(orderId) {
+  const r = (_orderRequests || []).find(x => x.id === orderId && x.status === 'ordered');
+  if (!r) { showToast('주문 기록을 찾지 못했습니다 — 아무것도 바뀌지 않았습니다', 3000); return; }
+  await _confirmActualOrder(orderId, `${r.item_name} ${_agentNum(r.qty)}${r.unit || ''}`);
+}
+
+// 실제 주문 확인. 서버가 받을 수 있으면 사람이 아는 것만 함께 보낸다 — 주문처 · 실제 주문 시각 · 판매처 주문번호, 모두 선택.
+// 모르면 비워 둔다 (확인하는 지금을 주문 시각으로 쓰지 않는다). 수량·품목·매장은 서버의 주문 기록이 정한다.
+async function _confirmActualOrder(orderId, what) {
+  const head = `주문 기록 #${orderId}${what ? ' · ' + what : ''}`;
+  if (!(_writerCaps || []).includes('CONFIRM_ORDER_IDENTITY')) {
+    if (!confirm(`${head}\n판매처에 실제로 주문을 넣었나요?\n(발주표에 담기만 한 것은 주문이 아니에요)`)) return;
+    await _writerAct('CONFIRM_ORDER', { order_id: orderId });
+    return;
+  }
+  const v = await _zkForm(`${head}\n판매처에 실제로 주문을 넣었나요? (발주표에 담기만 한 것은 주문이 아니에요)\n아는 것만 적어 주세요 — 모르면 비워 두세요`, [
+    { key: 'supply_source', label: '주문처', type: 'select', options: [{ value: '', label: '모름' }, ...await _supplierOptions()] },
+    { key: 'ordered_at', label: '실제 주문 시각', type: 'datetime' },
+    { key: 'external_order_ref', label: '판매처 주문번호', type: 'text' },
+  ], '실제로 주문했어요');
+  if (!v) return;
+  await _writerAct('CONFIRM_ORDER', _writerFields('CONFIRM_ORDER', { order_id: orderId, ...v }));
+}
+
+// 주문처 선택지: 서버의 정규 주문처 목록(supply_source_codes). 읽지 못하면 앱에 있는 같은 목록.
+async function _supplierOptions() {
+  try {
+    const { data, error } = await db.from('supply_source_codes').select('code, label_ko').eq('active', true).order('code');
+    if (!error && Array.isArray(data) && data.length) return data.map(r => ({ value: r.code, label: r.label_ko }));
+  } catch { /* 아래 고정 목록 */ }
+  return Object.entries(_AGENT_SOURCE_LABEL).map(([value, label]) => ({ value, label }));
+}
+
+// [다른 곳에서 이미 주문한 것 등록]: 발주표를 거치지 않은 실제 주문 → CREATE_AND_CONFIRM_ORDER (서버가 한 번에 주문 기록 + 확인).
+// 품목은 목록에서 직접 고른다 (상품명 글자로 품목을 맞추지 않는다). 단위는 그 품목의 재고 단위.
+async function _agentRegisterExternalOrder() {
+  if (!_writerReady || !(_writerCaps || []).includes('CREATE_AND_CONFIRM_ORDER')) { showToast('기록 권한이 준비되지 않았습니다 — 아무것도 바뀌지 않았습니다', 3500); return; }
+  const items = (_items || []).filter(i => i.unit).slice().sort((a, b) => a.item_name.localeCompare(b.item_name, 'ko'));
+  const v = await _zkForm('다른 곳에서 이미 주문한 것 등록\n쿠팡·식봄 등에서 직접 주문한 경우 — 품목은 목록에서 직접 골라 주세요', [
+    { key: 'item_id', label: '품목', type: 'select', required: true, options: [{ value: '', label: '선택' }, ...items.map(i => ({ value: String(i.item_id), label: `${i.item_name} (${i.unit})` }))] },
+    { key: 'ordered_qty', label: '주문 수량 (재고 단위)', type: 'number', required: true },
+    { key: 'supply_source', label: '주문처', type: 'select', required: true, options: [{ value: '', label: '선택' }, ...await _supplierOptions()] },
+    { key: 'ordered_at', label: '실제 주문 시각 (아는 경우만)', type: 'datetime' },
+    { key: 'external_order_ref', label: '판매처 주문번호 (아는 경우만)', type: 'text' },
+    { key: 'confirm', label: '판매처에 실제로 주문했어요', type: 'checkbox', required: true },
+  ], '주문 등록');
+  if (!v) return;
+  const it = items.find(i => String(i.item_id) === String(v.item_id));
+  if (!it || !(Number(v.ordered_qty) > 0) || !v.supply_source || v.confirm !== true) { showToast('품목·수량·주문처를 확인해 주세요 — 아무것도 바뀌지 않았습니다', 3000); return; }
+  await _writerAct('CREATE_AND_CONFIRM_ORDER', _writerFields('CREATE_AND_CONFIRM_ORDER', { item_id: it.item_id, ordered_qty: Number(v.ordered_qty), unit: it.unit,
+    supply_source: v.supply_source, confirm: true, ordered_at: v.ordered_at, external_order_ref: v.external_order_ref }));
+}
+
+// [배송 상태 기록]: 지금 본 배송 상태만 기록 (append-only). 배송 완료는 입고가 아니다 — 받은 것은 [받았어요]로 따로.
+async function _agentDeliveryUpdate(orderId) {
+  if (!_writerReady || !(_writerCaps || []).includes('UPDATE_ORDER_DELIVERY')) { showToast('기록 권한이 준비되지 않았습니다 — 아무것도 바뀌지 않았습니다', 3500); return; }
+  const sup = _orderSupply.get(orderId);
+  if (!sup || !['OPEN', 'PARTIAL'].includes(sup.order_state)) { showToast('확인된 진행 주문만 배송 상태를 기록할 수 있어요 — 아무것도 바뀌지 않았습니다', 3000); return; }
+  const v = await _zkForm(`주문 기록 #${orderId} · 배송 상태 기록\n판매처에서 지금 본 것만 적어 주세요 — 모르면 비워 두세요`, [
+    { key: 'delivery_status', label: '배송 상태', type: 'select', options: [{ value: '', label: '모름' }, { value: 'PREPARING', label: '배송 준비 중' },
+      { value: 'IN_TRANSIT', label: '배송 중' }, { value: 'DELIVERED', label: '배송 완료 (받았는지는 따로 기록)' }] },
+    { key: 'is_delayed', label: '지연 여부', type: 'tri', options: [{ value: '', label: '모름' }, { value: 'true', label: '지연되고 있어요' }, { value: 'false', label: '지연 아님' }] },
+    { key: 'expected_arrival_at', label: '도착 예정 (판매처에 나온 경우만)', type: 'datetime' },
+    { key: 'external_order_url', label: '판매처 주문 페이지 주소 (https)', type: 'text' },
+  ], '기록');
+  if (!v) return;
+  if (v.external_order_url && !_safeOrderUrl(v.external_order_url)) { showToast('주문 페이지 주소는 https 주소만, ?·# 없이 적어 주세요 — 아무것도 바뀌지 않았습니다', 3500); return; }
+  const fields = _writerFields('UPDATE_ORDER_DELIVERY', { order_id: orderId, observed_at: new Date().toISOString(), ...v });
+  if (!['delivery_status', 'is_delayed', 'expected_arrival_at', 'external_order_url'].some(k => k in fields)) { showToast('기록할 내용이 없어요 — 아무것도 바뀌지 않았습니다', 3000); return; }
+  await _writerAct('UPDATE_ORDER_DELIVERY', fields);
+}
+
+// 작은 입력 창 (선택 / 날짜·시각 / 글자 / 숫자 / 예·아니오·모름 / 체크). 취소하면 null.
+// 날짜·시각은 기기 시간대 기준으로 읽어 시간대가 붙은 ISO로 보낸다.
+function _zkForm(title, fields, okLabel) {
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.className = 'zk-form-overlay';
+    const inputs = fields.map((f, i) => {
+      const id = `zkf_${i}`;
+      const opts = o => o.map(x => `<option value="${_agentEsc(x.value)}">${_agentEsc(x.label)}</option>`).join('');
+      const ctl = f.type === 'select' || f.type === 'tri' ? `<select id="${id}">${opts(f.options || [])}</select>`
+        : f.type === 'datetime' ? `<input id="${id}" type="datetime-local">`
+        : f.type === 'number' ? `<input id="${id}" type="number" inputmode="decimal" min="0" step="any">`
+        : f.type === 'checkbox' ? `<input id="${id}" type="checkbox">`
+        : `<input id="${id}" type="text" maxlength="300" autocomplete="off">`;
+      return f.type === 'checkbox' ? `<label class="zk-form-check">${ctl} ${_agentEsc(f.label)}</label>`
+        : `<label class="zk-form-row"><span>${_agentEsc(f.label)}${f.required ? ' *' : ''}</span>${ctl}</label>`;
+    }).join('');
+    wrap.innerHTML = `<div class="zk-form"><div class="zk-form-title">${_agentEsc(title).replace(/\n/g, '<br>')}</div>${inputs}
+      <div class="zk-form-msg"></div><div class="zk-form-acts"><button class="agent-btn-sub" data-act="cancel">취소</button><button class="agent-btn" data-act="ok">${_agentEsc(okLabel || '확인')}</button></div></div>`;
+    const done = v => { wrap.remove(); resolve(v); };
+    wrap.querySelector('[data-act="cancel"]').onclick = () => done(null);
+    wrap.querySelector('[data-act="ok"]').onclick = () => {
+      const out = {};
+      for (const [i, f] of fields.entries()) {
+        const el = wrap.querySelector(`#zkf_${i}`);
+        let v;
+        if (f.type === 'checkbox') v = !!el.checked;
+        else if (f.type === 'tri') v = el.value === '' ? null : el.value === 'true';
+        else if (f.type === 'datetime') { const d = el.value ? new Date(el.value) : null; v = d && !isNaN(d) ? d.toISOString() : null; }
+        else if (f.type === 'number') v = el.value === '' ? null : Number(el.value);
+        else v = el.value.trim() || null;
+        if (f.required && (v === null || v === '' || v === false || (f.type === 'number' && !(v > 0)))) {
+          wrap.querySelector('.zk-form-msg').textContent = `${f.label}을(를) 입력해 주세요`; return;
+        }
+        out[f.key] = v;
+      }
+      done(out);
+    };
+    document.body.appendChild(wrap);
+  });
 }
 
 // [재고 확인]: 기존 재고 점검(Count Mode)으로 연결하고 그 품목을 보여 준다. 새 저장 경로를 만들지 않는다.
@@ -5753,10 +5969,11 @@ function _receivingOutcome(res) {
 // 'ordered' 상태만으로는 확인된 주문이 아니다. 서버에 이 기능이 아직 없으면 예전 입고 화면 그대로 둔다.
 let _orderSupply = new Map();     // order_id → get_order_supply 행
 let _openSupply = new Map();      // item_id → get_open_supply 행
+let _orderDelivery = new Map();   // order_id → get_order_delivery 행 (배송 기록이 있는 확인된 주문만)
 let _supplyAvailable = false;
 async function _loadOrderSupply() {
   const ep = _storeEpoch, sid = SID;
-  const next = new Map(), nextOpen = new Map();
+  const next = new Map(), nextOpen = new Map(), nextDel = new Map();
   let ok = false;
   try {
     const [o, s] = await Promise.all([
@@ -5770,20 +5987,29 @@ async function _loadOrderSupply() {
   } catch (e) {
     console.warn('[supply] 주문 공급 상태를 읽지 못했습니다 — 예전 입고 화면으로 둡니다:', e?.message);
   }
-  if (_storeChanged(ep)) return;   // 이전 매장 공급 상태는 새 매장에 쓰지 않는다
+  // 배송 기록은 따로 읽는다: 없는 서버(배송 기록 기능 전)이거나 읽지 못하면 배송 이야기를 하지 않을 뿐, 공급 판단은 그대로
+  if (ok) {
+    try {
+      const d = await db.rpc('get_order_delivery', { p_store_id: sid, p_item_id: null });
+      if (!d?.error) for (const r of d?.data || []) nextDel.set(r.order_id, r);
+    } catch (e) { /* 배송 기록 없음으로 둔다 */ }
+  }
+  if (_storeChanged(ep)) return;   // 이전 매장 공급·배송 상태는 새 매장에 쓰지 않는다
   _orderSupply = ok ? next : new Map();
   _openSupply = ok ? nextOpen : new Map();
+  _orderDelivery = ok ? nextDel : new Map();
   _supplyAvailable = ok;
 }
 function _isVerifiedOrder(orderId) { return !!_orderSupply.get(orderId)?.verified; }
 const _VERIFIED_ORDER_LOCKED_MSG = '확인된 주문은 앱에서 취소·수정할 수 없습니다 (확인된 주문 관리 경로 필요)';
 const _RECEIVE_LOCKED_MSG = '입고는 신뢰된 관리 경로에서만 기록합니다 (앱 입고 비활성)';
 const _fmtQty = v => (v === null || v === undefined) ? '' : String(Number(v));
-// 같은 품목 주문이 여러 건일 때 구분할 최소 정보: 주문 번호(order id)와 주문 시각.
+// 같은 품목 주문이 여러 건일 때 구분할 최소 정보: 앱 안의 주문 기록 번호(order id, 판매처 주문번호가 아니다)와 이 기록을 만든 시각.
+// 이 시각은 발주표에 담은 때일 수 있어 실제 주문 시각이라고 말하지 않는다 ("기록").
 function _orderIdentity(r) {
   const d = r.created_at ? new Date(r.created_at) : null;
-  const when = d && !isNaN(d) ? ` · ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` : '';
-  return `주문 #${r.order_id}${when}`;
+  const when = d && !isNaN(d) ? ` · ${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')} 기록` : '';
+  return `주문 기록 #${r.order_id}${when}`;
 }
 // 품목 공급 상태 한 줄 (상태가 숫자보다 먼저): 모르면 총량을 말하지 않는다.
 function _openSupplyLabel(itemId, unit) {
@@ -5793,7 +6019,7 @@ function _openSupplyLabel(itemId, unit) {
   switch (p.open_supply_state) {
     case 'NONE_CONFIRMED': return '진행 중 주문 없음(확인됨)';
     case 'VERIFIED_OPEN': return `확인된 미입고 ${_fmtQty(p.known_healthy_open_qty)}${u}`;
-    case 'AT_RISK': return `미입고 ${_fmtQty(p.known_healthy_open_qty)}${u} · 도착 위험 ${_fmtQty(p.known_at_risk_open_qty)}${u}`;
+    case 'AT_RISK': return `미입고 ${_fmtQty(p.known_healthy_open_qty)}${u} · 확인 필요 ${_fmtQty(p.known_at_risk_open_qty)}${u}`;
     case 'CONFLICT': return '공급 기록 확인 필요';
     default: return Number(p.known_healthy_open_qty) > 0 || Number(p.known_at_risk_open_qty) > 0
       ? `다른 주문 확인 안 됨 (확인된 것만 ${_fmtQty(Number(p.known_healthy_open_qty) + Number(p.known_at_risk_open_qty))}${u} 이상)`
@@ -5816,7 +6042,7 @@ function _receiveItemHtml(r) {
   switch (sup?.order_state) {
     case 'UNVERIFIED_LEGACY': line = '주문 확인 전 — 공급으로 세지 않음'; break;
     case 'OPEN': case 'PARTIAL':
-      line = `확인된 주문 · 입고 ${_fmtQty(sup.accepted_qty)}/${_fmtQty(sup.ordered_qty)} · 남은 ${_fmtQty(sup.remaining_qty)}${r.unit}${sup.health === 'AT_RISK' ? ' · 도착 위험' : ''}`;
+      line = `확인된 주문 · 입고 ${_fmtQty(sup.accepted_qty)}/${_fmtQty(sup.ordered_qty)} · 남은 ${_fmtQty(sup.remaining_qty)}${r.unit}${sup.health === 'AT_RISK' ? ' · 확인 필요' : ''}`;
       break;
     case 'UNIT_UNRESOLVED': line = '단위가 바뀌어 확인 필요 — 공급으로 세지 않음'; break;
     case undefined: line = '공급 상태 확인 중'; break;
@@ -5844,12 +6070,29 @@ function _authClient() {
   return _authDb;
 }
 let _writerReady = false;                                   // TRUSTED_WRITER_READY — 서버 readiness 응답이 정한다
+let _writerCaps = [];                                       // 서버 writer가 받는 추가 기능 (readiness capabilities)
 let _writerState = { status: 'signed_out', reason: '' };    // signed_out | reauth | not_ready | ready
+// 각 기록이 보낼 수 있는 필드 (Edge 함수의 허용 목록과 같다). 값이 없는 필드는 보내지 않는다 — 모르는 것을 채우지 않는다.
+const _WRITER_FIELDS = {
+  CONFIRM_ORDER: ['order_id', 'supply_source', 'ordered_at', 'external_order_ref'],
+  PARTIAL_RECEIPT: ['order_id', 'received_qty'], FULL_RECEIPT: ['order_id'], CANCEL_ORDER: ['order_id', 'reason'], CONFIRM_COVERAGE: ['item_id', 'confirm'],
+  CREATE_AND_CONFIRM_ORDER: ['item_id', 'ordered_qty', 'unit', 'supply_source', 'confirm', 'ordered_at', 'external_order_ref'],
+  UPDATE_ORDER_DELIVERY: ['order_id', 'observed_at', 'delivery_status', 'is_delayed', 'expected_arrival_at', 'external_order_url'],
+};
+function _writerFields(action, v) {
+  const out = {};
+  for (const k of _WRITER_FIELDS[action] || []) {
+    const x = v[k];
+    if (x === undefined || x === null || (typeof x === 'string' && x.trim() === '')) continue;
+    out[k] = typeof x === 'string' ? x.trim() : x;
+  }
+  return out;
+}
 async function _writerToken() {
   try { const { data } = await _authClient().auth.getSession(); return data?.session?.access_token || null; } catch { return null; }
 }
 async function _refreshWriterReadiness() {
-  _writerReady = false;
+  _writerReady = false; _writerCaps = [];
   const token = await _writerToken();
   if (!token) { _writerState = { status: 'signed_out', reason: '' }; return false; }
   if (!_supplyAvailable) { _writerState = { status: 'not_ready', reason: 'CORE_ABSENT' }; return false; }
@@ -5860,6 +6103,7 @@ async function _refreshWriterReadiness() {
   if (!res.ok) { _writerState = { status: 'not_ready', reason: 'BACKEND_ABSENT' }; return false; }
   try { body = await res.json(); } catch { body = null; }
   _writerReady = !!(body && body.api_version === _WRITER_API && body.ready === true);
+  _writerCaps = _writerReady && Array.isArray(body.capabilities) ? body.capabilities.filter(c => typeof c === 'string') : [];
   _writerState = { status: _writerReady ? 'ready' : 'not_ready', reason: (body && body.reason) || 'UNKNOWN' };
   return _writerReady;
 }
@@ -5871,6 +6115,7 @@ function _writerActionsHtml(r, sup) {
     out.push(b('일부 입고', `_writerPartialReceipt(${r.order_id})`));
     out.push(b(`남은 전량 입고 (${_fmtQty(sup.remaining_qty)}${r.unit})`, `_writerFullReceipt(${r.order_id})`));
     out.push(b('주문 취소', `_writerCancelOrder(${r.order_id})`));
+    if ((_writerCaps || []).includes('UPDATE_ORDER_DELIVERY')) out.push(b('배송 상태', `_agentDeliveryUpdate(${r.order_id})`));
   }
   if (_openSupply.get(r.item_id)?.open_supply_state !== 'NONE_CONFIRMED') out.push(b('다른 진행 주문 없음', `_writerConfirmCoverage(${r.item_id})`));
   return out.length ? `<span class="v4-writer-actions" style="flex-basis:100%;display:flex;gap:6px;flex-wrap:wrap">${out.join('')}</span>` : '';
@@ -5888,6 +6133,13 @@ const _WRITER_MSG = {
   STOCK_UNKNOWN: '현재 재고를 몰라 입고하지 않았습니다 — 먼저 재고를 확인해 주세요 (모름은 0이 아닙니다)',
   IDEMPOTENCY_CONFLICT: '같은 기록 번호로 다른 내용이 와서 거부했습니다 — 아무것도 바뀌지 않았습니다',
   FORBIDDEN: '이 매장의 기록 권한이 없습니다 — 아무것도 바뀌지 않았습니다', NOT_FOUND: '대상을 찾지 못했습니다 — 아무것도 바뀌지 않았습니다',
+  CREATED_AND_CONFIRMED: '실제 주문을 등록했습니다', RECORDED: '배송 상태를 기록했습니다',
+  UNCHANGED: '배송 상태가 그대로라 새로 기록하지 않았습니다',
+  DUPLICATE_EXTERNAL_LINE: '같은 판매처 주문의 같은 품목이 이미 등록돼 있습니다 — 아무것도 바뀌지 않았습니다',
+  INVALID_EVIDENCE: '입력한 주문·배송 정보를 확인해 주세요 — 아무것도 바뀌지 않았습니다',
+  UNIT_MISMATCH: '품목의 재고 단위와 달라 기록하지 않았습니다 — 아무것도 바뀌지 않았습니다',
+  NOT_VERIFIED: '확인된 주문이 아니라 배송 상태를 기록하지 않았습니다 — 아무것도 바뀌지 않았습니다',
+  NOT_OPEN: '취소되었거나 끝난 주문이라 기록하지 않았습니다 — 아무것도 바뀌지 않았습니다',
 };
 function _writerResultMessage(body) {
   const m = _WRITER_MSG[body.code] || `기록하지 않았습니다 (${body.code}) — 아무것도 바뀌지 않았습니다`;
@@ -5934,30 +6186,30 @@ function _renderWriterBar() {
   if (!el) return;
   const p = _loadPendingAction();
   if (!p) { el.style.display = 'none'; el.innerHTML = ''; return; }
-  const what = { CONFIRM_ORDER: '주문 확인', PARTIAL_RECEIPT: `일부 입고 ${p.received_qty ?? ''}`, FULL_RECEIPT: '남은 전량 입고', CANCEL_ORDER: '주문 취소', CONFIRM_COVERAGE: '다른 진행 주문 없음' }[p.action] || p.action;
-  const target = p.order_id ? `주문 #${p.order_id}` : `품목 #${p.item_id}`;
+  const what = { CONFIRM_ORDER: '주문 확인', PARTIAL_RECEIPT: `일부 입고 ${p.received_qty ?? ''}`, FULL_RECEIPT: '남은 전량 입고', CANCEL_ORDER: '주문 취소', CONFIRM_COVERAGE: '다른 진행 주문 없음',
+    CREATE_AND_CONFIRM_ORDER: `실제 주문 등록 ${p.ordered_qty ?? ''}${p.unit ?? ''}`, UPDATE_ORDER_DELIVERY: '배송 상태 기록' }[p.action] || p.action;
+  const target = p.order_id ? `주문 기록 #${p.order_id}` : `품목 #${p.item_id}`;
   el.style.display = 'block';
   el.innerHTML = `<div class="card" style="border:1px solid var(--accent);font-size:13px">결과 확인 중인 기록: ${target} ${what}
     ${p.state === 'REAUTH' ? ' — 다시 로그인 필요' : p.state === 'FORBIDDEN' ? ' — 권한 없음' : ''}
     <button class="v4-receive-btn" style="margin-left:8px" onclick="_deliverPendingAction()">다시 확인</button></div>`;
 }
 async function _writerConfirmOrder(orderId) {
-  if (!confirm(`주문 #${orderId}를 실제로 주문된 것으로 확인할까요?`)) return;
-  await _writerAct('CONFIRM_ORDER', { order_id: orderId });
+  await _confirmActualOrder(orderId, '');
 }
 async function _writerPartialReceipt(orderId) {
-  const v = prompt(`주문 #${orderId}: 지금 들어온 수량`);
+  const v = prompt(`주문 기록 #${orderId}: 지금 들어온 수량`);
   if (v === null) return;
   const q = Number(String(v).trim());
   if (!Number.isFinite(q) || q <= 0) { showToast('0보다 큰 수량을 입력해 주세요 — 아무것도 바뀌지 않았습니다', 3000); return; }
   await _writerAct('PARTIAL_RECEIPT', { order_id: orderId, received_qty: q });
 }
 async function _writerFullReceipt(orderId) {
-  if (!confirm(`주문 #${orderId}의 남은 수량이 모두 들어왔나요?`)) return;
+  if (!confirm(`주문 기록 #${orderId}의 남은 수량이 모두 들어왔나요?`)) return;
   await _writerAct('FULL_RECEIPT', { order_id: orderId });
 }
 async function _writerCancelOrder(orderId) {
-  const reason = prompt(`주문 #${orderId} 취소 이유`);
+  const reason = prompt(`주문 기록 #${orderId} 취소 이유`);
   if (reason === null) return;
   if (!reason.trim()) { showToast('취소 이유를 적어 주세요 — 아무것도 바뀌지 않았습니다', 3000); return; }
   await _writerAct('CANCEL_ORDER', { order_id: orderId, reason: reason.trim().slice(0, 200) });

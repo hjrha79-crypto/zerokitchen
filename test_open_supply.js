@@ -94,7 +94,7 @@ const writes = e => e.calls.filter(c => c.write);
   for (const [state, extra, expect] of [
     ['NONE_CONFIRMED', { known_healthy_open_qty: 0, total_open_qty: 0 }, '진행 중 주문 없음(확인됨)'],
     ['VERIFIED_OPEN', { known_healthy_open_qty: 6, total_open_qty: 6 }, '확인된 미입고 6박스'],
-    ['AT_RISK', { known_healthy_open_qty: 2, known_at_risk_open_qty: 4, total_open_qty: 6 }, '미입고 2박스 · 도착 위험 4박스'],
+    ['AT_RISK', { known_healthy_open_qty: 2, known_at_risk_open_qty: 4, total_open_qty: 6 }, '미입고 2박스 · 확인 필요 4박스'],
     ['UNKNOWN', { known_healthy_open_qty: 6, known_at_risk_open_qty: 0, total_open_qty: null }, '다른 주문 확인 안 됨 (확인된 것만 6박스 이상)'],
     ['CONFLICT', { known_healthy_open_qty: 6, total_open_qty: null }, '공급 기록 확인 필요'],
   ]) {
@@ -113,7 +113,7 @@ const writes = e => e.calls.filter(c => c.write);
     await e.f._loadOrderSupply();
     const h = e.row(1);
     check(`AUTH-07 server WITH the feature, ${s.order_state} row → read only (no button at all), says receiving is the trusted path's`,
-      !h.includes('onclick') && h.includes('입고는 신뢰된 관리 경로에서만 기록합니다') && /주문 #1 · /.test(h), h);
+      !h.includes('onclick') && h.includes('입고는 신뢰된 관리 경로에서만 기록합니다') && /주문 기록 #1 · /.test(h), h);
   }
   { const e = makeEnv({ orderSupply: [sup({ order_state: 'PARTIAL', accepted_qty: 4, remaining_qty: 6 })] });
     await e.f._loadOrderSupply();

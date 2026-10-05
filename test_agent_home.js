@@ -22,9 +22,9 @@ const constLine = n => { const m = new RegExp(`const ${n} = [^\\n]+`).exec(HTML)
 let pass = 0, fail = 0;
 function check(name, ok, detail = '') { if (ok) pass++; else fail++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? '  — ' + String(detail).slice(0, 400) : ''}`); }
 
-const FNS = ['_orderNeedOf', '_admittedNeedOf', '_draftAge', '_renderOrderNeed', '_renderTableRow', 'deriveAgentActions', '_agentContext', '_agentCardHtml', '_renderAgentHome', '_loadAgentCycle',
+const FNS = ['_orderNeedOf', '_admittedNeedOf', '_draftAge', '_renderOrderNeed', '_renderTableRow', '_agentOrderSupplier', '_fmtKst', '_agentDeliveryLine', '_safeOrderUrl', 'deriveAgentActions', '_agentContext', '_agentCardHtml', '_renderAgentHome', '_loadAgentCycle',
   '_agentPrepareOrder', '_agentShowOrderSheet', '_agentShowOrder', '_agentCountItem', '_agentGoLogin', '_agentFocus', '_insertOrderIfNotDup', '_clearStoreContext', '_storeChanged'];
-const CODE = ['AGENT_PRIORITY', 'AGENT_MAX_CHECKS', '_AGENT_SOURCE_LABEL', '_agentEsc', '_agentNum'].map(constLine).join('\n') + '\n' + FNS.map(extractFn).join('\n');
+const CODE = ['AGENT_PRIORITY', 'AGENT_MAX_CHECKS', '_AGENT_SOURCE_LABEL', '_DELIVERY_LABEL', '_agentEsc', '_agentNum'].map(constLine).join('\n') + '\n' + FNS.map(extractFn).join('\n');
 
 // item helpers: trusted = an explicit stock check stands behind the number (see _admittedNeedOf)
 const I = (id, name, cur, target, unit = '개', extra = {}) => ({ item_id: id, item_name: name, current_qty: cur, target_qty: target, unit, ...extra });
@@ -63,7 +63,7 @@ function makeEnv(o = {}) {
   const body = `let SID = __S.SID, _storeEpoch = 0, _items = __S._items, _itemTrust = __S._itemTrust, _orderRequests = __S._orderRequests,
       _orderSupply = __S._orderSupply, _openSupply = __S._openSupply, _supplyAvailable = __S._supplyAvailable, _writerReady = __S._writerReady,
       _vendors = __S._vendors, _countMode = false, _countedIds = new Set(), _homeTableCollapsed = false, _agentCycle = new Map(),
-      _dismissedItemIds = new Set(), _orderedItemIds = new Set(), _storeAliases = [], _draftItems = [], _pendingComplexItems = null;
+      _dismissedItemIds = new Set(), _orderedItemIds = new Set(), _storeAliases = [], _draftItems = [], _pendingComplexItems = null, _orderDelivery = new Map(), _writerCaps = [];
     ${CODE}
     return { ${FNS.join(', ')},
       set(k, v) { eval(k + ' = v'); }, get(k) { return eval(k); } };`;
@@ -82,10 +82,10 @@ const ofItem = (r, id) => [...r.primary, ...r.moreChecks, ...r.waiting].filter(a
     const e = makeEnv({ items: [I(1, '우유', 1, 3, '박스')], trusted: [1], openSupply: { 1: { open_supply_state: 'NONE_CONFIRMED' } } });
     const r = e.derive(), a = r.primary[0];
     check('CASE-01 우유 1/3, no open order → "우유 2박스 주문하세요" [주문 준비]', r.primary.length === 1 && a.type === 'ORDER_NOW' && a.title === '우유 2박스 주문하세요'
-      && a.primary_action.label === '주문 준비' && a.required_qty === 2 && /현재 1박스 · 목표 3박스 · 주문 중 없음/.test(a.reason), JSON.stringify(a));
+      && a.primary_action.label === '주문 준비' && a.required_qty === 2 && /현재 1박스 · 목표 3박스 · 현재 확인된 주문 없음 · 진행 중인 주문이 없다고 확인됨/.test(a.reason), JSON.stringify(a));
     const u = makeEnv({ items: [I(1, '우유', 1, 3, '박스')], trusted: [1], openSupply: { 1: { open_supply_state: 'UNKNOWN', known_healthy_open_qty: 0 } } }).derive().primary[0];
-    check('CASE-01b other orders not confirmed → conservative wording (필요해요 + 이미 시켰다면 추가 주문하지 마세요)', u.type === 'ORDER_NOW' && u.title === '우유 2박스 주문이 필요해요'
-      && u.reason.includes('이미 시켰다면 추가 주문하지 마세요'), JSON.stringify(u));
+    check('CASE-01b other orders not confirmed → conservative wording (필요해요 + 현재 확인된 주문 없음; never "없다고 확인됨", never hands the question back)', u.type === 'ORDER_NOW' && u.title === '우유 2박스 주문이 필요해요'
+      && u.reason.includes('현재 확인된 주문 없음') && !/없다고 확인됨|이미 시켰다면/.test(u.reason), JSON.stringify(u));
   }
   // ── CASE-02 / CONTRA-03  verified open remaining 2 covers the need → no ORDER_NOW, "추가 주문하지 마세요"
   const OPEN2 = { items: [I(1, '우유', 1, 3, '박스')], trusted: [1], orders: [{ id: 11, store_id: 1, item_id: 1, item_name: '우유', qty: 2, unit: '박스', status: 'ordered', vendor_id: 7 }],
@@ -93,8 +93,8 @@ const ofItem = (r, id) => [...r.primary, ...r.moreChecks, ...r.waiting].filter(a
     openSupply: { 1: { open_supply_state: 'VERIFIED_OPEN', known_healthy_open_qty: 2 } } };
   {
     const e = makeEnv(OPEN2); const r = e.derive(); const mine = ofItem(r, 1); const html = e.render();
-    check('CASE-02 open 2 covers need 2 → one card, not ORDER_NOW, says 추가 주문하지 마세요 + 쿠팡 · 남은 2박스', mine.length === 1 && mine[0].type === 'WAIT_EXISTING_ORDER'
-      && mine[0].title === '우유 2박스 입고 대기' && mine[0].reason.includes('추가 주문하지 마세요') && mine[0].reason.includes('쿠팡') && !r.primary.some(a => a.type === 'ORDER_NOW'), JSON.stringify(mine));
+    check('CASE-02 open 2 covers need 2 → one card, not ORDER_NOW, "우유 추가 주문하지 마세요" + 쿠팡 · 2박스 주문 확인됨', mine.length === 1 && mine[0].type === 'WAIT_EXISTING_ORDER'
+      && mine[0].title === '우유 추가 주문하지 마세요' && mine[0].reason.includes('쿠팡에서 2박스 주문 중이라 추가 주문하지 않아도 돼요') && mine[0].orders[0].line === '쿠팡 · 2박스 주문 확인됨' && !r.primary.some(a => a.type === 'ORDER_NOW'), JSON.stringify(mine));
     const txt = e.text(html);
     check('CONTRA-03 covered by open supply → no "주문하세요/주문 준비" anywhere; "추가 주문" only as "추가 주문하지 마세요"',
       !/주문하세요|주문이 필요해요|주문 준비/.test(txt) && (txt.match(/추가 주문/g) || []).length === (txt.match(/추가 주문하지/g) || []).length, txt);
@@ -118,7 +118,7 @@ const ofItem = (r, id) => [...r.primary, ...r.moreChecks, ...r.waiting].filter(a
     const e = makeEnv({ items: [I(3, '토마토', 4, 6)], trusted: [3], orders: [{ id: 31, store_id: 1, item_id: 3, item_name: '토마토', qty: 5, unit: '개', status: 'ordered' }],
       orderSupply: { 31: { order_state: 'PARTIAL', ordered_qty: 5, accepted_qty: 3, remaining_qty: 2, health: 'HEALTHY' } }, openSupply: { 3: { open_supply_state: 'VERIFIED_OPEN' } } });
     const a = ofItem(e.derive(), 3);
-    check('CASE-04 partial 5/3 → "토마토 2개 입고 대기", 주문 5개 중 3개 받음', a.length === 1 && a[0].title === '토마토 2개 입고 대기' && a[0].reason.includes('주문 5개 중 3개 받음'), JSON.stringify(a));
+    check('CASE-04 partial 5/3 → "토마토 2개 입고 대기", 주문 5개 중 3개 받음', a.length === 1 && a[0].title === '토마토 2개 입고 대기' && a[0].orders[0].line.includes('주문 5개 중 3개 받음 · 2개 남음'), JSON.stringify(a));
   }
   // ── CASE-05  nothing to do
   {
@@ -207,7 +207,7 @@ const ofItem = (r, id) => [...r.primary, ...r.moreChecks, ...r.waiting].filter(a
   {
     const e = makeEnv({ ...OPEN2, orders: [...OPEN2.orders, draft(74, 1, '우유', 2, '박스', '2026-09-01T01:00:00Z')] });
     const r = deriveAt(e);
-    check('DRAFT-06 / CONTRA-DRAFT-04 verified open covers need, draft present → 추가 주문 0 (입고 대기 card only)', orderFor(r, 1).length === 0 && ofItem(r, 1).length === 1 && ofItem(r, 1)[0].title === '우유 2박스 입고 대기'
+    check('DRAFT-06 / CONTRA-DRAFT-04 verified open covers need, draft present → 추가 주문 0 (입고 대기 card only)', orderFor(r, 1).length === 0 && ofItem(r, 1).length === 1 && ofItem(r, 1)[0].title === '우유 추가 주문하지 마세요'
       && !/주문하세요|주문이 필요해요|주문 준비/.test(e.text(e.render()).replace('발주표에 지금 주문할 필요가', '')), JSON.stringify(ofItem(r, 1)));
   }
   // DRAFT-07  need 3, verified open 1, draft 3 → uncovered 2; draft does not override; no qty rewrite
@@ -251,10 +251,10 @@ const ofItem = (r, id) => [...r.primary, ...r.moreChecks, ...r.waiting].filter(a
     const ids = [...html.matchAll(/data-agent-iid="(\d+)"/g)].map(m => m[1]);
     check('ONE-DECISION every item at most one card on Home', ids.length === new Set(ids).size && ids.length === 6, ids.join(','));
     // critical first (late order, conflicting records; among them the base order), then 입고 → 주문 (bigger shortage ratio first) → 재고 확인
-    check('PRIORITY critical (늦어지고 있어요, 주문 기록 다름) → 입고 → 주문 → 재고 확인', r.primary.map(a => `${a.item_id}:${a.type}`).join(' ') ===
+    check('PRIORITY critical (확인이 필요한 주문, 주문 기록 다름) → 입고 → 주문 → 재고 확인', r.primary.map(a => `${a.item_id}:${a.type}`).join(' ') ===
       '6:RECEIVE_PENDING 8:WAIT_EXISTING_ORDER 3:RECEIVE_PENDING 1:ORDER_NOW 2:ORDER_NOW 4:CHECK_STOCK', r.primary.map(a => `${a.item_id}:${a.type}:${a.critical}`).join(' '));
     const at = r.primary.find(a => a.item_id === 6), cf = r.primary.find(a => a.item_id === 8);
-    check('AT_RISK / CONFLICT in owner words (늦어지고 있어요 / 기록이 서로 달라 확인이 필요해요), no order advice', at.reason.includes('늦어지고 있어요') && cf.title === '버터 주문 기록을 확인해 주세요'
+    check('AT_RISK / CONFLICT in owner words (이 주문은 확인이 필요해요 — not a delay claim / 기록이 서로 달라 확인이 필요해요), no order advice', at.reason.includes('이 주문은 확인이 필요해요') && !/늦어|지연/.test(at.reason) && cf.title === '버터 주문 기록을 확인해 주세요'
       && cf.reason.includes('기록이 서로 달라 확인이 필요해요') && !r.primary.some(a => a.type === 'ORDER_NOW' && [6, 8].includes(a.item_id)), JSON.stringify({ at, cf }));
     const vis = e.text(html);
     const leaked = ['VERIFIED_OPEN', 'AT_RISK', 'CONFLICT', 'UNKNOWN', 'NEEDS_VERIFICATION', 'NONE_CONFIRMED', 'Trusted', 'trusted', 'Operational', 'ORDER_NOW', 'CHECK_STOCK', 'RECEIVE_PENDING', '기록 재고', 'intent', 'mutation'].filter(w => vis.includes(w));

@@ -30,7 +30,7 @@ const asExpr = (src, name) => '(' + src.replace(new RegExp('^(async )?function '
 const constLine = name => (new RegExp(`const ${name} = [^\\n]+`).exec(HTML) || [''])[0];
 const FNS = ['_authClient', '_writerToken', '_refreshWriterReadiness', '_writerActionsHtml', '_loadPendingAction', '_savePendingAction', '_writerResultMessage',
   '_newActionId', '_writerAct', '_deliverPendingAction', '_renderWriterBar', '_writerConfirmOrder', '_writerPartialReceipt', '_writerFullReceipt', '_writerCancelOrder',
-  '_writerConfirmCoverage', '_receiveItemHtml', '_openSupplyLabel', '_orderIdentity', '_renderWriterAuthCard', '_writerSignOut'];
+  '_writerConfirmCoverage', '_receiveItemHtml', '_openSupplyLabel', '_orderIdentity', '_renderWriterAuthCard', '_writerSignOut', '_confirmActualOrder', '_writerFields'];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 let pass = 0, fail = 0;
@@ -68,7 +68,8 @@ function makeEnv({ session = 'jwt-op', supply = true, readiness = { status: 200,
   for (const c of ['_RECEIVE_LOCKED_MSG', '_fmtQty', '_WRITER_API', '_WRITER_URL', '_WRITER_PENDING_KEY']) eval(constLine(c).replace('const ', 'var '));
   eval(extractConstBlock('_WRITER_MSG').replace('const ', 'var '));
   // eslint-disable-next-line no-unused-vars
-  var _authDb = null, _writerReady = false, _writerState = { status: 'signed_out', reason: '' };
+  var _authDb = null, _writerReady = false, _writerState = { status: 'signed_out', reason: '' }, _writerCaps = [];
+  eval(extractConstBlock('_WRITER_FIELDS').replace('const ', 'var '));
   const f = {};
   for (let k = 0; k < 2; k++) {
     for (const n of FNS) f[n] = eval(asExpr(extractFn(n), n));
@@ -76,7 +77,7 @@ function makeEnv({ session = 'jwt-op', supply = true, readiness = { status: 200,
     var _authClient = f._authClient, _writerToken = f._writerToken, _refreshWriterReadiness = f._refreshWriterReadiness, _writerActionsHtml = f._writerActionsHtml,
       _loadPendingAction = f._loadPendingAction, _savePendingAction = f._savePendingAction, _writerResultMessage = f._writerResultMessage, _newActionId = f._newActionId,
       _writerAct = f._writerAct, _deliverPendingAction = f._deliverPendingAction, _renderWriterBar = f._renderWriterBar, _openSupplyLabel = f._openSupplyLabel,
-      _orderIdentity = f._orderIdentity, _renderWriterAuthCard = f._renderWriterAuthCard;
+      _orderIdentity = f._orderIdentity, _renderWriterAuthCard = f._renderWriterAuthCard, _confirmActualOrder = f._confirmActualOrder, _writerFields = f._writerFields;
   }
   void fetch; void db; void localStorage; void document; void showToast; void confirm; void prompt; void _renderOrderKeepScroll; void SUPABASE_KEY; void createClient;
   return { f, fetchCalls, rpcCalls, toasts, store, renders, bar, authBody, createClient,
