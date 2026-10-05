@@ -22,9 +22,9 @@ let pass = 0, fail = 0;
 function check(name, ok, detail = '') { if (ok) pass++; else fail++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? '  — ' + String(detail).slice(0, 300) : ''}`); }
 
 const READ_REQ = new Set(['inventory_read', 'order_generate', 'stock_check_read']);
-const CLASSIFIER = ['_ZERO_HALF_RE', '_HAS_ACTION_RE', '_INTERROGATIVE_RE', '_QUESTION_END_RE', '_READ_ONLY_CMDS'].map(constLine).join('\n')
+const CLASSIFIER = ['_ZERO_HALF_RE', '_HAS_ACTION_RE', '_INTERROGATIVE_RE', '_QUESTION_END_RE', '_READ_ONLY_CMDS', '_trailingQryRe', '_MIX_ACTION_TOKEN_RE'].map(constLine).join('\n')
   + '\nlet _numUnitRe = null;\n' + /const _NUM_WORDS = \{[\s\S]*?\};/.exec(HTML)[0] + '\n' + constLine('_UNITS') + '\n'
-  + ['_hasExplicitQty', 'detectCommand', '_inputIntentOf'].map(extractFn).join('\n');
+  + ['_hasExplicitQty', 'detectCommand', '_inputIntentOf', '_splitMixedQuery'].map(extractFn).join('\n');
 
 function makeEnv() {
   const S = { ruleEngine: [], parseWithClaude: [], complex: [], requests: [], dbWrites: [], results: [], toasts: [], focus: 0 };

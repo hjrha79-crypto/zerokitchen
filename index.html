@@ -1606,6 +1606,27 @@ function _inputIntentOf(raw) {
   return null;
 }
 
+// 혼합 입력 분리: "치즈 3봉 입고 우유 재고 얼마야" → 기록 "치즈 3봉 입고" + 조회 "우유 재고 얼마야".
+// 뒤쪽 재고 질문(어미 포함: 얼마야·몇 개야·얼마나 남았어·있어 …)은 절대 기록 파서로 보내지 않는다.
+const _trailingQryRe = /^(.+?)\s*((?:재고\s*(?:얼마나?|몇|확인|알려|뭐|봐|보여)\s*(?:개|봉지?|박스|팩|캔|통|병|kg|g|장|묶음|롤|판|다발|단)?\s*(?:남았|남아|있)?|(?:몇\s*(?:개|봉지?|박스|팩|캔|통|병|kg|g|장|묶음|롤|판|다발|단)?|얼마나?)\s*(?:남았|남아|있))\s*(?:어요|어|야|요|이야|예요|에요|나요|나|니|는지|지|냐|해\s*줘|해|줘요|줘)?)[\s?？.!~]*$/;
+const _MIX_ACTION_TOKEN_RE = /^(?:추가|입고|넣어|넣고|넣기|넣었어|넣었고|빼기|빼고|차감|사용|받았어|받았고|들어왔어|들어왔고|썼어|썼고|뺐어|버렸어?|꺼냈어?)(?:해줘|하고|했고|했어|해|고|서)?$/;
+// 앞부분이 분명한 기록(수량 포함)이고, 그 뒤가 "품목명 + 재고 질문"일 때만 나눈다. 아니면 null (기존 처리).
+function _splitMixedQuery(raw) {
+  const m = _trailingQryRe.exec(String(raw || '').trim());
+  if (!m) return null;
+  const toks = m[1].trim().split(/\s+/);
+  for (let i = toks.length - 1; i >= 1; i--) {
+    const action = toks.slice(0, i).join(' '), name = toks.slice(i).join(' ');
+    const last = toks[i - 1], lastTwo = toks.slice(Math.max(0, i - 2), i).join(' ');
+    // 경계: 동작어로 끝나거나, 수량(숫자 / "세 개"처럼 수 단어+단위)으로 끝나는 지점
+    const boundary = _MIX_ACTION_TOKEN_RE.test(last) || /\d/.test(last) || (_hasExplicitQty(lastTwo) && _UNITS.some(u => last.endsWith(u)));
+    if (!boundary || !_hasExplicitQty(action)) continue;
+    if (_hasExplicitQty(name) || _HAS_ACTION_RE.test(name)) continue;
+    return { action, query: `${name} ${m[2]}`.trim(), name: name.replace(/(?:은|는|이|가|도)$/, '') };
+  }
+  return null;
+}
+
 function detectCommand(text) {
   const s = text.trim();
 
@@ -1828,6 +1849,19 @@ async function handleNaturalInput() {
 
     console.log('[NL] 일반 처리 진입:', raw, '| _pendingComplexItems:', _pendingComplexItems, '| _complexQtyState:', !!_complexQtyState);
 
+    // 혼합 입력: 뒤쪽 재고 질문은 그 품목을 조회만 하고, 앞쪽 기록 부분만 아래 처리로 보낸다
+    const _mixed = _splitMixedQuery(raw);
+    if (_mixed) {
+      const hit = _items.find(x => x.item_name === _mixed.name || x.item_name.replace(/\s/g, '') === _mixed.name.replace(/\s/g, ''));
+      if (hit) {
+        const r = await processRequest({ request_type: 'inventory_read', filter: 'specific', names: [hit.item_name] });
+        addResult(_mixed.query, formatResult(r), r.status === 'success' ? 'ok' : 'warn');
+      } else {
+        addResult(_mixed.query, `"${_mixed.name}" 품목을 찾지 못했어요 — 재고는 바꾸지 않았습니다.`, 'warn');
+      }
+      inp.value = raw = _mixed.action;
+    }
+
     // 질문·불분명한 입력은 재고를 바꾸지 않는다 (텍스트·음성 공통 — 음성도 이 함수로 들어온다).
     const _intent = _inputIntentOf(raw);
     if (_intent === 'QUESTION') {
@@ -1982,32 +2016,6 @@ async function handleNaturalInput() {
         if (document.getElementById('tab-input').classList.contains('active')) renderOrder();
       }
       return;
-    }
-
-    // 0.5차: 혼합 입력 분리 (예: "치즈 3봉 입고 토마토소스 재고 얼마야")
-    // 동작어(입고/사용 등) 뒤에 재고 조회 패턴이 붙은 경우 분리 처리
-    const _actionSplitRe = /(?:추가|입고|넣어|넣기|넣었어|빼기|빼줘|차감|사용|받았어|들어왔어|썼어|뺐어|버렸|꺼냈)(?:해줘|하고|해|고|서)?\s+/;
-    const _trailingQryRe = /(.+?)\s*(?:재고\s*(?:얼마|몇|확인|알려줘?|뭐야|봐줘?)|몇\s*(?:개|봉지?|박스|팩|캔|통|병|kg|g|장|묶음|롤|판|다발|단)?\s*(?:남았|있어|남아)|얼마나?\s*(?:남았|있어|남아))[\s?？]*$/;
-    if (_actionSplitRe.test(raw) && _trailingQryRe.test(raw)) {
-      const splitMatch = raw.match(_actionSplitRe);
-      if (splitMatch) {
-        const splitPos = splitMatch.index + splitMatch[0].length;
-        const restAfterAction = raw.slice(splitPos).trim();
-        // restAfterAction가 재고 조회 패턴이면 분리
-        if (_trailingQryRe.test(restAfterAction) || /재고|얼마|남았|있어/.test(restAfterAction)) {
-          const actionPart = raw.slice(0, splitPos).trim();
-          const queryPart = restAfterAction;
-          // 재고 조회 부분 처리
-          const qryCmd = detectCommand(queryPart);
-          if (qryCmd) {
-            const qryResult = await processRequest(qryCmd);
-            addResult(queryPart, formatResult(qryResult), qryResult.status === 'success' ? 'ok' : 'warn');
-          }
-          // 동작 부분은 아래 rule engine으로 계속 처리
-          inp.value = actionPart;
-          raw = actionPart;
-        }
-      }
     }
 
     // 1차: Rule Engine (빠름, 비용 없음)
