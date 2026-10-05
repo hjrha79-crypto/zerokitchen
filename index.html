@@ -4120,10 +4120,25 @@ const _AGENT_SOURCE_LABEL = { COUPANG: '쿠팡', SIKBOM: '식봄' };
 const _agentEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const _agentNum = v => String(Number(Number(v).toFixed(3)));
 
-// ctx: { storeId, items, needOf, orderRequests, orderSupply, openSupply, supplyAvailable, writerReady, cycle, vendors }
-// → { storeId, primary, moreChecks, waiting } — 품목 하나에 결정 하나.
+// 발주표 항목을 담은 때 (한국 날짜 기준): 오늘 / 어제 / N일 전 / 날짜. 만료 정책이 아니라 보여 주기만 한다.
+function _draftAge(createdAt, now = new Date()) {
+  const d = createdAt ? new Date(createdAt) : null;
+  if (!d || isNaN(d)) return { days: null, label: '담은 날짜 모름' };
+  const kst = x => { const p = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(x); return { s: p, y: +p.slice(0, 4), m: +p.slice(5, 7), dd: +p.slice(8, 10) }; };
+  const a = kst(d), b = kst(now);
+  const days = Math.round((Date.UTC(b.y, b.m - 1, b.dd) - Date.UTC(a.y, a.m - 1, a.dd)) / 86400000);
+  const label = days <= 0 ? '오늘 담음' : days === 1 ? '어제 담음' : days <= 30 ? `${days}일 전 담음`
+    : a.y === b.y ? `${a.m}월 ${a.dd}일에 담음` : `${a.y}년 ${a.m}월 ${a.dd}일에 담음`;
+  return { days, label };
+}
+
+// ctx: { storeId, items, needOf, orderRequests, orderSupply, openSupply, supplyAvailable, writerReady, cycle, vendors, now }
+// → { storeId, primary, moreChecks, waiting, drafts } — 품목 하나에 결정 하나.
+// 발주표(pending order_requests) = 예전에 담아 둔 주문 후보(draft)일 뿐이다: 현재 주문 필요를 만들지도, 바꾸지도,
+// 확인된 주문처럼 빼지도 않는다. 현재 필요가 있는 품목에서만 "발주표에 담겨 있음"으로 연결(handoff)한다.
 function deriveAgentActions(ctx) {
   const out = [];
+  const now = ctx.now || new Date();
   const reqs = (ctx.orderRequests || []).filter(r => Number(r.qty) > 0);
   const known = new Set();
   const vendorName = id => (ctx.vendors || []).find(v => v.vendor_id === id)?.vendor_name || '';
@@ -4132,6 +4147,14 @@ function deriveAgentActions(ctx) {
     const u = unit || '';
     const mine = reqs.filter(r => r.item_id === id);
     const pending = mine.find(r => r.status === 'pending');
+    // 현재 필요량(needQty, 현재 판정)과 발주표 수량이 다르면 숨기지 않고 보여 준다. 발주표 수량은 고치지 않는다.
+    const draftLine = needQty => {
+      if (!pending) return '';
+      const pq = Number(pending.qty), pu = pending.unit || u, age = _draftAge(pending.created_at, now).label;
+      return Math.abs(pq - needQty) < 1e-9
+        ? ` · 발주표에 ${_agentNum(pq)}${pu} 담겨 있어요 (${age})`
+        : ` · 발주표에는 ${_agentNum(pq)}${pu}가 담겨 있어요 (${age}) — 지금 필요한 양은 ${_agentNum(needQty)}${u}예요, 보내기 전에 발주표 수량을 확인하세요`;
+    };
     const ordered = mine.filter(r => r.status === 'ordered');
     const supOf = r => ctx.supplyAvailable ? ctx.orderSupply.get(r.id) : null;
     const open = ordered.map(r => ({ r, sup: supOf(r) })).filter(x => x.sup && (x.sup.order_state === 'OPEN' || x.sup.order_state === 'PARTIAL'));
@@ -4160,7 +4183,7 @@ function deriveAgentActions(ctx) {
         const q = Number((need.qty - rem).toFixed(10));
         return act('ORDER_NOW', { todo: true, required_qty: q, open_supply_remaining: rem, supplier: src,
           title: `${name} ${_agentNum(q)}${u} 더 주문하세요`,
-          reason: `현재 ${_agentNum(need.current)}${u} · 목표 ${_agentNum(need.target)}${u} · 이미 ${_agentNum(rem)}${u} 주문 중`,
+          reason: `현재 ${_agentNum(need.current)}${u} · 목표 ${_agentNum(need.target)}${u} · 이미 ${_agentNum(rem)}${u} 주문 중` + draftLine(q),
           primary_action: pending ? { label: '발주표 보기', call: `_agentShowOrderSheet(${id})` } : { label: '주문 준비', call: `_agentPrepareOrder(${id})` } });
       }
       const one = open.length === 1 ? open[0] : null;
@@ -4190,7 +4213,7 @@ function deriveAgentActions(ctx) {
         ? `현재 수량을 몰라 주문 판단을 미뤘어요 (목표 ${_agentNum(need.target)}${u})`
         : `최근 수량이 확실하지 않아 주문 판단을 미뤘어요 (앱에 적힌 수량 ${_agentNum(need.recorded)}${u} · 목표 ${_agentNum(need.target)}${u})`];
       if (cycle) why.push('평소 주문 주기가 됐어요');
-      if (pending) why.push(`발주표에 ${_agentNum(pending.qty)}${pending.unit || u} 담겨 있어요 — 주문 전에 확인하세요`);
+      if (pending) why.push(`발주표에 ${_agentNum(pending.qty)}${pending.unit || u} 담겨 있어요 (${_draftAge(pending.created_at, now).label}) — 주문 전에 확인하세요`);
       const rec = need.state === 'UNKNOWN' ? null : Number(need.recorded);
       const score = (pending ? 4 : 0) + (cycle ? 3 : 0) + (rec !== null && rec <= 0 ? 2 : 0) + (rec === null || rec < need.target ? 1 : 0);
       return act('CHECK_STOCK', { todo: true, title: `${name} 현재 수량을 확인하세요`, reason: why.join(' · '),
@@ -4200,21 +4223,21 @@ function deriveAgentActions(ctx) {
     if (need.state === 'NEEDED') {
       const sure = ctx.supplyAvailable && proj?.open_supply_state === 'NONE_CONFIRMED';
       const why = `현재 ${_agentNum(need.current)}${u} · 목표 ${_agentNum(need.target)}${u}` +
-        (sure ? ' · 주문 중 없음' : ' · 다른 주문은 확인되지 않았어요 — 이미 시켰다면 추가 주문하지 마세요') +
-        (pending ? ` · 발주표에 ${_agentNum(pending.qty)}${pending.unit || u} 담겨 있어요` : '');
+        (sure ? ' · 주문 중 없음' : ' · 다른 주문은 확인되지 않았어요 — 이미 시켰다면 추가 주문하지 마세요') + draftLine(need.qty);
       return act('ORDER_NOW', { todo: true, required_qty: need.qty, open_supply_remaining: 0,
         title: sure ? `${name} ${_agentNum(need.qty)}${u} 주문하세요` : `${name} ${_agentNum(need.qty)}${u} 주문이 필요해요`, reason: why,
         _rank: [-(need.qty / need.target), name],
         primary_action: pending ? { label: '발주표 보기', call: `_agentShowOrderSheet(${id})` } : { label: '주문 준비', call: `_agentPrepareOrder(${id})` } });
     }
-    // 6) 발주표에 담아 둔 품목: 아직 보내지 않은 주문이다 (홈과 발주표가 서로 다른 말을 하지 않게)
-    if (pending) {
-      return act('ORDER_NOW', { todo: true, required_qty: Number(pending.qty), title: `${name} ${_agentNum(pending.qty)}${pending.unit || u} 주문하세요`,
-        reason: '발주표에 담아 둔 품목이에요', _rank: [1, name], primary_action: { label: '발주표 보기', call: `_agentShowOrderSheet(${id})` } });
-    }
+    // 6) 현재 주문 필요가 없으면 발주표에 담겨 있다는 것만으로는 아무 행동도 만들지 않는다 (아래 발주표 안내로만)
   };
   for (const it of ctx.items || []) decide(it.item_id, it.item_name, it.unit, it);
   for (const r of reqs) if (!known.has(r.item_id)) decide(r.item_id, r.item_name, r.unit, null);
+  // 현재 주문 필요(ORDER_NOW)에 연결되지 않은 발주표 항목: 오래된 순. "주문하세요"가 아니라 확인용 안내다.
+  const ordering = new Set(out.filter(a => a.type === 'ORDER_NOW').map(a => a.item_id));
+  const drafts = reqs.filter(r => r.status === 'pending' && !ordering.has(r.item_id))
+    .map(r => ({ item_id: r.item_id, name: r.item_name, qty: Number(r.qty), unit: r.unit || '', created_at: r.created_at || null, age: _draftAge(r.created_at, now) }))
+    .sort((a, b) => (b.age.days ?? -1) - (a.age.days ?? -1));
 
   const cmp = (a, b) => {
     if (a.critical !== b.critical) return a.critical ? -1 : 1;
@@ -4232,7 +4255,7 @@ function deriveAgentActions(ctx) {
   const primary = out.filter(a => a.todo && (a.type !== 'CHECK_STOCK' || shownChecks.has(a)));
   const moreChecks = checks.filter(a => !shownChecks.has(a));
   const waiting = out.filter(a => !a.todo);
-  return { storeId: ctx.storeId, primary, moreChecks, waiting };
+  return { storeId: ctx.storeId, primary, moreChecks, waiting, drafts };
 }
 
 function _agentContext() {
@@ -4253,7 +4276,7 @@ function _renderAgentHome() {
   const el = document.getElementById('agentHome');
   if (!el) return;
   if (!(_items || []).length && !(_orderRequests || []).length) { el.innerHTML = ''; return; }
-  const { primary, moreChecks, waiting } = deriveAgentActions(_agentContext());
+  const { primary, moreChecks, waiting, drafts } = deriveAgentActions(_agentContext());
   let html = `<div class="agent-home">`;
   html += primary.length
     ? `<div class="agent-sum">오늘 할 일 ${primary.length}개</div>`
@@ -4264,6 +4287,13 @@ function _renderAgentHome() {
   }
   if (waiting.length) {
     html += `<div class="agent-sub-hdr">주문 중 — 추가 주문하지 않아도 돼요</div>${waiting.map(a => _agentCardHtml(a, true)).join('')}`;
+  }
+  if (drafts.length) {   // 오늘 할 일 수에 넣지 않는다: 예전에 담아 둔 후보는 주문 지시가 아니다
+    const oldest = drafts[0].age.label;
+    html += `<div class="agent-sub-hdr">발주표</div><div class="agent-card agent-compact agent-draft-note" data-agent-drafts="${drafts.length}">
+      <div class="agent-main"><div class="agent-title">발주표에 지금 주문할 필요가 확인되지 않은 항목 ${drafts.length}개가 있어요</div>
+      <div class="agent-reason">예전에 담아 둔 항목은 주문 지시가 아니에요 · 가장 오래된 항목: ${_agentEsc(oldest)} · 보내기 전에 품목과 수량을 확인하세요</div></div>
+      <div class="agent-acts"><button class="agent-btn-sub" onclick="_agentShowOrderSheet(0)">발주표 보기</button></div></div>`;
   }
   html += `</div>`;
   el.innerHTML = html;
@@ -4493,7 +4523,8 @@ async function renderOrder() {
       _pendingRows.push({ status: 'pending', order_id: r.id, item_id: r.item_id, name: r.item_name,
         stockQty: it ? Number(it.current_qty) : null, orderQty: Number(r.qty),
         unit: it?.unit || r.unit || '개', vendor_id: r.vendor_id || it?.vendor_id || null,
-        vendor: (r.vendor_id || it?.vendor_id) ? (_vendors.find(v => v.vendor_id === (r.vendor_id || it?.vendor_id))?.vendor_name || '') : '', checked: true });
+        vendor: (r.vendor_id || it?.vendor_id) ? (_vendors.find(v => v.vendor_id === (r.vendor_id || it?.vendor_id))?.vendor_name || '') : '', checked: true,
+        created_at: r.created_at || null });
     }
 
     // 2) ordered → 입고 대기 섹션: 실제 주문(order id)마다 한 줄. 같은 품목의 주문이 여러 건이어도
@@ -4722,7 +4753,7 @@ function _renderTableRow(r) {
   const checkIcon = checked ? '✓' : '';
   const checkCls = checked ? 'v4-check' : 'v4-check off';
   return `<tr${rowCls} data-iid="${r.item_id}" ${r.order_id ? `data-oid="${r.order_id}"` : ''} data-unit="${r.unit}" data-vid="${r.vendor_id || ''}" data-vendor="${r.vendor || ''}" data-checked="${checked ? '1' : '0'}" onclick="_tblRowTap(event,this)">
-    <td class="v4-name">${r.name}</td>
+    <td class="v4-name">${r.name}${r.status === 'pending' && r.created_at ? `<div class="v4-draft-age" style="font-size:10px;font-weight:400;color:var(--muted)">${_draftAge(r.created_at).label}</div>` : ''}</td>
     ${stockCell}
     <td class="v4-order-qty" data-col="order" onclick="_tblEdit(this,${r.item_id},'order')">${r.orderQty || '-'}<span style="font-size:10px;font-weight:400;color:var(--dim);margin-left:1px">${r.unit}</span></td>
     <td><span class="${checkCls}" onclick="_tblToggleCheck(this)">${checkIcon}</span></td>

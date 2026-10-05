@@ -22,7 +22,7 @@ const constLine = n => { const m = new RegExp(`const ${n} = [^\\n]+`).exec(HTML)
 let pass = 0, fail = 0;
 function check(name, ok, detail = '') { if (ok) pass++; else fail++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? '  — ' + String(detail).slice(0, 400) : ''}`); }
 
-const FNS = ['_orderNeedOf', '_admittedNeedOf', 'deriveAgentActions', '_agentContext', '_agentCardHtml', '_renderAgentHome', '_loadAgentCycle',
+const FNS = ['_orderNeedOf', '_admittedNeedOf', '_draftAge', '_renderOrderNeed', '_renderTableRow', 'deriveAgentActions', '_agentContext', '_agentCardHtml', '_renderAgentHome', '_loadAgentCycle',
   '_agentPrepareOrder', '_agentShowOrderSheet', '_agentShowOrder', '_agentCountItem', '_agentGoLogin', '_agentFocus', '_insertOrderIfNotDup', '_clearStoreContext', '_storeChanged'];
 const CODE = ['AGENT_PRIORITY', 'AGENT_MAX_CHECKS', '_AGENT_SOURCE_LABEL', '_agentEsc', '_agentNum'].map(constLine).join('\n') + '\n' + FNS.map(extractFn).join('\n');
 
@@ -153,13 +153,81 @@ const ofItem = (r, id) => [...r.primary, ...r.moreChecks, ...r.waiting].filter(a
     check('CONTRA-04 Store2 shows only Store2 actions; late Store1 reminder does not land', !/하드롤|핫소스/.test(html) && html.includes('양파') && r.storeId === 2
       && r.primary.every(a => a.store_id === 2) && e.f.get('_agentCycle').size === 0, html);
   }
-  // ── CONTRA-01  발주표 has rows → Home never says "nothing to order"; drafts are counted as today's work
+  // ── STALE DRAFTS (ZEROKITCHEN_STALE_DRAFT_ORDER_SEMANTICS_FIX_V0_1): 발주표(draft) ≠ 현재 주문 필요 ≠ 확인된 주문 ≠ 입고
+  const NOW = new Date('2026-10-05T05:00:00Z');
+  const draft = (id, itemId, name, qty, unit, at) => ({ id, store_id: 1, item_id: itemId, item_name: name, qty, unit, status: 'pending', created_at: at });
+  const deriveAt = e => e.f.deriveAgentActions({ ...e.f._agentContext(), now: NOW });
+  const orderFor = (r, id) => [...r.primary, ...r.moreChecks, ...r.waiting].filter(a => a.item_id === id && a.type === 'ORDER_NOW');
+  // DRAFT-01 / CONTRA-DRAFT-01  테스트매장 fixture: 10 drafts from April, no current need (sufficient / no target)
   {
-    const orders = Array.from({ length: 10 }, (_, k) => ({ id: 40 + k, store_id: 1, item_id: 50 + k, item_name: `담은품목${k}`, qty: 1, unit: '개', status: 'pending' }));
-    const items = orders.map(r => I(r.item_id, r.item_name, 9, 3));
-    const e = makeEnv({ items, trusted: items.map(i => i.item_id), orders }); const html = e.render(); const r = e.derive();
-    check('CONTRA-01 발주표 10건 → 오늘 할 일 10개 (주문하세요 · 발주표 보기), never "할 일 없음 / 발주 필요한 품목 없음"', r.primary.length === 10 && r.primary.every(a => a.type === 'ORDER_NOW' && a.primary_action.label === '발주표 보기')
-      && html.includes('오늘 할 일 10개') && !/처리할 일이 없습니다|발주 필요한 품목 없음/.test(html), `primary=${r.primary.length}`);
+    const orders = Array.from({ length: 10 }, (_, k) => draft(40 + k, 50 + k, `담은품목${k}`, 1 + (k % 3), '개', `2026-04-0${2 + (k % 3)}T03:00:00Z`));
+    const items = orders.map((r, k) => (k % 2 ? I(r.item_id, r.item_name, 9, 3) : I(r.item_id, r.item_name, 4, null)));
+    const e = makeEnv({ items, trusted: items.map(i => i.item_id), orders });
+    e.f._renderOrderNeed();
+    const detail = e.document.getElementById('orderNeedCard').innerHTML;
+    const html = e.document.getElementById('agentHome').innerHTML; const r = deriveAt(e);
+    check('DRAFT-01 10 old drafts, need 0 → 0 actions from drafts, 0 "주문하세요", "오늘은 바로 처리할 일이 없습니다."', r.primary.length === 0 && !r.primary.concat(r.waiting).some(a => a.type === 'ORDER_NOW')
+      && html.includes('오늘은 바로 처리할 일이 없습니다.') && !/오늘 할 일 \d+개|주문하세요|주문이 필요해요|주문 준비/.test(e.text(html)), `primary=${r.primary.length}`);
+    check('DRAFT-01b drafts shown as a secondary 발주표 notice (10개, oldest 4월 2일에 담음, 주문 지시가 아니에요), not counted, no item decision cards',
+      r.drafts.length === 10 && r.drafts[0].age.label === '4월 2일에 담음' && html.includes('data-agent-drafts="10"') && html.includes('발주표에 지금 주문할 필요가 확인되지 않은 항목 10개가 있어요')
+      && html.includes('가장 오래된 항목: 4월 2일에 담음') && html.includes('주문 지시가 아니에요') && !/data-agent-iid/.test(html), e.text(html));
+    check('CONTRA-DRAFT-01 detail "지금 발주 필요한 품목 없음" and Home agree (no 오늘 할 일 N개 · 주문하세요)', detail.includes('지금 발주 필요한 품목 없음') && !/오늘 할 일 \d+개/.test(html) && !e.text(html).includes('주문하세요'), '');
+  }
+  // DRAFT-02  need 2 + matching draft 2 → current need kept, handoff to 발주표, no new draft
+  {
+    const o = { items: [I(1, '우유', 1, 3, '박스')], trusted: [1], orders: [draft(70, 1, '우유', 2, '박스', '2026-10-05T01:00:00Z')] };
+    const e = makeEnv(o); const a = orderFor(deriveAt(e), 1);
+    check('DRAFT-02 need 2 + draft 2 → ORDER_NOW 2박스 (current need), [발주표 보기], "발주표에 2박스 담겨 있어요 (오늘 담음)"', a.length === 1 && a[0].required_qty === 2 && a[0].title.startsWith('우유 2박스 주문')
+      && a[0].primary_action.label === '발주표 보기' && a[0].reason.includes('발주표에 2박스 담겨 있어요 (오늘 담음)'), JSON.stringify(a));
+    const p = makeEnv({ ...o, existingOrders: [{ id: 70, store_id: 1, item_id: 1, status: 'pending', qty: 2 }] });
+    await p.f._agentPrepareOrder(1);
+    check('DRAFT-02b [주문 준비] path with an existing draft → 0 inserts (duplicate-safe)', p.writes.length === 0, JSON.stringify(p.writes));
+  }
+  // DRAFT-03 / CONTRA-DRAFT-05  need 2, draft 5 → need 2 is the truth, discrepancy shown, 5 never recommended
+  {
+    const e = makeEnv({ items: [I(1, '우유', 1, 3, '박스')], trusted: [1], orders: [draft(71, 1, '우유', 5, '박스', '2026-09-20T01:00:00Z')] });
+    const a = orderFor(deriveAt(e), 1);
+    check('DRAFT-03 need 2 vs draft 5 → ORDER_NOW 2박스, shows "발주표에는 5박스 … 지금 필요한 양은 2박스예요", no 5박스 order', a.length === 1 && a[0].required_qty === 2 && a[0].title === '우유 2박스 주문이 필요해요'
+      && a[0].reason.includes('발주표에는 5박스가 담겨 있어요 (15일 전 담음) — 지금 필요한 양은 2박스예요') && !/5박스 (더 )?주문/.test(a[0].title), JSON.stringify(a));
+  }
+  // DRAFT-04 / CONTRA-DRAFT-02  need 0 + draft 2 → no ORDER_NOW
+  {
+    const e = makeEnv({ items: [I(1, '우유', 5, 3, '박스')], trusted: [1], orders: [draft(72, 1, '우유', 2, '박스', '2026-10-01T01:00:00Z')] });
+    const r = deriveAt(e);
+    check('DRAFT-04 / CONTRA-DRAFT-02 trusted sufficient + draft → ORDER_NOW 0, primary 0, draft listed as notice only', orderFor(r, 1).length === 0 && r.primary.length === 0 && r.drafts.length === 1 && r.drafts[0].age.label === '4일 전 담음', JSON.stringify(r));
+  }
+  // DRAFT-05 / CONTRA-DRAFT-03  untrusted + draft → CHECK_STOCK only
+  {
+    const e = makeEnv({ items: [I(5, '하드롤', 1, 10)], orders: [draft(73, 5, '하드롤', 3, '개', '2026-04-02T03:00:00Z')] });
+    const r = deriveAt(e); const mine = ofItem(r, 5);
+    check('DRAFT-05 / CONTRA-DRAFT-03 untrusted + draft → one CHECK_STOCK, 0 order advice', mine.length === 1 && mine[0].type === 'CHECK_STOCK' && orderFor(r, 5).length === 0
+      && mine[0].reason.includes('발주표에 3개 담겨 있어요 (4월 2일에 담음) — 주문 전에 확인하세요'), JSON.stringify(mine));
+  }
+  // DRAFT-06 / CONTRA-DRAFT-04  need 2, verified open 2, draft → no additional order
+  {
+    const e = makeEnv({ ...OPEN2, orders: [...OPEN2.orders, draft(74, 1, '우유', 2, '박스', '2026-09-01T01:00:00Z')] });
+    const r = deriveAt(e);
+    check('DRAFT-06 / CONTRA-DRAFT-04 verified open covers need, draft present → 추가 주문 0 (입고 대기 card only)', orderFor(r, 1).length === 0 && ofItem(r, 1).length === 1 && ofItem(r, 1)[0].title === '우유 2박스 입고 대기'
+      && !/주문하세요|주문이 필요해요|주문 준비/.test(e.text(e.render()).replace('발주표에 지금 주문할 필요가', '')), JSON.stringify(ofItem(r, 1)));
+  }
+  // DRAFT-07  need 3, verified open 1, draft 3 → uncovered 2; draft does not override; no qty rewrite
+  {
+    const orders = [{ id: 11, store_id: 1, item_id: 1, item_name: '우유', qty: 1, unit: '박스', status: 'ordered' }, draft(75, 1, '우유', 3, '박스', '2026-10-03T01:00:00Z')];
+    const e = makeEnv({ items: [I(1, '우유', 0, 3, '박스')], trusted: [1], orders, orderSupply: { 11: { order_state: 'OPEN', ordered_qty: 1, accepted_qty: 0, remaining_qty: 1, health: 'HEALTHY' } },
+      openSupply: { 1: { open_supply_state: 'VERIFIED_OPEN' } } });
+    const a = orderFor(deriveAt(e), 1);
+    check('DRAFT-07 need 3 − verified open 1 = 2 → "우유 2박스 더 주문하세요"; draft 3 shown as different, not used', a.length === 1 && a[0].required_qty === 2 && a[0].title === '우유 2박스 더 주문하세요'
+      && a[0].reason.includes('이미 1박스 주문 중') && a[0].reason.includes('발주표에는 3박스가 담겨 있어요 (2일 전 담음) — 지금 필요한 양은 2박스예요'), JSON.stringify(a));
+    check('DRAFT-07b no automatic draft change: draft qty still 3, 0 writes', orders[1].qty === 3 && e.writes.length === 0, '');
+  }
+  // DRAFT age labels (KST calendar) + 발주표 row shows the age
+  {
+    const e = makeEnv({});
+    const L = s => e.f._draftAge(s, NOW).label;
+    const got = [L('2026-10-05T01:00:00Z'), L('2026-10-04T16:00:00Z'), L('2026-10-04T01:00:00Z'), L('2026-10-02T01:00:00Z'), L('2026-09-05T01:00:00Z'), L('2026-04-02T03:00:00Z'), L('2025-12-01T03:00:00Z'), L(null)];
+    check('DRAFT-AGE 오늘 / 오늘(KST 자정 넘김) / 어제 / 3일 전 / 30일 전 / 4월 2일 / 2025년 12월 1일 / 모름', got.join('|') === '오늘 담음|오늘 담음|어제 담음|3일 전 담음|30일 전 담음|4월 2일에 담음|2025년 12월 1일에 담음|담은 날짜 모름', got.join('|'));
+    const row = e.f._renderTableRow({ status: 'pending', order_id: 40, item_id: 50, name: '담은품목0', stockQty: 4, orderQty: 1, unit: '개', checked: true, created_at: '2025-04-02T03:00:00Z' });
+    check('DRAFT-ROW 발주표 row shows when it was put there (name cell)', /<td class="v4-name">담은품목0<div class="v4-draft-age"[^>]*>2025년 4월 2일에 담음<\/div><\/td>/.test(row), row.slice(0, 300));
   }
   // ── CONTRA-05  current unknown → never a confirmed ORDER_NOW
   {
