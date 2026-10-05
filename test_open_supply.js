@@ -64,6 +64,7 @@ function makeEnv({ orderSupply = [], openSupply = [], failRead = false, orders =
   const document = { querySelector: () => null };
   const console = { warn() {}, log() {}, error() {} };
   let _orderSupply = new Map(), _openSupply = new Map(), _supplyAvailable = false;
+  const _writerReady = false;   // no login / writer not ready → read only (the writer side: test_human_writer.js)
   for (const c of ['_fmtQty', '_VERIFIED_ORDER_LOCKED_MSG', '_RECEIVE_LOCKED_MSG', '_DELETE_HISTORY_MSG', '_DELETE_UNAVAILABLE_MSG']) eval(constLine(c).replace('const ', 'var '));
   const f = {};
   for (let k = 0; k < 2; k++) {

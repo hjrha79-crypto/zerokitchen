@@ -105,6 +105,8 @@ function makeEnv(opts = {}) {
   const renderInventory = () => { calls.inventory++; };
   const refreshItems = async () => {};
   const _loadObservation = () => { calls.observation++; };
+  // settings tab also refreshes the human-writer login card (read only; covered by test_human_writer.js)
+  const _refreshWriterReadiness = async () => false, _renderWriterAuthCard = async () => {};
   const _renderStoreTabs = () => {}, _updateLastInputChip = () => {}, v3InitLowToggle = () => {}, cancelReview = () => {}, updateJustTalk = () => {};
   const _hashTabMap = { home: 'input', inventory: 'inventory', settings: 'settings' };
   const _tabHashMap = { input: 'home', inventory: 'inventory', settings: 'settings' };
