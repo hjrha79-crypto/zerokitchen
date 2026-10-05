@@ -88,7 +88,7 @@ const item = (item_id, item_name, current_qty, target_qty, unit) => ({ item_id, 
 function makeEnv(items, ops, opts = {}) {
   const server = opts.server || items.map(i => ({ ...i }));
   const db = makeDb(ops, opts, server);
-  const SID = 1;
+  const SID = 1; let _storeEpoch = 0; const _storeChanged = ep => ep !== _storeEpoch;   // store switch guard (index.html)
   let _items = items.map(i => ({ ...i }));
   let refreshCalls = 0;
   const refreshItems = async () => { refreshCalls++; _items = server.map(i => ({ ...i })); };

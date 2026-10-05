@@ -78,7 +78,7 @@ function makeEnv(opts = {}) {
   const server = BASE_ITEMS.map(i => ({ ...i }));
   const ops = opts.ops ? opts.ops.map(o => ({ ...o })) : [];
   const db = makeDb(server, ops, opts.modes || {});
-  const SID = 1;
+  const SID = 1; let _storeEpoch = 0; const _storeChanged = ep => ep !== _storeEpoch;   // store switch guard (index.html)
   let _items = BASE_ITEMS.map(i => ({ ...i }));
   const inputs = Object.fromEntries(_items.map(i => [i.item_id, makeInput(i.current_qty)]));
   const toasts = []; const showToast = t => toasts.push(t);

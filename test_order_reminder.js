@@ -67,7 +67,7 @@ const ITEMS = [item(4, '핫소스', 10, 6, '개'), item(174, '파인애플', 2, 
 
 function makeEnv(patterns, opts = {}) {
   const db = makeDb({ item_usage_pattern: patterns });
-  const SID = 1;
+  const SID = 1; let _storeEpoch = 0; const _storeChanged = ep => ep !== _storeEpoch;   // store switch guard (index.html)
   const _items = ITEMS.map(i => ({ ...i }));
   let _orderRequests = [];
   const need = { innerHTML: null }, notif = { innerHTML: null, style: {}, querySelectorAll: () => [] };

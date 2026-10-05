@@ -46,7 +46,7 @@ document.body.innerHTML = \`
   <select id="invSort"><option value="name">이름순</option></select><span id="invCount"></span>
   <div class="inv-grid" id="invGrid"></div>\`;
 document.getElementById('invSort').value = 'name';
-var SID = 1, _vendors = [], _items = [], _itemTrust = new Map(), _invEditActive = null, _dismissedDupFingerprints = new Set();
+var SID = 1, _vendors = [], _items = [], _itemTrust = new Map(), _invEditActive = null, _dismissedDupFingerprints = new Set(); let _storeEpoch = 0; const _storeChanged = ep => ep !== _storeEpoch;   // store switch guard (index.html)
 var TRUSTED_STOCK_CHECK = ${JSON.stringify(MARKER)}, COUNT_MODE_RAW_TEXT = ${JSON.stringify(COUNT_RAW)};
 var _countMode = false, _countedIds = new Set();
 var _countSaving = new Set(), _invQtySaving = new Set(), _invAuditPending = new Map(), _invAuditRetrying = new Set();

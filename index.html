@@ -971,6 +971,10 @@ function _dupKeyOf(it) {
   return it.item_name.replace(/\s/g, '').toLowerCase();
 }
 let _stores = [];      // 전체 매장 목록
+// 매장 전환 세대. 전환할 때마다 올라가며, 전환 전에 시작된 요청의 응답은 이 값이 바뀌었으면 상태·화면에 쓰지 않는다
+// (늦게 도착한 이전 매장 응답이 새 매장 화면을 덮지 못하게).
+let _storeEpoch = 0;
+function _storeChanged(ep) { return ep !== _storeEpoch; }
 let _currentSessionId = null;
 let _sessionStartedAt = null;
 let _dismissedItemIds = new Set();  // 이번 세션에서 취소/이월한 품목
@@ -1059,33 +1063,65 @@ function _renderStoreTabs() {
   container.innerHTML = html;
 }
 
+// 매장 전환 = 이전 매장의 운영 판단을 모두 버린다: 매장별 상태를 비우고, 이전 매장 카드(발주 필요·주기 알림·추천·
+// 발주표·입고 대기·공급 상태)를 화면에서 바로 지운 뒤 새 매장 데이터만 다시 그린다.
+function _clearStoreContext() {
+  _items = []; _vendors = []; _orderRequests = [];
+  _dismissedItemIds = new Set(); _orderedItemIds = new Set(); _storeAliases = [];
+  _itemTrust = new Map(); _orderSupply = new Map(); _openSupply = new Map();
+  _draftItems = [];
+  window._v4TableRows = []; window._textOrderCache = [];
+  if (_countMode) {   // 센 품목은 품목마다 이미 저장됐다. 이전 매장의 점검 표시는 새 매장으로 넘기지 않는다
+    const n = _countedIds.size;
+    _countMode = false; _countedIds = new Set();
+    showToast(`매장을 바꿔 재고 점검을 마쳤습니다 — 센 품목 ${n}개는 저장됨`, 3500);
+  }
+  const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
+  set('orderNeedCard', '');
+  set('suggestBar', '');
+  set('resList', '');
+  set('orderList', '<div class="no-item">매장 정보를 불러오는 중…</div>');
+  const notif = document.getElementById('v3NotifContainer');
+  if (notif) { notif.innerHTML = ''; notif.style.display = 'none'; }
+  const alertBar = document.getElementById('invAlertBar');
+  if (alertBar) alertBar.style.display = 'none';
+  // 이전 매장의 입력 검토·중복 정리·수량 되묻기 카드는 닫는다(쓰지 않고 닫기만 한다)
+  const review = document.getElementById('reviewPanel');
+  if (review && review.style.display !== 'none') {
+    if (review.querySelector('[data-dup-root]')) _closeDupCleanup();
+    else if (_pendingComplexItems) _closeComplexCard();
+    else cancelReview();
+  }
+}
+
 async function _switchStore(storeId) {
   if (storeId === SID) return;
+  _storeEpoch++;
+  const ep = _storeEpoch;
   SID = storeId;
   localStorage.setItem('zk_store_id', storeId);
 
   // UI 업데이트
   _renderStoreTabs();
   showToast(_stores.find(s => s.store_id === storeId)?.store_name + ' 전환');
+  _clearStoreContext();
 
-  // 데이터 재로드
-  _items = [];
-  _vendors = [];
-  _orderRequests = [];
-  _dismissedItemIds = new Set();
-  _orderedItemIds = new Set();
+  // 데이터 재로드 (전환 중 다시 전환되면 이 흐름은 멈춘다)
   await refreshItems();
-    const { data: aliases } = await db.from('store_aliases').select('*').eq('store_id', SID);
-    _storeAliases = aliases || [];
+  if (_storeChanged(ep)) return;
+  const { data: aliases } = await db.from('store_aliases').select('*').eq('store_id', storeId);
+  if (_storeChanged(ep)) return;
+  _storeAliases = aliases || [];
+  _lastRawInput = localStorage.getItem('zk_last_input_' + SID) || '';
+  _updateLastInputChip();
 
-  // 현재 탭 재렌더링
+  // 현재 탭 재렌더링 (홈은 주기 알림까지 새 매장 기준으로 다시 그린다)
   const activeTab = document.querySelector('.tab.active');
   if (activeTab?.id === 'tab-inventory') renderInventory();
-  else if (activeTab?.id === 'tab-input') renderOrder();
-
-  // 채팅 영역 초기화
-  const resList = document.getElementById('resList');
-  if (resList) resList.innerHTML = '';
+  else if (activeTab?.id === 'tab-input') {
+    renderOrder();
+    renderV3Notifications().catch(e => console.error('[v3] Notif error:', e));
+  }
   updateJustTalk();
 }
 
@@ -1107,10 +1143,12 @@ async function _addStore() {
 }
 
 async function refreshItems() {
+  const ep = _storeEpoch, sid = SID;
   const [r1, r2] = await Promise.allSettled([
-    db.from('items').select('*').eq('store_id', SID).order('item_name'),
-    db.from('vendors').select('*').eq('store_id', SID)
+    db.from('items').select('*').eq('store_id', sid).order('item_name'),
+    db.from('vendors').select('*').eq('store_id', sid)
   ]);
+  if (_storeChanged(ep)) return;   // 그 사이 매장이 바뀌었다: 이전 매장 품목을 새 매장 상태에 넣지 않는다
   if (r1.status === 'fulfilled' && r1.value.data) _items = r1.value.data;
   if (r2.status === 'fulfilled' && r2.value.data) _vendors = r2.value.data;
 }
@@ -1535,6 +1573,39 @@ async function processRequest(json) {
 
 // ── 자연어 명령 감지 ──
 // Vita가 없는 동안 기본 패턴 매칭으로 명령 처리
+// 입력 의도 판정 (텍스트·음성 공통). 재고를 바꾸는 길은 수량이 분명한 입력뿐이다.
+//   QUESTION  — 물음표·의문사·질문 어미가 있고 분명한 수량이 없다 → 조회만(재고 조회·발주 목록·질문 답) 또는 안내, 쓰기 0
+//   AMBIGUOUS — 수량도 명령도 없다("우유", "하드롤 좀 봐줘") → 되묻기, 쓰기 0
+//   null      — 기존 처리 그대로(분명한 수량 입력, 설정·삭제·발주 명령 등)
+// 분명한 수량: 숫자, 0을 뜻하는 말(없음·거의없음·다 썼어·품절…), 반, 또는 룰엔진과 같은 수 단어(_NUM_WORDS) + 단위(_UNITS)
+const _ZERO_HALF_RE = /\d|(?:^|\s)반(?:\s|$|개|봉|박스|팩)|절반|없(?:음|어|다)|거의\s*없|다\s*(?:썼|떨어|팔)|떨어졌|품절|바닥|소진/;
+let _numUnitRe = null;
+function _hasExplicitQty(s) {
+  if (_ZERO_HALF_RE.test(s)) return true;
+  if (!_numUnitRe) {
+    const esc = w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const words = Object.keys(_NUM_WORDS).sort((a, b) => b.length - a.length).map(esc).join('|');
+    const units = _UNITS.slice().sort((a, b) => b.length - a.length).map(esc).join('|');
+    _numUnitRe = new RegExp(`(?:${words})\\s*(?:${units})|(?:^|\\s)(?:하나|둘|셋|넷|다섯|여섯|일곱|여덟|아홉|열)(?:\\s|$)`);
+  }
+  return _numUnitRe.test(s);
+}
+const _HAS_ACTION_RE = /추가|입고|넣어|넣었|넣기|빼기|차감|사용|소비|받았|들어왔|가져왔|썼|뺐|버렸|꺼냈/;
+const _INTERROGATIVE_RE = /뭐|무엇|뭘|무슨|어떤|어떻게|어때|왜|언제|어디|누가|얼마|몇/;
+const _QUESTION_END_RE = /(?:해야\s*(?:돼|해|하나|할까|되나|되지)|할\s*(?:거|게|것)\s*(?:있어|있나)?|있(?:어|나|니|을까|나요)|없(?:나|니|을까)|남았(?:어|나|니|지)|했(?:어|나|니|지)|됐(?:어|나|니)|인가|일까|할까|나요|까요|어때|알려\s*줘|보여\s*줘|봐\s*줘|확인해\s*줘)\s*[.!~]*\s*$/;
+const _READ_ONLY_CMDS = new Set(['inventory_read', 'order_generate', '_llm_question', '_switch_tab', '_invalid_jamo']);
+function _inputIntentOf(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+  const hasQty = _hasExplicitQty(s);
+  // 수량 + 동작어가 분명한 입력은 질문이 붙어 있어도 기존 처리(혼합 입력 분리 포함)를 그대로 쓴다
+  if (hasQty && _HAS_ACTION_RE.test(s)) return null;
+  const asks = /[?？]\s*$/.test(s) || _INTERROGATIVE_RE.test(s) || (!hasQty && _QUESTION_END_RE.test(s));
+  if (asks) return 'QUESTION';
+  if (!hasQty && !detectCommand(s) && !/주문|발주|시켜/.test(s)) return 'AMBIGUOUS';
+  return null;
+}
+
 function detectCommand(text) {
   const s = text.trim();
 
@@ -1684,6 +1755,27 @@ let _sessionInputs = []; // 동일 품목 재입력 감지용 세션 이력
 
 // 자연어 입력 처리
 let _nlProcessing = false; // 중복 호출 방지 락
+// 되묻기 [재고 입력]: 입력을 다시 채우고 수량을 이어서 쓰게 한다 (아무것도 저장하지 않는다)
+function _clarifyAsStockEntry(raw) {
+  const inp = document.getElementById('nlInput');
+  if (!inp) return;
+  inp.value = `${raw} `;
+  inp.focus();
+  showToast('수량을 이어서 입력해 주세요 (예: 2박스)', 2500);
+}
+// 되묻기 [질문으로]: 품목 이름이면 그 재고를 조회만 하고, 아니면 안내만 한다 (쓰기 0)
+async function _clarifyAsQuestion(raw, btn) {
+  if (btn) btn.parentElement?.remove();
+  const name = String(raw).replace(/\s*(?:좀|확인|봐\s*줘|보여\s*줘|어때|은|는|이|가)\s*$/g, '').trim();
+  const it = _items.find(x => x.item_name === name || x.item_name.replace(/\s/g, '') === name.replace(/\s/g, ''));
+  if (it) {
+    const r = await processRequest({ request_type: 'inventory_read', filter: 'specific', names: [it.item_name] });
+    addResult(raw, formatResult(r), r.status === 'success' ? 'ok' : 'warn');
+  } else {
+    addResult(raw, '질문으로 이해했어요 — 재고는 바꾸지 않았습니다.', 'ok');
+  }
+}
+
 async function handleNaturalInput() {
   if (_nlProcessing) { console.log('[NL] _nlProcessing 차단'); return; }
   const inp   = document.getElementById('nlInput');
@@ -1736,8 +1828,38 @@ async function handleNaturalInput() {
 
     console.log('[NL] 일반 처리 진입:', raw, '| _pendingComplexItems:', _pendingComplexItems, '| _complexQtyState:', !!_complexQtyState);
 
-    // 복합 입력 우선 체크 — detectCommand보다 먼저 실행
-    if (_isComplexInput(raw)) {
+    // 질문·불분명한 입력은 재고를 바꾸지 않는다 (텍스트·음성 공통 — 음성도 이 함수로 들어온다).
+    const _intent = _inputIntentOf(raw);
+    if (_intent === 'QUESTION') {
+      const qc = detectCommand(raw);
+      // "배송 늦는 거 있어"처럼 품목이 아닌 것을 묻는 질문은 품목 조회로 보내지 않는다
+      const _noSuchItem = qc && qc.request_type === 'inventory_read' && qc.filter === 'specific' && Array.isArray(qc.names)
+        && !qc.names.some(n => _items.some(x => x.item_name.replace(/\s/g, '').includes(String(n).replace(/\s/g, '')) || String(n).replace(/\s/g, '').includes(x.item_name.replace(/\s/g, ''))));
+      if (!qc || !_READ_ONLY_CMDS.has(qc.request_type) || _noSuchItem) {
+        document.getElementById('parseLoading')?.remove();
+        inp.value = '';
+        addResult(raw, '질문으로 이해했어요 — 재고는 바꾸지 않았습니다. 오늘 할 일은 홈 위쪽 카드(발주 필요·재고 확인 필요·입고 대기)에서 볼 수 있어요.', 'ok');
+        return;
+      }
+      // 조회 명령(재고 조회·발주 목록·질문 답·탭 이동)은 아래 명령 처리로 — 쓰지 않는다
+    } else if (_intent === 'AMBIGUOUS') {
+      document.getElementById('parseLoading')?.remove();
+      inp.value = '';
+      addResult(raw, '재고 입력인가요, 질문인가요? 재고를 입력하려면 수량도 함께 말해 주세요 (예: 우유 2박스) — 재고는 바꾸지 않았습니다.', 'warn');
+      const card = document.getElementById('resList')?.lastChild;
+      if (card) {
+        const row = document.createElement('div');
+        row.className = 'order-action-inline';
+        const enc = encodeURIComponent(raw);
+        row.innerHTML = `<button class="oai-edit" onclick="_clarifyAsStockEntry(decodeURIComponent('${enc}'))">재고 입력</button>
+          <button class="oai-cancel" onclick="_clarifyAsQuestion(decodeURIComponent('${enc}'), this)">질문으로</button>`;
+        card.appendChild(row);
+      }
+      return;
+    }
+
+    // 복합 입력 우선 체크 — detectCommand보다 먼저 실행 (질문은 여기로 오지 않는다)
+    if (_intent !== 'QUESTION' && _isComplexInput(raw)) {
       if (!_claudeApiKey) {
         document.getElementById('parseLoading')?.remove();
         addResult(raw, '⚙️ API 키를 먼저 설정해주세요. 상단 ⚙ 버튼을 눌러 Claude API 키를 입력하세요.', 'err');
@@ -3808,10 +3930,11 @@ function _inventoryTrustOf(currentQty, ops) {
 
 // 현재 매장의 신뢰 판정을 읽어 _itemTrust에 둔다. 읽기 전용. 실패하면 모두 미확인(fail closed).
 async function _loadInventoryTrust() {
+  const ep = _storeEpoch, sid = SID;
   const next = new Map();
   try {
     const { data: anchors, error } = await db.from('kitchen_operations')
-      .select('item_id, created_at').eq('store_id', SID).eq('input_method', TRUSTED_STOCK_CHECK);
+      .select('item_id, created_at').eq('store_id', sid).eq('input_method', TRUSTED_STOCK_CHECK);
     if (error) throw error;
     const since = new Map();
     for (const a of anchors || []) if (!since.has(a.item_id) || a.created_at > since.get(a.item_id)) since.set(a.item_id, a.created_at);
@@ -3819,7 +3942,7 @@ async function _loadInventoryTrust() {
       const from = [...since.values()].sort()[0];
       const { data: ops, error: e2 } = await db.from('kitchen_operations')
         .select('item_id, created_at, operation_id, action_type, qty_before, qty_after, input_method, raw_text')
-        .eq('store_id', SID).in('item_id', [...since.keys()]).gte('created_at', from)
+        .eq('store_id', sid).in('item_id', [...since.keys()]).gte('created_at', from)
         .order('created_at', { ascending: true }).order('operation_id', { ascending: true });
       if (e2) throw e2;
       for (const [itemId, at] of since) {
@@ -3832,6 +3955,7 @@ async function _loadInventoryTrust() {
     console.warn('[trust] 신뢰 재고 판정을 읽지 못했습니다 — 모두 확인 필요로 둡니다:', e?.message);
     next.clear();
   }
+  if (_storeChanged(ep)) return;   // 이전 매장 판정은 새 매장에 쓰지 않는다
   _itemTrust = next;
 }
 
@@ -3950,6 +4074,8 @@ async function _renderOrderKeepScroll() {
 }
 
 async function renderOrder() {
+  // 이 그리기는 시작한 매장 기준이다. 중간에 매장이 바뀌면(세대 변경) 어떤 상태·화면도 쓰지 않고 멈춘다.
+  const ep = _storeEpoch;
   const list = document.getElementById('orderList');
   list.innerHTML = '<div class="no-item"><span class="spin" style="border-color:var(--border);border-top-color:var(--accent)"></span></div>';
 
@@ -3958,14 +4084,18 @@ async function renderOrder() {
     const { data: pendingRows, error: oErr } = await db.from('order_requests')
       .select('*').eq('store_id', SID).in('status', ['pending', 'ordered'])
       .order('created_at', { ascending: false });
+    if (_storeChanged(ep)) return;
     if (oErr) throw oErr;
     _orderRequests = (pendingRows || []).filter(r => Number(r.qty) > 0);
     // 전역 _orderedItemIds 갱신 (pending + ordered 품목)
     _orderedItemIds = new Set(_orderRequests.map(r => r.item_id));
     await _loadOrderSupply();
+    if (_storeChanged(ep)) return;
     await _refreshWriterReadiness();
+    if (_storeChanged(ep)) return;
     _renderWriterBar();
     await _loadInventoryTrust();
+    if (_storeChanged(ep)) return;
     _renderOrderNeed();
     const _pendingItems = _orderRequests.filter(r => r.status === 'pending');
     const _orderedItems = _orderRequests.filter(r => r.status === 'ordered');
@@ -3975,6 +4105,7 @@ async function renderOrder() {
     const { data: cancelledRows } = await db.from('order_requests')
       .select('item_id').eq('store_id', SID).eq('status', 'cancelled')
       .gte('updated_at', _24hAgo);
+    if (_storeChanged(ep)) return;
     const _cancelledItemIds = new Set((cancelledRows || []).map(r => r.item_id));
 
     // 1.5) 이월된 발주 로드 (어제 이전 deferred)
@@ -3982,6 +4113,7 @@ async function renderOrder() {
     const { data: deferredRows } = await db.from('daily_orders')
       .select('*').eq('store_id', SID).eq('status', 'deferred')
       .lt('order_date', today);
+    if (_storeChanged(ep)) return;
     const _deferredItems = (deferredRows || []).map(r => ({
       ...r,
       isDeferred: true,
@@ -3990,6 +4122,7 @@ async function renderOrder() {
 
     // 2) 재고 부족 품목 (자동 제안용) — 추천 기준: current_qty <= 0 만
     await refreshItems();
+    if (_storeChanged(ep)) return;
     console.log('[suggest] 전체 품목 수:', _items.length);
     const _zeroItems = _items.filter(i => Number(i.current_qty) <= 0);
     console.log('[suggest] 재고 0 이하:', _zeroItems.map(i => `${i.item_name}(${i.current_qty})`));
@@ -4006,6 +4139,7 @@ async function renderOrder() {
     const suggestItems = [];
     for (const it of needItems) {
       const consumption = await _calcConsumption(it.item_id);
+      if (_storeChanged(ep)) return;
       const order = _calcOrderQty(Number(it.current_qty), Number(it.target_qty), consumption, it.order_unit_qty);
       // 목표/소비량이 없는 경우(재고 0 단독) 수량 1로 강제 추가
       if (order.qty <= 0) {
@@ -4201,12 +4335,14 @@ async function renderOrder() {
     console.log('[소진예측] 호출 직전, _seenIds:', [..._seenIds]);
     _loadDepletionAsync(_seenIds, _cancelledItemIds);
   } catch(e) {
+    if (_storeChanged(ep)) return;
     list.innerHTML = `<div class="no-item">오류: ${e.message}</div>`;
   }
 }
 
 // 소진 예측 백그라운드 로드 + 캐시
 async function _loadDepletionAsync(existingIds, cancelledIds) {
+  const ep = _storeEpoch;
   try {
     const cacheKey = `zk_depletion_${SID}`;
     const cached = sessionStorage.getItem(cacheKey);
@@ -4228,6 +4364,7 @@ async function _loadDepletionAsync(existingIds, cancelledIds) {
     if (!alerts) {
       console.log('[소진예측] DB 조회 시작');
       alerts = await _getDepletionAlerts();
+      if (_storeChanged(ep)) return;   // 이전 매장의 소진 예측은 새 매장 캐시·추천에 넣지 않는다
       console.log('[소진예측] DB 조회 완료:', alerts.length, '건');
       // 0건이면 캐시하지 않음 (다음 로드 시 재계산)
       if (alerts.length > 0) {
@@ -4244,6 +4381,7 @@ async function _loadDepletionAsync(existingIds, cancelledIds) {
     }
 
     // 소진 임박 → 추천 칩에 추가
+    if (_storeChanged(ep)) return;
     const chipsEl = document.getElementById('v4SuggestChips');
     let added = 0;
     for (const a of alerts) {
@@ -5317,12 +5455,13 @@ let _orderSupply = new Map();     // order_id → get_order_supply 행
 let _openSupply = new Map();      // item_id → get_open_supply 행
 let _supplyAvailable = false;
 async function _loadOrderSupply() {
+  const ep = _storeEpoch, sid = SID;
   const next = new Map(), nextOpen = new Map();
   let ok = false;
   try {
     const [o, s] = await Promise.all([
-      db.rpc('get_order_supply', { p_store_id: SID, p_item_id: null }),
-      db.rpc('get_open_supply', { p_store_id: SID, p_item_id: null }),
+      db.rpc('get_order_supply', { p_store_id: sid, p_item_id: null }),
+      db.rpc('get_open_supply', { p_store_id: sid, p_item_id: null }),
     ]);
     if (o?.error || s?.error) throw (o?.error || s?.error);
     for (const r of o?.data || []) next.set(r.order_id, r);
@@ -5331,6 +5470,7 @@ async function _loadOrderSupply() {
   } catch (e) {
     console.warn('[supply] 주문 공급 상태를 읽지 못했습니다 — 예전 입고 화면으로 둡니다:', e?.message);
   }
+  if (_storeChanged(ep)) return;   // 이전 매장 공급 상태는 새 매장에 쓰지 않는다
   _orderSupply = ok ? next : new Map();
   _openSupply = ok ? nextOpen : new Map();
   _supplyAvailable = ok;
@@ -8327,17 +8467,21 @@ async function recordNotificationOnAction(data, storeId) {
 async function renderV3Notifications() {
   const container = document.getElementById('v3NotifContainer');
   if (!container) return;
+  // 이 알림은 시작한 매장 기준이다. 중간에 매장이 바뀌면 이전 매장 알림을 그리지 않는다.
+  const ep = _storeEpoch, sid = SID;
 
-  const candidates = await checkOrderNotifications(SID);
+  const candidates = await checkOrderNotifications(sid);
+  if (_storeChanged(ep)) return;
 
   // 오늘 알림 카운트 조회
   const _today = new Date().toISOString().split('T')[0];
   const { data: quotaData } = await db
     .from('daily_notification_quota')
     .select('notification_count')
-    .eq('store_id', SID)
+    .eq('store_id', sid)
     .eq('date', _today)
     .maybeSingle();
+  if (_storeChanged(ep)) return;
   const todayCount = quotaData?.notification_count || 0;
 
   if (candidates.length === 0) {
@@ -8346,9 +8490,10 @@ async function renderV3Notifications() {
     const { data: hasPatterns } = await db
       .from('item_usage_pattern')
       .select('item_id')
-      .eq('store_id', SID)
+      .eq('store_id', sid)
       .in('confidence_score', confCheck)
       .limit(1);
+    if (_storeChanged(ep)) return;
 
     if (hasPatterns && hasPatterns.length > 0) {
       // 주기 알림이 없다는 뜻일 뿐, 부족한 품목이 없다는 뜻이 아니다 (부족은 최상단 카드가 말한다)

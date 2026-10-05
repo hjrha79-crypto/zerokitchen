@@ -52,7 +52,7 @@ function makeEnv({ orderSupply = [], openSupply = [], failRead = false, orders =
       return b;
     },
   };
-  const SID = 1, toasts = []; const showToast = t => toasts.push(t);
+  const SID = 1, toasts = []; const showToast = t => toasts.push(t); let _storeEpoch = 0; const _storeChanged = ep => ep !== _storeEpoch;   // store switch guard (index.html)
   let answers = []; const confirm = () => (answers.length ? answers.shift() : true);
   const _vendors = [];
   let _orderRequests = orders.map(o => ({ ...o }));
