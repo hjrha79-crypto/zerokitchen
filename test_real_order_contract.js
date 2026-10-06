@@ -30,7 +30,7 @@ let pass = 0, fail = 0;
 const check = (name, ok, detail = '') => { if (ok) pass++; else fail++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? '  — ' + String(detail).slice(0, 500) : ''}`); };
 const J = x => JSON.stringify(x);
 
-const FNS = ['_orderNeedOf', '_admittedNeedOf', '_draftAge', '_agentOrderSupplier', '_fmtKst', '_agentDeliveryLine', '_safeOrderUrl', 'deriveAgentActions', '_agentCardHtml',
+const FNS = ['_asideProposalLine', '_orderNeedOf', '_admittedNeedOf', '_draftAge', '_agentOrderSupplier', '_fmtKst', '_agentDeliveryLine', '_safeOrderUrl', 'deriveAgentActions', '_agentCardHtml',
   '_confirmActualOrder', '_agentConfirmOrder', '_agentRegisterExternalOrder', '_agentDeliveryUpdate', '_writerFields', '_supplierOptions'];
 const CODE = ['AGENT_PRIORITY', 'AGENT_MAX_CHECKS', '_AGENT_SOURCE_LABEL', '_DELIVERY_LABEL', '_agentEsc', '_agentNum'].map(constLine).join('\n') + '\n'
   + extractConstBlock('_WRITER_FIELDS') + '\n' + FNS.map(extractFn).join('\n');

@@ -57,10 +57,12 @@ function makeEnv() {
     parseWithClaude: async raw => { S.claude.push(raw); return []; },
     draftToRequest: items => ({ request_type: 'inventory_update', items: items.map(it => ({ name: it.item_name, quantity: it.quantity, unit: it.unit, action: it.action })) }),
     _stopMicUI() {}, _restoreUI() {},
+    SID: 1, _writerReady: false, TRUSTED_STOCK_CHECK: 'trusted_stock_check', _loadInventoryTrust: async () => {},
   };
   const names = Object.keys(env);
   const body = `let _nlProcessing = false, _draftItems = [], _parseMeta = {}, _sessionInputs = [], _complexQtyState = null, _pendingComplexItems = null;
     ${RULE_BLOCK}
+    ${HTML.slice(HTML.indexOf('const _PC_ORDER'), HTML.indexOf('// 확정 OrderNeed'))}
     const _ruleEngineReal = ruleEngine;
     ${ROUTER}
     ${extractFn('handleNaturalInput').replace(/\bruleEngine\(/g, '__rule(')}

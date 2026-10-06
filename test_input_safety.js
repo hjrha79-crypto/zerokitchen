@@ -66,10 +66,12 @@ function makeEnv() {
       return it ? { results: [{ item_name: it.item_name, quantity: 2, unit: it.unit, action: 'inbound', qtyParsed: true }], needsFallback: false, confidence: 0.95 } : { results: [], needsFallback: true, confidence: 0 }; },
     parseWithClaude: async raw => { S.parseWithClaude.push(raw); return []; },
     draftToRequest: items => ({ request_type: 'inventory_update', items }),
+    SID: 1, _writerReady: false, TRUSTED_STOCK_CHECK: 'trusted_stock_check', _loadInventoryTrust: async () => {},
   };
   const names = Object.keys(env).filter(k => !['S', 'els'].includes(k));
   const body = `let _nlProcessing = false, _draftItems = [], _parseMeta = {}, _sessionInputs = [], _complexQtyState = null, _pendingComplexItems = null;
     ${CLASSIFIER}
+    ${HTML.slice(HTML.indexOf('const _PC_ORDER'), HTML.indexOf('// 확정 OrderNeed'))}
     ${['handleNaturalInput', '_clarifyAsStockEntry', '_clarifyAsQuestion'].map(extractFn).join('\n')}
     return { handleNaturalInput, _clarifyAsStockEntry, _clarifyAsQuestion, _inputIntentOf, get draft() { return _draftItems; } };`;
   const f = new Function(...names, body)(...names.map(n => env[n]));

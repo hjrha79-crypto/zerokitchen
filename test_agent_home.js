@@ -22,7 +22,7 @@ const constLine = n => { const m = new RegExp(`const ${n} = [^\\n]+`).exec(HTML)
 let pass = 0, fail = 0;
 function check(name, ok, detail = '') { if (ok) pass++; else fail++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${!ok && detail ? '  — ' + String(detail).slice(0, 400) : ''}`); }
 
-const FNS = ['_orderNeedOf', '_admittedNeedOf', '_draftAge', '_renderOrderNeed', '_renderTableRow', '_agentOrderSupplier', '_fmtKst', '_agentDeliveryLine', '_safeOrderUrl', 'deriveAgentActions', '_agentContext', '_agentCardHtml', '_renderAgentHome', '_loadAgentCycle',
+const FNS = ['_asideProposalLine', '_orderNeedOf', '_admittedNeedOf', '_draftAge', '_renderOrderNeed', '_renderTableRow', '_agentOrderSupplier', '_fmtKst', '_agentDeliveryLine', '_safeOrderUrl', 'deriveAgentActions', '_agentContext', '_agentCardHtml', '_renderAgentHome', '_loadAgentCycle',
   '_agentPrepareOrder', '_agentShowOrderSheet', '_agentShowOrder', '_agentCountItem', '_agentGoLogin', '_agentFocus', '_insertOrderIfNotDup', '_clearStoreContext', '_storeChanged'];
 const CODE = ['AGENT_PRIORITY', 'AGENT_MAX_CHECKS', '_AGENT_SOURCE_LABEL', '_DELIVERY_LABEL', '_agentEsc', '_agentNum'].map(constLine).join('\n') + '\n' + FNS.map(extractFn).join('\n');
 
@@ -63,7 +63,7 @@ function makeEnv(o = {}) {
   const body = `let SID = __S.SID, _storeEpoch = 0, _items = __S._items, _itemTrust = __S._itemTrust, _orderRequests = __S._orderRequests,
       _orderSupply = __S._orderSupply, _openSupply = __S._openSupply, _supplyAvailable = __S._supplyAvailable, _writerReady = __S._writerReady,
       _vendors = __S._vendors, _countMode = false, _countedIds = new Set(), _homeTableCollapsed = false, _agentCycle = new Map(),
-      _dismissedItemIds = new Set(), _orderedItemIds = new Set(), _storeAliases = [], _draftItems = [], _pendingComplexItems = null, _orderDelivery = new Map(), _writerCaps = [];
+      _dismissedItemIds = new Set(), _orderedItemIds = new Set(), _storeAliases = [], _draftItems = [], _pendingComplexItems = null, _orderDelivery = new Map(), _writerCaps = [], _asideWatch = new Map(), _asideEnabled = false;
     ${CODE}
     return { ${FNS.join(', ')},
       set(k, v) { eval(k + ' = v'); }, get(k) { return eval(k); } };`;

@@ -32,7 +32,7 @@ function extractConstBlock(name) {
 }
 const constLine = n => { const m = new RegExp(`const ${n} = [^\\n]+`).exec(HTML); if (!m) throw new Error('const not found: ' + n); return m[0]; };
 
-const FNS = ['_orderNeedOf', '_admittedNeedOf', '_draftAge', '_agentOrderSupplier', '_fmtKst', '_agentDeliveryLine', '_safeOrderUrl', 'deriveAgentActions', '_agentContext', '_agentCardHtml', '_renderAgentHome',
+const FNS = ['_asideProposalLine', '_orderNeedOf', '_admittedNeedOf', '_draftAge', '_agentOrderSupplier', '_fmtKst', '_agentDeliveryLine', '_safeOrderUrl', 'deriveAgentActions', '_agentContext', '_agentCardHtml', '_renderAgentHome',
   '_agentConfirmOrder', '_agentShowOrder', '_agentCountItem', '_agentGoLogin', '_agentFocus', '_clearStoreContext', '_storeChanged', '_loadOrderSupply',
   '_orderIdentity', '_openSupplyLabel', '_receiveItemHtml', '_writerActionsHtml',
   '_authClient', '_writerToken', '_refreshWriterReadiness', '_loadPendingAction', '_savePendingAction', '_writerResultMessage', '_newActionId', '_writerAct',
@@ -112,7 +112,7 @@ function makeEnv(o = {}, patch = null) {
       _orderSupply = __S._orderSupply, _openSupply = __S._openSupply, _supplyAvailable = __S._supplyAvailable, _writerReady = __S._writerReady,
       _vendors = __S._vendors, _countMode = false, _countedIds = new Set(), _homeTableCollapsed = false, _agentCycle = new Map(),
       _dismissedItemIds = new Set(), _orderedItemIds = new Set(), _storeAliases = [], _draftItems = [], _pendingComplexItems = null,
-      _authDb = null, _writerState = { status: 'signed_out', reason: '' }, _orderDelivery = new Map(), _writerCaps = [];
+      _authDb = null, _writerState = { status: 'signed_out', reason: '' }, _orderDelivery = new Map(), _writerCaps = [], _asideWatch = new Map(), _asideEnabled = false;
     ${code}
     return { ${FNS.join(', ')}, set(k, v) { eval(k + ' = v'); }, get(k) { return eval(k); } };`;
   const f = new Function(...names, '__S', body)(...names.map(n => env[n]), S);
@@ -322,7 +322,7 @@ function check(name, ok, detail = '') { if (ok) pass++; else fail++; console.log
       a.length === 1 && a[0].type === 'RECEIVE_PENDING' && a[0].title === '우유 추가 주문하지 마세요' && a[0].orders[0].line === '주문처 미확인 · 2박스 주문 확인됨' && a[0].primary_action.call === '_writerFullReceipt(11)'
       && html.includes('주문처 미확인 · 2박스 주문 확인됨') && !html.includes('쿠팡') && !/주문하세요|주문이 필요해요|이미 시켰다면/.test(e.text(html)), e.text(html));
     check('E2E-6 confirming an order changes no stock: item still 1박스 (app and server), app made no table write, no supply writer RPC',
-      e.f.get('_items')[0].current_qty === 1 && e.srv.items[0].current_qty === 1 && e.writes.length === 0 && e.rpcCalls.every(c => ['get_order_supply', 'get_open_supply', 'get_order_delivery'].includes(c.name)), JSON.stringify(e.writes));
+      e.f.get('_items')[0].current_qty === 1 && e.srv.items[0].current_qty === 1 && e.writes.length === 0 && e.rpcCalls.every(c => ['get_order_supply', 'get_open_supply', 'get_order_delivery', 'get_aside_watch'].includes(c.name)), JSON.stringify(e.writes));
 
     e.answer('1'); await e.f._writerPartialReceipt(11);
     a = ofItem(e.derive(), 1);
