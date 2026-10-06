@@ -565,6 +565,8 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 .agent-delivery-line.delayed{color:var(--warn)}
 .agent-aside-proposal{font-size:12px;margin-top:4px;padding:6px 8px;border:1px dashed var(--accent);border-radius:8px;word-break:keep-all;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .agent-aside-state{font-size:12px;color:var(--warn);margin-top:2px;word-break:keep-all}
+.agent-aside-worker{font-size:12px;color:var(--muted);margin:2px 0 6px;word-break:keep-all}
+.agent-aside-worker.warn{color:var(--warn);font-weight:600}
 .agent-links{display:flex;gap:10px;margin-top:3px}
 .agent-link{font-size:12px;color:var(--dim);text-decoration:underline}
 .agent-ext{margin-top:8px;text-align:right}
@@ -1114,7 +1116,7 @@ function _renderStoreTabs() {
 function _clearStoreContext() {
   _items = []; _vendors = []; _orderRequests = [];
   _dismissedItemIds = new Set(); _orderedItemIds = new Set(); _storeAliases = [];
-  _itemTrust = new Map(); _orderSupply = new Map(); _openSupply = new Map(); _orderDelivery = new Map(); _asideWatch = new Map(); _asideEnabled = false;
+  _itemTrust = new Map(); _orderSupply = new Map(); _openSupply = new Map(); _orderDelivery = new Map(); _asideWatch = new Map(); _asideEnabled = false; _asideWorker = null;
   _draftItems = [];
   window._v4TableRows = []; window._textOrderCache = [];
   if (_countMode) {   // 센 품목은 품목마다 이미 저장됐다. 이전 매장의 점검 표시는 새 매장으로 넘기지 않는다
@@ -4263,12 +4265,20 @@ function _fmtKst(v) {
 }
 
 // 배송 한 줄: 서버 배송 기록(get_order_delivery)에 있는 것만. 배송 완료는 입고가 아니다 (받았다고 기록해야 재고에 반영).
+// 도착 예정의 의미 (expected_arrival_kind): BY = 그 시각 이전, AT = 그 시각, 없음 = 예전 기록(의미 모름 — '이전'이라고 말하지 않는다).
+// 날짜만 알려진 BY(그날 23:59 이전)는 "N월 D일 중"으로 말한다 (시각을 지어내지 않는다).
 function _agentDeliveryLine(d) {
   if (!d) return '';
+  const eta = (at, kind) => {
+    const t = _fmtKst(at);
+    if (!t) return '';
+    if (kind === 'BY' && / 23:59$/.test(t)) return `${t.replace(/ 23:59$/, '')} 중 도착 예정`;
+    return kind === 'BY' ? `${t} 이전 도착 예정` : kind === 'AT' ? `${t} 도착 예정` : `도착 예정 ${t}`;
+  };
   const parts = [];
   if (d.delivery_status && _DELIVERY_LABEL[d.delivery_status]) parts.push(_DELIVERY_LABEL[d.delivery_status]);
   if (d.is_delayed === true) parts.push('배송이 지연되고 있어요');
-  if (d.expected_arrival_at && d.delivery_status !== 'DELIVERED') parts.push(`도착 예정 ${_fmtKst(d.expected_arrival_at)}`);
+  if (d.expected_arrival_at && d.delivery_status !== 'DELIVERED') parts.push(eta(d.expected_arrival_at, d.expected_arrival_kind === 'AT' || d.expected_arrival_kind === 'BY' ? d.expected_arrival_kind : null));
   if (d.delivery_conflict) parts.push('배송 기록이 서로 달라요 — 확인이 필요해요');
   return parts.join(' · ');
 }
@@ -4511,6 +4521,9 @@ function _renderAgentHome() {
   html += primary.length
     ? `<div class="agent-sum">오늘 할 일 ${primary.length}개</div>`
     : `<div class="agent-sum agent-none">오늘은 바로 처리할 일이 없습니다.</div>`;
+  // 자동 배송 확인이 켜진 매장에서만: 작업 PC 프로그램 상태 (정상 / 실행 중지 / Aside 로그인 필요 / 재시도 대기 / 오류)
+  const workerLine = typeof _asideEnabled !== 'undefined' && _asideEnabled ? _asideWorkerLine(_asideWorker) : '';
+  if (workerLine) html += `<div class="agent-aside-worker${_asideWorker.display_status === 'OK' ? '' : ' warn'}" data-aside-worker="${_agentEsc(_asideWorker.display_status)}">${_agentEsc(workerLine)}</div>`;
   html += primary.map(a => _agentCardHtml(a, false)).join('');
   if (moreChecks.length) {
     html += `<details class="agent-more"><summary>재고 확인이 필요한 품목 ${moreChecks.length}개 더 있음</summary>${moreChecks.map(a => _agentCardHtml(a, true)).join('')}</details>`;
@@ -6130,15 +6143,17 @@ async function _loadOrderSupply() {
   }
   // 자동 배송 확인(Aside 배송 확인 임무): 없는 서버이거나 이 매장이 켜져 있지 않으면 아무것도 보이지 않는다
   const nextAside = new Map();
-  let asideOn = false;
+  let asideOn = false, worker = null;
   if (ok) {
     try {
-      const [w, p] = await Promise.all([
+      const [w, p, s] = await Promise.all([
         db.rpc('get_aside_watch', { p_store_id: sid }),
         db.from('aside_watch_policy').select('enabled').eq('store_id', sid).limit(1),
+        db.rpc('get_aside_worker_status', { p_store_id: sid }),
       ]);
       if (!w?.error) for (const r of w?.data || []) nextAside.set(r.order_id, r);
       asideOn = !p?.error && p?.data?.[0]?.enabled === true;
+      worker = !s?.error && Array.isArray(s?.data) && s.data[0] ? s.data[0] : null;   // 예전 서버(상태 없음) → 표시 안 함
     } catch (e) { /* 자동 배송 확인 없음으로 둔다 */ }
   }
   if (_storeChanged(ep)) return;   // 이전 매장 공급·배송 상태는 새 매장에 쓰지 않는다
@@ -6147,6 +6162,7 @@ async function _loadOrderSupply() {
   _orderDelivery = ok ? nextDel : new Map();
   _asideWatch = nextAside;
   _asideEnabled = asideOn;
+  _asideWorker = worker;
   _supplyAvailable = ok;
 }
 
@@ -6155,6 +6171,17 @@ async function _loadOrderSupply() {
 // 근거 ASIDE_APPROVED + 제안 번호)으로 배송 기록이 남는다. 다시 입력할 것은 없다. 배송 완료도 입고가 아니다.
 let _asideWatch = new Map();      // order_id → get_aside_watch 행 (임무 상태 + 기다리는 제안)
 let _asideEnabled = false;        // 이 매장에서 자동 배송 확인이 켜져 있는가 (aside_watch_policy)
+let _asideWorker = null;          // get_aside_worker_status 행 (작업 PC의 배송 확인 프로그램 상태)
+// 작업 PC 상태 한 줄 — 멈춰 있으면 멈춰 있다고 말한다 (조용히 안 도는 상태 금지)
+const _ASIDE_WORKER_LABEL = { OK: '정상', STOPPED: '실행 중지', LOGIN_REQUIRED: 'Aside 로그인 필요', RETRY_WAIT: '재시도 대기', ERROR: '오류' };
+function _asideWorkerLine(w) {
+  if (!w || !_ASIDE_WORKER_LABEL[w.display_status]) return '';
+  const hint = w.display_status === 'STOPPED' ? ' — 작업 PC에서 프로그램이 돌고 있지 않아요'
+    : w.display_status === 'LOGIN_REQUIRED' ? ' — Aside에서 판매처에 다시 로그인해 주세요'
+    : w.display_status === 'ERROR' && w.aside_cli === 'KEY_UNAVAILABLE' ? ' — 작업 PC의 Aside 사용자로 실행해야 해요'
+    : w.display_status === 'ERROR' ? ' — 확인이 필요해요' : '';
+  return `자동 배송 확인: ${_ASIDE_WORKER_LABEL[w.display_status]}${hint}`;
+}
 const _ASIDE_URL = `${SUPABASE_URL}/functions/v1/aside-mission`;
 
 // 제안 한 줄 (Aside가 본 그대로): "쿠팡 주문 1103431282926 · 배송 중 · 10월 7일 07:00 이전 도착 예정 · 22:40 확인"
@@ -6163,11 +6190,16 @@ function _asideProposalLine(p) {
   if (!p || !p.changes) return '';
   const o = p.observed || {}, c = p.changes, parts = [];
   const status = o.delivery_status ?? c.delivery_status?.to, delayed = o.is_delayed ?? c.is_delayed?.to;
-  const eta = o.expected_arrival_at ?? c.expected_arrival_at?.to, kind = o.eta_kind ?? c.expected_arrival_at?.eta_kind;
-  parts.push(`${_AGENT_SOURCE_LABEL[p.supplier] || p.supplier || '판매처'} 주문 ${p.external_order_ref || ''}`.trim());
+  const eta = o.expected_arrival_at ?? c.expected_arrival_at?.to;
+  // 정규 의미(AT / BY)가 있으면 그것으로, 예전 서버의 제안(eta_kind만)이면 BY / AT만 인정 — 그 밖에는 '이전'이라고 말하지 않는다
+  const raw = o.expected_arrival_kind ?? c.expected_arrival_at?.kind ?? o.eta_kind ?? c.expected_arrival_at?.eta_kind;
+  const kind = raw === 'AT' || raw === 'BY' ? raw : null;
+  const words = o.eta_text ?? c.expected_arrival_at?.eta_text;
+  const seller = _AGENT_SOURCE_LABEL[p.supplier] || p.supplier || '판매처';
+  parts.push(`${seller} 주문 ${p.external_order_ref || ''}`.trim());
   if (status) parts.push(status === 'DELIVERED' ? '배송 완료' : (_DELIVERY_LABEL[status] || status));
   if (delayed === true) parts.push('배송이 지연되고 있어요');
-  if (eta && status !== 'DELIVERED') parts.push(`${_fmtKst(eta)}${kind === 'BY' ? ' 이전' : ''} 도착 예정`);
+  if (eta && status !== 'DELIVERED') parts.push(_agentDeliveryLine({ expected_arrival_at: eta, expected_arrival_kind: kind }) + (words ? ` (${seller} 표시: ${words})` : ''));
   if (c.external_order_url && Object.keys(c).length === 1) parts.push('주문 페이지 주소');
   const t = _fmtKst(p.observed_at);
   if (t) parts.push(`${t.replace(/^\d+월 \d+일 /, '')} 확인`);
@@ -6187,6 +6219,12 @@ async function _asideApply(orderId) {
   }
   // 일반 배송 기록 경로는 근거 출처를 보내지 않는다. 이 [반영]만 "사람이 승인한 Aside 관측"과 그 제안 번호를 붙인다.
   const fields = { ..._writerFields('UPDATE_ORDER_DELIVERY', v), evidence_source: 'ASIDE_APPROVED', evidence_ref: String(p.proposal_ref) };
+  // 도착 예정의 의미(AT / BY)는 시각과 함께 그대로 보낸다. 서버가 아직 의미를 저장하지 못하면 반영하지 않는다 (의미를 버리지 않는다).
+  const kind = p.changes?.expected_arrival_at?.kind;
+  if (kind === 'AT' || kind === 'BY') {
+    if (!(_writerCaps || []).includes('DELIVERY_ETA_KIND')) { showToast("서버가 아직 '이전·정각' 의미를 저장하지 못해 반영하지 않았어요 — 아무것도 바뀌지 않았습니다", 4000); return; }
+    fields.expected_arrival_kind = kind;
+  }
   await _writerAct('UPDATE_ORDER_DELIVERY', fields);
 }
 async function _asideCall(route, body) {

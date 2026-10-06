@@ -30,8 +30,8 @@ const check = (name, ok, detail = '') => { if (ok) pass++; else fail++; console.
 const J = x => JSON.stringify(x);
 
 const FNS = ['_asideProposalLine', '_asideOrderOf', '_asideApply', '_orderNeedOf', '_admittedNeedOf', '_draftAge', '_agentOrderSupplier', '_fmtKst',
-  '_agentDeliveryLine', '_safeOrderUrl', 'deriveAgentActions', '_agentCardHtml', '_writerFields'];
-const CODE = ['AGENT_PRIORITY', 'AGENT_MAX_CHECKS', '_AGENT_SOURCE_LABEL', '_DELIVERY_LABEL', '_agentEsc', '_agentNum'].map(constLine).join('\n') + '\n'
+  '_agentDeliveryLine', '_safeOrderUrl', 'deriveAgentActions', '_agentCardHtml', '_writerFields', '_asideWorkerLine'];
+const CODE = ['AGENT_PRIORITY', 'AGENT_MAX_CHECKS', '_AGENT_SOURCE_LABEL', '_DELIVERY_LABEL', '_agentEsc', '_agentNum', '_ASIDE_WORKER_LABEL'].map(constLine).join('\n') + '\n'
   + extractConstBlock('_WRITER_FIELDS') + '\n' + FNS.map(extractFn).join('\n');
 
 function makeEnv(o = {}) {
@@ -123,6 +123,43 @@ function card({ ready = true, delivery = CANON, watch = new Map([[129, WATCH()]]
     const t6 = q(6, '개'), t1 = q(1, '봉'), t3 = q(3, '박스');
     check('WEB-AW-08 the particle 이/가 follows the last sound in the receipt question (6개가 · 1봉이 · 3박스가)',
       t6.includes('스파게티니 6개가 배송완료로') && t1.includes('스파게티니 1봉이 배송완료로') && t3.includes('스파게티니 3박스가 배송완료로'), J([t6, t1, t3]));
+  }
+  // ── v0.2: ETA meaning on the Home (ETA-01 / 02 / 03 / 05) ──
+  {
+    const e = makeEnv();
+    const L = (at, kind) => e.f._agentDeliveryLine({ delivery_status: 'IN_TRANSIT', expected_arrival_at: at, expected_arrival_kind: kind });
+    const by = L('2026-10-06T22:00:00+00:00', 'BY'), at = L('2026-10-06T22:00:00+00:00', 'AT'), none = L('2026-10-06T22:00:00+00:00', null),
+      legacy = L('2026-10-06T23:00:00+00:00', undefined), day = L('2026-10-07T14:59:00+00:00', 'BY'), odd = L('2026-10-06T22:00:00+00:00', 'ABOUT');
+    check('ETA-01 kind BY → "10월 7일 07:00 이전 도착 예정"', by === '배송 중 · 10월 7일 07:00 이전 도착 예정', by);
+    check('ETA-02 kind AT → "10월 7일 07:00 도착 예정" (no 이전)', at === '배송 중 · 10월 7일 07:00 도착 예정', at);
+    check('ETA-03 no kind → "도착 예정 10월 7일 07:00" — never a false 이전; an unknown kind value is treated as none', none === '배송 중 · 도착 예정 10월 7일 07:00' && odd === none, [none, odd]);
+    check('ETA-05 the legacy Production row (08:00 KST, kind NULL) keeps its wording — no 이전 / 정각 meaning fabricated', legacy === '배송 중 · 도착 예정 10월 7일 08:00', legacy);
+    check('ETA-07w date-only BY (that day 23:59) → "10월 7일 중 도착 예정" (no invented hour)', day === '배송 중 · 10월 7일 중 도착 예정', day);
+  }
+  {
+    const P2 = { ...PROPOSAL, observed: { delivery_status: 'IN_TRANSIT', is_delayed: false, expected_arrival_at: '2026-10-07T14:59:00+00:00', eta_kind: 'DATE', expected_arrival_kind: 'BY', eta_text: '오늘 새벽 도착 보장' },
+      changes: { expected_arrival_at: { from: '2026-10-06T23:00:00+00:00', to: '2026-10-07T14:59:00+00:00', eta_kind: 'DATE', kind: 'BY', from_kind: null, eta_text: '오늘 새벽 도착 보장' } } };
+    const c = card({ watch: new Map([[129, WATCH({ proposal: P2 })]]) });
+    check('ETA-04w the v0.2 proposal on the card: "쿠팡 주문 1103431282926 · 배송 중 · 10월 7일 중 도착 예정 (쿠팡 표시: 오늘 새벽 도착 보장) · 22:40 확인 — 반영할까요?"',
+      c.text.includes(`쿠팡 주문 ${REF} · 배송 중 · 10월 7일 중 도착 예정 (쿠팡 표시: 오늘 새벽 도착 보장) · 22:40 확인 — 반영할까요?`), c.text);
+    const ok = makeEnv({ watch: new Map([[129, WATCH({ proposal: P2 })]]), caps: ['UPDATE_ORDER_DELIVERY', 'DELIVERY_ETA_KIND'] });
+    await ok.f._asideApply(129);
+    const old = makeEnv({ watch: new Map([[129, WATCH({ proposal: P2 })]]), caps: ['UPDATE_ORDER_DELIVERY'] });
+    await old.f._asideApply(129);
+    const legacyProposal = makeEnv({ watch: new Map([[129, WATCH()]]), caps: ['UPDATE_ORDER_DELIVERY'] });
+    await legacyProposal.f._asideApply(129);
+    check('ETA-04x [반영] carries the meaning: expected_arrival_kind BY sent with the time (server advertises DELIVERY_ETA_KIND); an older server → NOT applied (toast, nothing sent) instead of dropping the meaning; a v0.1 proposal (no kind) still applies as before',
+      ok.acts.length === 1 && ok.acts[0].fields.expected_arrival_kind === 'BY' && ok.acts[0].fields.expected_arrival_at === '2026-10-07T14:59:00.000Z'
+      && old.acts.length === 0 && /의미를 저장하지 못해/.test(old.toasts[0] || '') && legacyProposal.acts.length === 1 && !('expected_arrival_kind' in legacyProposal.acts[0].fields), J([ok.acts, old.toasts, legacyProposal.acts]));
+  }
+  // ── v0.2: operator-visible worker status line ──
+  {
+    const e = makeEnv();
+    const lines = ['OK', 'STOPPED', 'LOGIN_REQUIRED', 'RETRY_WAIT', 'ERROR'].map(s => e.f._asideWorkerLine({ display_status: s }));
+    const key = e.f._asideWorkerLine({ display_status: 'ERROR', aside_cli: 'KEY_UNAVAILABLE' });
+    check('WEB-AW-09 worker status line: 정상 / 실행 중지 / Aside 로그인 필요 / 재시도 대기 / 오류 (with the reason when stopped / login / installation key); DISABLED or no server status → nothing',
+      lines[0] === '자동 배송 확인: 정상' && /^자동 배송 확인: 실행 중지 — /.test(lines[1]) && /^자동 배송 확인: Aside 로그인 필요 — /.test(lines[2]) && lines[3] === '자동 배송 확인: 재시도 대기'
+      && /^자동 배송 확인: 오류/.test(lines[4]) && /Aside 사용자로 실행/.test(key) && e.f._asideWorkerLine({ display_status: 'DISABLED' }) === '' && e.f._asideWorkerLine(null) === '', J(lines));
   }
   console.log(`\nRESULT: ${pass} PASS / ${fail} FAIL (of ${pass + fail})`);
   process.exit(fail ? 1 : 0);

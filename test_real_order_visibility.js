@@ -322,7 +322,7 @@ function check(name, ok, detail = '') { if (ok) pass++; else fail++; console.log
       a.length === 1 && a[0].type === 'RECEIVE_PENDING' && a[0].title === '우유 추가 주문하지 마세요' && a[0].orders[0].line === '주문처 미확인 · 2박스 주문 확인됨' && a[0].primary_action.call === '_writerFullReceipt(11)'
       && html.includes('주문처 미확인 · 2박스 주문 확인됨') && !html.includes('쿠팡') && !/주문하세요|주문이 필요해요|이미 시켰다면/.test(e.text(html)), e.text(html));
     check('E2E-6 confirming an order changes no stock: item still 1박스 (app and server), app made no table write, no supply writer RPC',
-      e.f.get('_items')[0].current_qty === 1 && e.srv.items[0].current_qty === 1 && e.writes.length === 0 && e.rpcCalls.every(c => ['get_order_supply', 'get_open_supply', 'get_order_delivery', 'get_aside_watch'].includes(c.name)), JSON.stringify(e.writes));
+      e.f.get('_items')[0].current_qty === 1 && e.srv.items[0].current_qty === 1 && e.writes.length === 0 && e.rpcCalls.every(c => ['get_order_supply', 'get_open_supply', 'get_order_delivery', 'get_aside_watch', 'get_aside_worker_status'].includes(c.name)), JSON.stringify(e.writes));
 
     e.answer('1'); await e.f._writerPartialReceipt(11);
     a = ofItem(e.derive(), 1);
