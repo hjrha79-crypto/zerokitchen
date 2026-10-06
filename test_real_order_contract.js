@@ -119,6 +119,39 @@ function card({ sup = SUP(), delivery = null, ready = false, caps } = {}) {
       && !/주문 #\d/.test(HTML.replace(/주문 기록 #/g, '')), a.orders.map(o => o.line).join('|'));
   }
 
+  // WEB-RISK-01..07: the existing order's state is never hidden, whichever branch decides the card
+  {
+    const e = makeEnv({});
+    const ONION = { item_id: 5, item_name: '양파', current_qty: 0, target_qty: 6, unit: '개' };
+    const ctxOf = ({ health = 'HEALTHY', delivery = null, need = { state: 'NEEDED', qty: 6, current: 0, target: 6, unit: '개' }, remaining = 1, ready = false } = {}) => ({
+      storeId: 1, items: [ONION], needOf: () => need, orderRequests: [{ id: 51, store_id: 1, item_id: 5, item_name: '양파', qty: remaining, unit: '개', status: 'ordered', created_at: '2026-10-01T00:00:00Z' }],
+      orderSupply: new Map([[51, SUP({ ordered_qty: remaining, remaining_qty: remaining, health, supply_source: 'COUPANG' })]]),
+      openSupply: new Map([[5, { open_supply_state: health === 'AT_RISK' ? 'AT_RISK' : 'VERIFIED_OPEN' }]]), supplyAvailable: true, writerReady: ready, cycle: new Map(), vendors: [],
+      delivery: new Map(delivery ? [[51, delivery]] : []), writerCaps: [] });
+    const cardOf = ctx => { const r = e.f.deriveAgentActions(ctx); const all = [...r.primary, ...r.moreChecks, ...r.waiting].filter(a => a.item_id === 5); return { all, a: all[0], text: all[0] ? `${all[0].title} | ${all[0].reason}` : '' }; };
+    const h = cardOf(ctxOf());
+    check('WEB-RISK-01 partial cover, healthy → "양파 5개 더 주문하세요" (6 − 1), no risk / delay wording', h.all.length === 1 && h.a.type === 'ORDER_NOW' && h.a.required_qty === 5 && h.a.title === '양파 5개 더 주문하세요'
+      && !/확인이 필요|지연|늦어/.test(h.text) && h.a.critical === false, h.text);
+    const r2 = cardOf(ctxOf({ health: 'AT_RISK' }));
+    check('WEB-RISK-02 partial cover + AT_RISK → still 5개 더 주문 + "기존 주문(1개)은 확인이 필요해요"; no delay wording; one card', r2.all.length === 1 && r2.a.required_qty === 5
+      && r2.a.title === '양파 5개 더 주문하세요' && r2.a.reason.includes('기존 주문(1개)은 확인이 필요해요') && !/지연|늦어/.test(r2.text) && r2.a.critical === true, r2.text);
+    const r3 = cardOf(ctxOf({ delivery: { delivery_status: 'IN_TRANSIT', is_delayed: true } }));
+    check('WEB-RISK-03 partial cover + delayed delivery → "기존 주문 배송이 지연되고 있어요"; no "확인이 필요" claim', r3.all.length === 1 && r3.a.required_qty === 5
+      && r3.a.reason.includes('기존 주문 배송이 지연되고 있어요') && !/확인이 필요/.test(r3.a.reason) && r3.a.orders[0].delivery_line.includes('배송이 지연되고 있어요'), r3.text);
+    const r4 = cardOf(ctxOf({ health: 'AT_RISK', delivery: { delivery_status: 'IN_TRANSIT', is_delayed: true } }));
+    check('WEB-RISK-04 partial cover + AT_RISK + delayed → one combined line "기존 주문(1개)은 배송이 지연되고 있어 확인이 필요해요" (no duplicate sentences)', r4.all.length === 1
+      && r4.a.reason.includes('기존 주문(1개)은 배송이 지연되고 있어 확인이 필요해요') && (r4.a.reason.match(/지연/g) || []).length === 1 && (r4.a.reason.match(/확인이 필요/g) || []).length === 1, r4.text);
+    const full = { state: 'NEEDED', qty: 1, current: 2, target: 3, unit: '개' };
+    const r5 = cardOf(ctxOf({ health: 'AT_RISK', need: full }));
+    check('WEB-RISK-05 full cover + AT_RISK → unchanged: "양파 추가 주문하지 마세요" + "이 주문은 확인이 필요해요", no delay wording', r5.a.title === '양파 추가 주문하지 마세요'
+      && r5.a.reason.includes('이 주문은 확인이 필요해요') && !/지연|늦어/.test(r5.text) && r5.a.type !== 'ORDER_NOW', r5.text);
+    const r6 = cardOf(ctxOf({ need: full, delivery: { delivery_status: 'IN_TRANSIT', is_delayed: true } }));
+    check('WEB-RISK-06 full cover + delayed → unchanged: "배송이 지연되고 있어요"', r6.a.title === '양파 추가 주문하지 마세요' && r6.a.reason.includes('배송이 지연되고 있어요') && r6.a.type !== 'ORDER_NOW', r6.text);
+    const r7 = cardOf(ctxOf({ need: { state: 'NEEDS_VERIFICATION', qty: 0, current: 0, recorded: 0, target: 6, unit: '개' }, delivery: { delivery_status: 'IN_TRANSIT', is_delayed: true }, health: 'AT_RISK' }));
+    check('WEB-RISK-07 untrusted count + a delayed / at-risk order → no ORDER_NOW and no order quantity; "현재 수량을 확인하면 더 주문할지 알려 드릴게요" + the delay / check wording',
+      r7.all.length === 1 && r7.a.type !== 'ORDER_NOW' && r7.a.required_qty === null && r7.a.reason.includes('현재 수량을 확인하면 더 주문할지 알려 드릴게요') && r7.a.reason.includes('배송이 지연되고 있어요'), r7.text);
+  }
+
   // CONFIRM dialog: only what the person knows
   {
     const e = makeEnv({ orders: [ORD(11)], form: { supply_source: 'COUPANG', ordered_at: null, external_order_ref: '' } });
