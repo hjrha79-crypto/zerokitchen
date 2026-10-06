@@ -140,8 +140,8 @@ function card({ ready = true, delivery = CANON, watch = new Map([[129, WATCH()]]
     const P2 = { ...PROPOSAL, observed: { delivery_status: 'IN_TRANSIT', is_delayed: false, expected_arrival_at: '2026-10-07T14:59:00+00:00', eta_kind: 'DATE', expected_arrival_kind: 'BY', eta_text: '오늘 새벽 도착 보장' },
       changes: { expected_arrival_at: { from: '2026-10-06T23:00:00+00:00', to: '2026-10-07T14:59:00+00:00', eta_kind: 'DATE', kind: 'BY', from_kind: null, eta_text: '오늘 새벽 도착 보장' } } };
     const c = card({ watch: new Map([[129, WATCH({ proposal: P2 })]]) });
-    check('ETA-04w the v0.2 proposal on the card: "쿠팡 주문 1103431282926 · 배송 중 · 10월 7일 중 도착 예정 (쿠팡 표시: 오늘 새벽 도착 보장) · 22:40 확인 — 반영할까요?"',
-      c.text.includes(`쿠팡 주문 ${REF} · 배송 중 · 10월 7일 중 도착 예정 (쿠팡 표시: 오늘 새벽 도착 보장) · 22:40 확인 — 반영할까요?`), c.text);
+    check('ETA-04w the v0.2 proposal on the card: "쿠팡 주문 1103431282926 · 배송 중 · 10월 7일 중 도착 예정 · 쿠팡 표시: 오늘 새벽 도착 보장 · 22:40 확인 — 반영할까요?"',
+      c.text.includes(`쿠팡 주문 ${REF} · 배송 중 · 10월 7일 중 도착 예정 · 쿠팡 표시: 오늘 새벽 도착 보장 · 22:40 확인 — 반영할까요?`), c.text);
     const ok = makeEnv({ watch: new Map([[129, WATCH({ proposal: P2 })]]), caps: ['UPDATE_ORDER_DELIVERY', 'DELIVERY_ETA_KIND'] });
     await ok.f._asideApply(129);
     const old = makeEnv({ watch: new Map([[129, WATCH({ proposal: P2 })]]), caps: ['UPDATE_ORDER_DELIVERY'] });
@@ -151,6 +151,28 @@ function card({ ready = true, delivery = CANON, watch = new Map([[129, WATCH()]]
     check('ETA-04x [반영] carries the meaning: expected_arrival_kind BY sent with the time (server advertises DELIVERY_ETA_KIND); an older server → NOT applied (toast, nothing sent) instead of dropping the meaning; a v0.1 proposal (no kind) still applies as before',
       ok.acts.length === 1 && ok.acts[0].fields.expected_arrival_kind === 'BY' && ok.acts[0].fields.expected_arrival_at === '2026-10-07T14:59:00.000Z'
       && old.acts.length === 0 && /의미를 저장하지 못해/.test(old.toasts[0] || '') && legacyProposal.acts.length === 1 && !('expected_arrival_kind' in legacyProposal.acts[0].fields), J([ok.acts, old.toasts, legacyProposal.acts]));
+  }
+  // ── v0.3: day-only ETA (DATE) — no clock time anywhere ──
+  {
+    const e = makeEnv();
+    const dl = e.f._agentDeliveryLine({ delivery_status: 'IN_TRANSIT', expected_arrival_kind: 'DATE', expected_arrival_date: '2026-10-07', expected_arrival_at: null, expected_arrival_text: '오늘 새벽 도착 보장' });
+    const dlNoText = e.f._agentDeliveryLine({ delivery_status: 'IN_TRANSIT', expected_arrival_kind: 'DATE', expected_arrival_date: '2026-10-07' });
+    check('ETA3-01w canonical DATE on the Home: "배송 중 · 10월 7일 도착 예정 · 판매처 표시: 오늘 새벽 도착 보장"; without words still "10월 7일 도착 예정"; no clock time',
+      dl === '배송 중 · 10월 7일 도착 예정 · 판매처 표시: 오늘 새벽 도착 보장' && dlNoText === '배송 중 · 10월 7일 도착 예정' && !/\d\d:\d\d/.test(dl + dlNoText), [dl, dlNoText]);
+    const P3 = { ...PROPOSAL, observed_at: '2026-10-06T16:41:00+00:00', observed: { delivery_status: 'IN_TRANSIT', is_delayed: false, expected_arrival_kind: 'DATE', expected_arrival_date: '2026-10-07', eta_text: '오늘 새벽 도착 보장' },
+      changes: { expected_arrival: { from: { at: '2026-10-06T23:00:00+00:00' }, to: { kind: 'DATE', date: '2026-10-07', text: '오늘 새벽 도착 보장' }, eta_kind: 'DATE' } } };
+    const c = card({ watch: new Map([[129, WATCH({ proposal: P3 })]]) });
+    check('ETA3-04w the v0.3 proposal: "쿠팡 주문 1103431282926 · 배송 중 · 10월 7일 도착 예정 · 쿠팡 표시: 오늘 새벽 도착 보장 · 01:41 확인 — 반영할까요?"; never 23:59 / 07:00 이전 / 08:00 in the proposal',
+      c.text.includes(`쿠팡 주문 ${REF} · 배송 중 · 10월 7일 도착 예정 · 쿠팡 표시: 오늘 새벽 도착 보장 · 01:41 확인 — 반영할까요?`)
+      && !/23:59|07:00 이전/.test(c.text.slice(c.text.indexOf('쿠팡 주문'))), c.text);
+    const ok = makeEnv({ watch: new Map([[129, WATCH({ proposal: P3 })]]), caps: ['UPDATE_ORDER_DELIVERY', 'DELIVERY_ETA_KIND', 'DELIVERY_ETA_DATE'] });
+    await ok.f._asideApply(129);
+    const old = makeEnv({ watch: new Map([[129, WATCH({ proposal: P3 })]]), caps: ['UPDATE_ORDER_DELIVERY', 'DELIVERY_ETA_KIND'] });
+    await old.f._asideApply(129);
+    const f = ok.acts[0]?.fields || {};
+    check('ETA3-04x [반영] of a DATE proposal → expected_arrival_kind DATE + expected_arrival_date 2026-10-07 + the seller words, and NO expected_arrival_at (no time made up); a server without DELIVERY_ETA_DATE → refused, nothing sent',
+      ok.acts.length === 1 && f.expected_arrival_kind === 'DATE' && f.expected_arrival_date === '2026-10-07' && f.expected_arrival_text === '오늘 새벽 도착 보장' && !('expected_arrival_at' in f)
+      && old.acts.length === 0 && /날짜만 있는 도착 예정/.test(old.toasts[0] || ''), J([ok.acts, old.toasts]));
   }
   // ── v0.2: operator-visible worker status line ──
   {
