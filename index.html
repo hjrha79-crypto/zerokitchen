@@ -316,6 +316,7 @@ tr.ot-done .ot-name{text-decoration:line-through;color:var(--dim)}
 }
 .nl-input:focus{border-color:var(--accent)}
 .nl-input::placeholder{color:var(--text-muted);font-size:14px}
+textarea.nl-input{resize:none;overflow-y:auto;max-height:132px;line-height:1.35;display:block}
 .nl-mic-btn{width:52px;height:52px;border-radius:50%;border:2px solid var(--accent);background:var(--accent-lt);cursor:pointer;font-size:20px;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
 .nl-mic-btn.rec{border-color:var(--red);background:rgba(217,48,37,.08);animation:none}
 .nl-mic-btn .mic-countdown{font-size:14px;font-weight:700;color:var(--red);line-height:1}
@@ -691,6 +692,8 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 <!-- 홈탭 (발주 체크리스트 + 입력) -->
 <div id="tab-input" class="tab active">
   <!-- [최상단] 오늘 할 일 (Agent Home): 품목마다 결정 하나, 우선순위 순. 부족·주기 알림·추천·입고 대기를 여기서 하나로 말한다 -->
+  <!-- 매장 발주요청 (발주요청을 받는 매장에서만 보인다) -->
+  <div id="purchaseHome"></div>
   <div id="agentHome"></div>
 
   <!-- [중단] 오늘의 발주 표 카드 (발주표 = 담아 둔 주문 + 입고 대기 상세) -->
@@ -909,8 +912,9 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
         <div class="msp-opts" id="micTimeoutOpts"></div>
       </div>
     </div>
-    <input class="nl-input" id="nlInput" type="text"
-      placeholder="말하거나 입력하세요" autocomplete="off" enterkeyhint="send">
+    <!-- 여러 줄(매니저 발주 문자)을 붙여넣어도 줄바꿈이 그대로 남도록 textarea. Enter = 보내기, Shift+Enter = 줄바꿈 -->
+    <textarea class="nl-input" id="nlInput" rows="1"
+      placeholder="말하거나 입력하세요" autocomplete="off" enterkeyhint="send" oninput="_nlAutosize(this)"></textarea>
     <button class="nl-send-btn" id="nlSendBtn" onclick="handleNaturalInput()">
       <span id="nlBtnTxt">입력</span>
     </button>
@@ -1126,6 +1130,8 @@ function _clearStoreContext() {
   }
   const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
   _agentCycle = new Map();
+  if (typeof _purchase === 'object' && _purchase) _purchase = { ..._purchase, requests: [], sid: null };
+  set('purchaseHome', '');
   set('agentHome', '');
   set('orderNeedCard', '');
   set('suggestBar', '');
@@ -1899,6 +1905,9 @@ async function handleNaturalInput() {
 
     console.log('[NL] 일반 처리 진입:', raw, '| _pendingComplexItems:', _pendingComplexItems, '| _complexQtyState:', !!_complexQtyState);
 
+    // 매장 발주요청(매니저 문자)은 재고·실사·정정·발주 조회 파서보다 먼저 가른다 — 발주요청이면 여기서 끝 (재고·주문 쓰기 0)
+    if (typeof _purchaseRoute === 'function' && await _purchaseRoute(raw)) return;
+
     // 혼합 입력: 뒤쪽 재고 질문은 그 품목을 조회만 하고, 앞쪽 기록 부분만 아래 처리로 보낸다
     const _mixed = _splitMixedQuery(raw);
     if (_mixed) {
@@ -2297,6 +2306,7 @@ async function handleNaturalInput() {
     _nlProcessing = false;
     btn.disabled = false;
     btnTxt.textContent = '입력';
+    if (typeof _nlAutosize === 'function') _nlAutosize(inp);   // 보낸 뒤 비워진 입력창은 다시 한 줄
   }
 }
 
@@ -4764,6 +4774,7 @@ async function renderOrder() {
     await _refreshWriterReadiness();
     if (_storeChanged(ep)) return;
     _renderWriterBar();
+    if (typeof _refreshPurchaseHome === 'function') _refreshPurchaseHome(ep).catch(() => {});   // 발주요청 카드 — 기다리지 않는다
     await _loadInventoryTrust();
     if (_storeChanged(ep)) return;
     _renderOrderNeed();
@@ -6932,6 +6943,390 @@ async function runJson() {
 }
 
 /* ════════════════════════════════════════════════════════
+   매장 발주요청 (STORE_PURCHASE_REQUEST, pr-v1)
+   매니저가 보낸 발주 문자를 대표가 붙여넣으면: 재고 입력·주문이 아니라 "발주요청"으로 받는다.
+   문자 → 서버(purchase-request)가 원문·줄을 보관 → 품목/포장 확인(한 화면) → 공급처 조사 준비.
+   이 앱은 재고·주문·장바구니·결제를 만들지 않는다. 판정(상태·매핑)은 서버가 한다.
+════════════════════════════════════════════════════════ */
+// 서버 zk_pr_parse(pr-parse-v1)와 같은 규칙 (parity 테스트): "<품목> [<규격 51-70>] <수량><단위>" — 규격 범위는 수량이 아니다.
+const _PR_UNITS = '박스|상자|케이스|봉지|봉|캔|팩|통|병|개|포|판|망|단|롤|장|묶음|인분|킬로그램|kg|KG|Kg|키로|킬로|그램|g|리터|L|ml|EA|ea';
+const _PR_TAIL_RE = /\s*((발주|주문)\s*(좀\s*)?(부탁(합니다|드립니다|드려요|해요|해)?|해\s*주세요|해\s*줘|요청(합니다|드립니다)?|넣어\s*주세요|넣어\s*줘)?|부탁(합니다|드립니다|드려요|해요))$/;
+const _PR_PHRASE_RE = /(발주|주문|부탁|요청|보내\s*주|넣어\s*주|시켜)/;
+const _PR_UNCERTAIN_RE = /였나|였지|였던가|인가|일까|아마|어제|지난|그때/;
+function _prAliasKey(s) { return String(s ?? '').replace(/[\s._()·[\]-]/g, '').toLowerCase(); }
+function _prSpecKey(s) { return String(s ?? '').replace(/[\s()]/g, '').replace(/~/g, '-'); }
+function _purchaseParse(raw) {
+  const itemRe = new RegExp(`^(.*?)\\s*([0-9]+(\\.[0-9]+)?)\\s*(${_PR_UNITS})$`);
+  const lines = [], skipped = [], unparsed = [];
+  let phrase = false;
+  for (const rawLine of String(raw ?? '').replace(/\r/g, '').split('\n')) {
+    const kept = rawLine.replace(/^ +| +$/g, '');
+    let s = rawLine.replace(/\s+/g, ' ').trim().replace(/^([-*•·▪]\s*|[0-9]{1,2}[.)]\s+)/, '');
+    s = s.replace(/[\s.,!~]+$/, '').trim();
+    if (!s) continue;
+    if (_PR_PHRASE_RE.test(s)) phrase = true;
+    const m = itemRe.exec(s.replace(_PR_TAIL_RE, '').trim());
+    if (m && /[가-힣A-Za-z]/.test(m[1])) {
+      let name = m[1].trim(), spec = null, unit = m[4];
+      const qty = Number(m[2]);
+      const n = /^(.*?)\s*[(]?([0-9]+\s*[-~]\s*[0-9]+)[)]?$/.exec(name);
+      if (n && /[가-힣A-Za-z]/.test(n[1].trim())) { name = n[1].trim(); spec = n[2].replace(/\s/g, ''); }
+      unit = ['kg', 'KG', 'Kg', '키로', '킬로', '킬로그램'].includes(unit) ? 'kg' : unit === '그램' ? 'g' : unit === '리터' ? 'L' : unit;
+      // 한 줄 = 한 품목: 이름 안에 "<수량><단위><낱말>"이 또 있거나(줄이 붙어 버림) 40자를 넘으면 한 품목으로 읽지 않는다
+      if (qty > 0 && qty <= 100000 && [...name].length <= 40 && !new RegExp(`[0-9]+(\\.[0-9]+)?\\s*(${_PR_UNITS})\\s*[가-힣A-Za-z]{2,}`).test(name)) {
+        lines.push({ line_no: lines.length + 1, raw_text: kept, raw_item_text: name, requested_qty: qty, requested_unit: unit, specification_text: spec,
+          alias_key: _prAliasKey(name), spec_key: _prSpecKey(spec), parse_confidence: 'HIGH' });
+        continue;
+      }
+    }
+    if (!/[0-9]/.test(s) && /^(안녕|수고|좋은\s*(아침|하루|오후|저녁)|고생|사장님|대표님|점장님)/.test(s)) skipped.push({ raw_text: kept, kind: 'GREETING' });
+    else if (!/[0-9]/.test(s) && /(발주|주문|부탁|요청|감사|고맙|넣어\s*주|보내\s*주)/.test(s)) skipped.push({ raw_text: kept, kind: 'CLOSING' });
+    else unparsed.push(kept);
+  }
+  return { parser_version: 'pr-parse-v1', status: !lines.length ? 'FAILED' : unparsed.length ? 'PARTIAL' : 'COMPLETE', lines, skipped, unparsed, has_request_phrase: phrase };
+}
+// 입력 라우터 (재고 파서보다 먼저): 여러 줄 "품목+수량" + 발주/주문 요청 표현 → 어느 매장에서든 발주요청(쓰기 0으로 시작).
+// 발주요청을 받는 매장에서만: 한 줄 요청("치즈 3박스 발주 부탁합니다"), 지난 발주 문자 보기, 발주요청 취소(미리보기).
+// 물음표로 끝나는 말·추측·지난 이야기는 요청이 아니다 → null (기존 질문 처리: 쓰기 0).
+function _purchaseIntentOf(raw, enabledHere) {
+  const s = String(raw ?? '').trim();
+  if (!s) return null;
+  const rows = s.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
+  if (rows.some(x => /[?？]$/.test(x))) return null;
+  const p = _purchaseParse(s);
+  if (rows.length >= 2 && p.lines.length >= 2 && p.has_request_phrase) return { kind: 'REQUEST', parse: p };
+  if (!enabledHere) return null;
+  if (rows.length === 1 && p.lines.length === 1 && p.has_request_phrase && !_PR_UNCERTAIN_RE.test(s)) return { kind: 'REQUEST', parse: p };
+  // 한 줄에 여러 "수량+단위"가 붙은 발주 문장(줄바꿈이 없어진 문자 등)도 재고 파서로 보내지 않는다 — 서버가 원문을 보관하고 "한 줄에 하나씩"을 안내
+  if (rows.length === 1 && p.has_request_phrase && !_PR_UNCERTAIN_RE.test(s)
+      && (s.match(new RegExp(`[0-9]+(\\.[0-9]+)?\\s*(${_PR_UNITS})`, 'g')) || []).length >= 2) return { kind: 'REQUEST', parse: p };
+  if (/(발주|주문)/.test(s) && /(문자|요청|메시지)/.test(s) && /(보여|다시|확인|알려|뭐였|목록)/.test(s)) return { kind: 'LOOKUP' };
+  if (/(발주|주문)\s*(요청)?\s*(을|를)?\s*취소/.test(s)) return { kind: 'CANCEL' };
+  return null;
+}
+
+const _PURCHASE_API = 'pr-v1';
+const _PURCHASE_URL = `${SUPABASE_URL}/functions/v1/purchase-request/web`;
+const _PURCHASE_PENDING_KEY = 'zk_purchase_pending_v1';
+let _purchase = { loaded: false, ready: false, stores: [], requests: [], sid: null, reason: '' };
+const _prEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const _prQty = v => String(Number(v));
+function _purchaseStoreOf(sid) { return (_purchase.stores || []).find(s => Number(s.store_id) === Number(sid) && (s.authority || []).length) || null; }
+async function _refreshPurchase(sid = SID) {
+  const token = await _writerToken();
+  if (!token) { _purchase = { loaded: true, ready: false, stores: [], requests: [], sid, reason: 'SIGNED_OUT' }; return _purchase; }
+  let body = null;
+  try {
+    const res = await fetch(`${_PURCHASE_URL}?store_id=${encodeURIComponent(sid)}`, { method: 'GET', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY } });
+    if (res.ok) body = await res.json().catch(() => null);
+  } catch { body = null; }
+  const ok = !!(body && body.api_version === _PURCHASE_API && body.ready === true);
+  _purchase = { loaded: true, ready: ok, stores: ok && Array.isArray(body.stores) ? body.stores : [], requests: ok && Array.isArray(body.requests) ? body.requests : [], sid, reason: ok ? 'READY' : 'UNAVAILABLE' };
+  return _purchase;
+}
+async function _purchaseRequestOf(requestId) {
+  const token = await _writerToken();
+  if (!token) return null;
+  try {
+    const res = await fetch(`${_PURCHASE_URL}?request_id=${encodeURIComponent(requestId)}`, { method: 'GET', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY } });
+    const b = res.ok ? await res.json().catch(() => null) : null;
+    return b && b.request ? b.request : null;
+  } catch { return null; }
+}
+// 보내기: action_id를 먼저 저장하고 보낸다. 응답을 못 받으면 성공·실패를 추정하지 않고 같은 번호로 다시 확인한다.
+async function _purchasePost(action, fields) {
+  const p = _loadPurchasePending();
+  if (p && p.action_id) { showToast('확인 중인 발주요청 기록이 있어요 — [다시 확인]을 먼저 눌러 주세요', 3500); return null; }
+  const env = { action, action_id: _newActionId(), ...fields };
+  _savePurchasePending(env);
+  return _deliverPurchasePending();
+}
+function _loadPurchasePending() { try { return JSON.parse(localStorage.getItem(_PURCHASE_PENDING_KEY) || 'null'); } catch { return null; } }
+function _savePurchasePending(p) { try { if (p) localStorage.setItem(_PURCHASE_PENDING_KEY, JSON.stringify(p)); else localStorage.removeItem(_PURCHASE_PENDING_KEY); } catch { /* 저장 불가 */ } }
+async function _deliverPurchasePending() {
+  const env = _loadPurchasePending();
+  if (!env) return null;
+  const token = await _writerToken();
+  if (!token) { showToast('다시 로그인해 주세요 — 보낸 발주요청은 로그인 후 같은 번호로 확인합니다', 4000); return null; }
+  let res, body = null;
+  try { res = await fetch(_PURCHASE_URL, { method: 'POST', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(env) }); }
+  catch { showToast('응답을 받지 못했어요 — [다시 확인]을 누르면 같은 요청으로 확인합니다 (중복 접수 없음)', 4000); _renderPurchasePendingBar(); return null; }
+  try { body = await res.json(); } catch { body = null; }
+  if (res.status >= 500 || !body || typeof body.code !== 'string') { showToast('서버가 확인하지 못했어요 — 잠시 후 [다시 확인]을 눌러 주세요', 4000); _renderPurchasePendingBar(); return null; }
+  _savePurchasePending(null);
+  _renderPurchasePendingBar();
+  return body;
+}
+function _renderPurchasePendingBar() {
+  const el = document.getElementById('purchaseHome');
+  if (!el) return;
+  const p = _loadPurchasePending();
+  const bar = p ? `<div class="card" style="border:1px solid var(--accent);font-size:13px">결과 확인 중인 발주요청 기록 <button class="v4-receive-btn" style="margin-left:8px" onclick="_purchaseRetryPending()">다시 확인</button></div>` : '';
+  const cur = el.querySelector('[data-pr-pending]');
+  if (cur) cur.outerHTML = `<div data-pr-pending>${bar}</div>`;
+}
+async function _purchaseRetryPending() {
+  const p = _loadPurchasePending();
+  const body = await _deliverPurchasePending();
+  if (body && p) _purchaseShowResult(p.action === 'SUBMIT_REQUEST' ? (p.raw_text || '') : '', body);
+}
+
+const _PR_STATUS_LABEL = { RECEIVED: '접수', PARSED: '읽음', MAPPING_REQUIRED: '품목 확인 필요', MAPPED: '품목 확인됨', READY_FOR_RESEARCH: '공급처 조사 준비됨', CANCELLED: '취소됨', FAILED: '읽지 못함' };
+const _PR_SCOPE_LABEL = { STORE_ORDER_HISTORY: '과거 구매', STRATEGY_CENSUS: '조사 후보' };
+const _PR_SUPPLIER_LABEL = { SIKBOM: '식봄', COUPANG: '쿠팡' };
+// 첫 화면 문장: "신세계 대전점 발주요청 11개를 읽었습니다. / 8개는 품목 후보를 찾았고, 3개는 확인이 필요합니다. / 구매 전에 제품/포장만 한 번 확인해주세요."
+function _purchaseSummaryText(req) {
+  const s = req.summary || {}, name = req.display_name || '매장';
+  const out = [`${name} 발주요청 ${s.line_count}개를 읽었습니다.`];
+  if (req.status === 'READY_FOR_RESEARCH') return _purchaseReadyText(req);
+  if (s.confirmed === s.line_count) out.push('모두 지난번에 확인한 품목입니다.');
+  else out.push(`${s.candidate_found}개는 품목 후보를 찾았고, ${s.needs_check}개는 확인이 필요합니다.`);
+  if ((req.unparsed_lines || []).length) out.push(`읽지 못한 줄 ${req.unparsed_lines.length}개는 원문에 그대로 남겨 두었어요 — 고친 문자로 다시 붙여넣어 주세요.`);
+  out.push('구매 전에 제품/포장만 한 번 확인해주세요.');
+  return out.join('\n');
+}
+function _purchaseReadyText(req) {
+  const s = req.summary || {};
+  return `${req.display_name || '매장'} 발주요청 ${s.line_count}개 매핑 완료\n식봄·쿠팡 가격/배송을 확인할 준비가 됐습니다.`;
+}
+function _purchaseResultButtons(req) {
+  if (!req) return '';
+  const rid = _prEsc(req.request_id);
+  if (req.status === 'READY_FOR_RESEARCH') return `<button class="oai-create" onclick="_purchaseResearchStart('${rid}')">공급처 조사 시작</button>`;
+  if (req.status === 'MAPPING_REQUIRED') return `<button class="oai-create" onclick="_purchaseOpenReview('${rid}')">품목 확인하기</button>`;
+  return '';
+}
+function _purchaseAttach(html) {
+  const card = document.getElementById('resList')?.lastChild;
+  if (!card || !html) return;
+  const row = document.createElement('div');
+  row.className = 'order-action-inline';
+  row.innerHTML = html;
+  card.appendChild(row);
+}
+function _purchaseShowResult(raw, body) {
+  const req = body.request || null;
+  switch (body.code) {
+    case 'RECEIVED': case 'ALREADY_RECEIVED':
+      addResult(raw, (body.code === 'ALREADY_RECEIVED' ? '이미 받은 발주요청이에요.\n' : '') + _purchaseSummaryText(req) + '\n재고·주문은 바꾸지 않았습니다.', 'ok');
+      _purchaseAttach(_purchaseResultButtons(req));
+      break;
+    case 'DUPLICATE_CANDIDATE': {
+      const t = _fmtKst(body.duplicate_received_at);
+      addResult(raw, `${body.same_text ? '같은 문자' : '같은 품목·수량'}의 발주요청을 ${t || '조금 전'}에 이미 받았어요 — 새로 접수하지 않았습니다 (재고·주문 변화 없음).`, 'warn');
+      const enc = encodeURIComponent(raw);
+      _purchaseAttach(`<button class="oai-edit" onclick="_purchaseOpenReview('${_prEsc(body.duplicate_of)}')">받은 요청 보기</button>
+        <button class="oai-cancel" onclick="_purchaseSubmit(${Number(req?.store_id ?? SID)}, decodeURIComponent('${enc}'), true)">새 요청으로 접수</button>`);
+      break;
+    }
+    case 'PARSE_FAILED': addResult(raw, '품목을 읽지 못했어요 — 원문만 보관했습니다. "치즈 3박스"처럼 한 줄에 하나씩 보내 주세요 (재고·주문 변화 없음).', 'warn'); break;
+    case 'STORE_NOT_ENABLED': addResult(raw, '이 매장은 아직 발주요청을 받지 않아요 — 아무것도 바뀌지 않았습니다.', 'warn'); break;
+    case 'FORBIDDEN': addResult(raw, '이 매장의 발주요청 권한이 없어요 — 아무것도 바뀌지 않았습니다.', 'warn'); break;
+    case 'INVALID_ACTION': addResult(raw, '링크·특수 문자가 있거나 너무 긴 문자는 받을 수 없어요 — 아무것도 바뀌지 않았습니다.', 'warn'); break;
+    case 'MAPPINGS_CONFIRMED': break;
+    default: addResult(raw, `발주요청을 기록하지 못했어요 (${_prEsc(body.code)}) — 아무것도 바뀌지 않았습니다.`, 'warn');
+  }
+}
+async function _purchaseSubmit(storeId, raw, acceptDuplicate = false) {
+  const body = await _purchasePost('SUBMIT_REQUEST', { store_id: Number(storeId), raw_text: raw, idempotency_key: _newActionId(), ...(acceptDuplicate ? { accept_duplicate: true } : {}) });
+  if (!body) return;
+  _purchaseShowResult(raw, body);
+  if (Number(storeId) === Number(SID)) await _refreshPurchaseHome(_storeEpoch);
+}
+// 다른 매장 탭에서 붙여넣었을 때: 발주요청을 받는 매장을 사람이 고르면 그 매장으로 접수하고 전환한다
+async function _purchaseSubmitTo(storeId, raw) {
+  if (Number(storeId) !== Number(SID) && typeof _switchStore === 'function') await _switchStore(Number(storeId));
+  await _purchaseSubmit(storeId, raw);
+}
+// 라우터 진입 (handleNaturalInput이 재고 파서보다 먼저 부른다). 발주요청이면 true — 재고·주문 경로로 가지 않는다.
+async function _purchaseRoute(raw) {
+  if (/(발주|주문|부탁|요청|취소)/.test(raw) && !_purchase.loaded) await _refreshPurchase().catch(() => {});
+  const here = _purchaseStoreOf(SID);
+  const intent = _purchaseIntentOf(raw, !!(here && here.purchasing_enabled));
+  if (!intent) return false;
+  document.getElementById('parseLoading')?.remove();
+  const inp = document.getElementById('nlInput');
+  if (inp) inp.value = '';
+  if (intent.kind === 'LOOKUP') { await _purchaseShowRecent(raw); return true; }
+  if (intent.kind === 'CANCEL') { await _purchaseCancelPreview(raw); return true; }
+  const n = intent.parse.lines.length;
+  if (here && here.purchasing_enabled) { await _purchaseSubmit(here.store_id, raw); return true; }
+  const targets = (_purchase.stores || []).filter(s => s.purchasing_enabled && (s.authority || []).length);
+  if (!targets.length) {
+    addResult(raw, `발주요청 ${n}개로 이해했어요 — 이 계정에는 발주요청을 받을 매장이 없어요. 재고·주문은 바꾸지 않았습니다.`, 'warn');
+    return true;
+  }
+  addResult(raw, `발주요청 ${n}개로 이해했어요 — 재고·주문은 바꾸지 않았습니다. 어느 매장의 요청인가요?`, 'ok');
+  const enc = encodeURIComponent(raw);
+  _purchaseAttach(targets.map(s => `<button class="oai-create" onclick="_purchaseSubmitTo(${Number(s.store_id)}, decodeURIComponent('${enc}'))">${_prEsc(s.display_name)}</button>`).join(''));
+  return true;
+}
+async function _purchaseShowRecent(raw) {
+  await _refreshPurchase().catch(() => {});
+  const list = (_purchase.requests || []).slice(0, 5);
+  if (!list.length) { addResult(raw, '받은 발주요청이 없어요.', 'ok'); return; }
+  addResult(raw, '최근 발주요청 (읽기만 — 아무것도 바뀌지 않습니다):\n' + list.map(r => `${_fmtKst(r.received_at) || ''} · ${r.line_count}개 · ${_PR_STATUS_LABEL[r.status] || r.status} — ${r.first_lines || ''}`).join('\n'), 'ok');
+  _purchaseAttach(list.filter(r => r.status === 'MAPPING_REQUIRED' || r.status === 'READY_FOR_RESEARCH')
+    .map(r => `<button class="oai-edit" onclick="_purchaseOpenReview('${_prEsc(r.request_id)}')">${_prEsc((_fmtKst(r.received_at) || '').replace(/^\d+월 \d+일 /, ''))} 요청 보기</button>`).join(''));
+}
+// "발주 취소할게": 바로 취소하지 않는다 — 어떤 요청인지 사람이 고르게 보여 준다
+async function _purchaseCancelPreview(raw) {
+  await _refreshPurchase().catch(() => {});
+  const open = (_purchase.requests || []).filter(r => ['MAPPING_REQUIRED', 'MAPPED', 'READY_FOR_RESEARCH'].includes(r.status));
+  if (!open.length) { addResult(raw, '취소할 발주요청이 없어요 — 아무것도 바뀌지 않았습니다.', 'ok'); return; }
+  addResult(raw, '어떤 발주요청을 취소할까요? — 아직 아무것도 취소하지 않았습니다.\n' + open.map(r => `${_fmtKst(r.received_at) || ''} · ${r.line_count}개 — ${r.first_lines || ''}`).join('\n'), 'warn');
+  _purchaseAttach(open.map(r => `<button class="oai-cancel" onclick="_purchaseCancel('${_prEsc(r.request_id)}')">${_prEsc((_fmtKst(r.received_at) || '').replace(/^\d+월 \d+일 /, ''))} 요청 취소</button>`).join(''));
+}
+async function _purchaseCancel(requestId) {
+  if (!confirm('이 발주요청을 취소할까요? (재고·주문은 바뀌지 않습니다)')) return;
+  const body = await _purchasePost('CANCEL_REQUEST', { store_id: Number(SID), request_id: requestId });
+  if (!body) return;
+  showToast(body.code === 'CANCELLED' ? '발주요청을 취소했어요' : body.code === 'ALREADY_CANCELLED' ? '이미 취소된 요청이에요' : `취소하지 못했어요 (${body.code})`, 3000);
+  await _refreshPurchaseHome(_storeEpoch);
+}
+function _purchaseResearchStart(requestId) {
+  // 다음 단계(공급처 조사)에서 연결한다. 지금은 조사·장바구니·주문·결제를 하지 않는다.
+  showToast('공급처 조사는 다음 단계에서 연결됩니다 — 장바구니·주문·결제는 하지 않았어요', 3500);
+}
+
+// ── 품목 확인 (한 화면 묶음 review) ──
+function _purchaseLineIcon(l) { return l.mapping_status === 'ACTIVE' ? '✅' : (l.candidates || []).length === 1 ? '✅' : (l.candidates || []).length > 1 ? '⚠️' : '❓'; }
+function _purchaseLineState(l) {
+  if (l.mapping_status === 'ACTIVE') return 'CONFIRMED';
+  if (l.mapping_status === 'HUMAN_CONFIRMED' || (l.candidates || []).length) return 'CANDIDATE';
+  return 'UNRESOLVED';
+}
+const _PR_STATE_LABEL = { CONFIRMED: '확인됨', CANDIDATE: '후보', UNRESOLVED: '미확인' };
+const _PR_CONF_LABEL = { NONE: '없음', LOW: '낮음', MEDIUM: '보통', CONFIRMED: '확인됨' };
+function _purchaseReviewHtml(req) {
+  const lines = req.lines || [];
+  const rows = lines.map(l => {
+    const n = l.line_no, cands = l.candidates || [], unit = _prEsc(l.requested_unit);
+    const title = `${_purchaseLineIcon(l)} ${_prEsc(l.raw_item_text)}${l.specification_text ? ' ' + _prEsc(l.specification_text) : ''} ${_prQty(l.requested_qty)}${unit}`;
+    const meta = `읽기 확실 · 제품 확신도 ${_PR_CONF_LABEL[l.mapping_confidence] || l.mapping_confidence} · <b>${_PR_STATE_LABEL[_purchaseLineState(l)]}</b>`;
+    const opts = [];
+    if (l.mapping_status === 'ACTIVE' && l.mapping) {
+      opts.push(`<label><input type="radio" name="pr-pick-${n}" value="keep" checked> 지난번 확인 그대로: ${_prEsc(l.mapping.product_name)} · 1${unit} = ${_prQty(l.mapping.conversion_factor)}${_prEsc(l.mapping.supplier_unit)}</label>`);
+    }
+    const preset = l.mapping_status !== 'ACTIVE' && cands.length === 1;
+    cands.forEach(c => opts.push(`<label><input type="radio" name="pr-pick-${n}" value="ev:${Number(c.evidence_id)}"${preset || (l.mapping && l.mapping.evidence_id === c.evidence_id && l.mapping_status !== 'ACTIVE') ? ' checked' : ''}>
+      ${_PR_SCOPE_LABEL[c.scope] || '후보'}: ${_prEsc(c.product_name)}${c.package_spec ? ' · ' + _prEsc(c.package_spec) : ''}${c.supplier ? ' (' + _prEsc(_PR_SUPPLIER_LABEL[c.supplier] || c.supplier) + ')' : ''}${c.spelling_variant ? ' · 다른 표기' : ''}</label>`));
+    opts.push(`<label><input type="radio" name="pr-pick-${n}" value="new"${!cands.length && l.mapping_status !== 'ACTIVE' ? ' checked' : ''}> ${cands.length ? '다른 제품' : '새 품목으로 등록'} (공급처 조사 때 찾기)</label>`);
+    const refs = (l.references || []).map(r => `참고(다른 매장): ${_prEsc(r.product_name)} — 이 매장 제품으로 쓰지 않음`).join('<br>');
+    const conv = l.mapping_status === 'ACTIVE' ? '' : `<div class="pr-conv">포장 단위: <select name="pr-conv-${n}" onchange="_purchaseConvChanged(${n})">
+        <option value="">선택…</option><option value="SAME_UNIT">1${unit} 그대로 구매</option><option value="FACTOR">1${unit} = 직접 입력</option><option value="UNKNOWN">모름 (조사 전에 확인 필요)</option></select>
+        <span class="pr-factor" data-pr-factor="${n}" style="display:none"><input name="pr-factor-${n}" type="number" min="0" step="any" style="width:64px" placeholder="수량"><input name="pr-sunit-${n}" type="text" maxlength="10" style="width:56px" placeholder="단위"></span></div>`;
+    return `<div class="pr-row" data-pr-line="${n}" style="border-top:1px solid var(--border);padding:8px 0">
+      <div style="font-weight:600">${title}</div><div style="font-size:12px;color:var(--muted)">${meta}</div>
+      <div class="pr-opts" style="display:flex;flex-direction:column;gap:2px;font-size:13px;margin-top:4px">${opts.join('')}</div>
+      ${refs ? `<div style="font-size:11px;color:var(--muted)">${refs}</div>` : ''}${conv}</div>`;
+  }).join('');
+  const s = req.summary || {};
+  return `<div class="card pr-review" data-pr-request="${_prEsc(req.request_id)}" data-pr-version="${Number(req.request_version)}">
+    <div style="font-weight:700">${_prEsc(req.display_name || '')} 발주 품목 확인 · ${s.line_count}개</div>
+    <div style="font-size:12px;color:var(--muted)">문자 읽기는 확실하고, 제품(SKU)은 아직 확정 전이에요. 맞는 제품과 포장만 골라 주세요 — 재고·주문은 바뀌지 않습니다.</div>
+    <label style="font-size:13px"><input type="checkbox" onchange="_purchaseAllSameUnit(this.checked)"> 고르지 않은 포장은 모두 "요청 단위 그대로 구매"</label>
+    ${rows}
+    <div id="prReviewError" style="color:var(--danger,#c00);font-size:13px"></div>
+    <div style="display:flex;gap:8px;margin-top:8px"><button class="oai-create" onclick="_purchaseSubmitReview()">${s.line_count}개 품목 확인 완료</button>
+    <button class="oai-cancel" onclick="_purchaseCloseReview()">닫기</button></div></div>`;
+}
+// 화면 값 → 서버 결정 목록. 고르지 않은 품목이 있으면 보내지 않는다 (추측해서 채우지 않는다).
+function _purchaseReviewCollect(req, val) {
+  const lines = [], missing = [];
+  for (const l of req.lines || []) {
+    const n = l.line_no, pick = val(`pr-pick-${n}`) || '';
+    const name = `${l.raw_item_text}${l.specification_text ? ' ' + l.specification_text : ''}`;
+    if (pick === 'keep' && l.mapping_status === 'ACTIVE') { lines.push({ line_no: n, choice: 'KEEP' }); continue; }
+    const d = { line_no: n };
+    if (/^ev:\d+$/.test(pick)) { d.choice = 'CANDIDATE'; d.evidence_id = Number(pick.slice(3)); }
+    else if (pick === 'new') d.choice = 'NEW_PRODUCT';
+    else { missing.push(`${name} (제품)`); continue; }
+    const conv = val(`pr-conv-${n}`) || '';
+    if (conv === 'SAME_UNIT' || conv === 'UNKNOWN') d.conversion = conv;
+    else if (conv === 'FACTOR') {
+      const f = Number(val(`pr-factor-${n}`)), u = String(val(`pr-sunit-${n}`) || '').trim();
+      if (!(f > 0 && f <= 10000) || !u || u.length > 10) { missing.push(`${name} (포장 수량·단위)`); continue; }
+      d.conversion = 'FACTOR'; d.conversion_factor = f; d.supplier_unit = u;
+    } else { missing.push(`${name} (포장)`); continue; }
+    lines.push(d);
+  }
+  return { lines, missing };
+}
+function _purchaseAllSameUnit(on) {
+  if (!on) return;
+  document.querySelectorAll('.pr-review select[name^="pr-conv-"]').forEach(sel => { if (!sel.value) sel.value = 'SAME_UNIT'; });
+}
+function _purchaseConvChanged(n) {
+  const sel = document.querySelector(`.pr-review select[name="pr-conv-${n}"]`), box = document.querySelector(`.pr-review [data-pr-factor="${n}"]`);
+  if (box) box.style.display = sel && sel.value === 'FACTOR' ? 'inline' : 'none';
+}
+let _purchaseReviewReq = null;
+async function _purchaseOpenReview(requestId) {
+  const req = await _purchaseRequestOf(requestId);
+  if (!req) { showToast('발주요청을 불러오지 못했어요 — 로그인·권한을 확인해 주세요', 3000); return; }
+  _purchaseReviewReq = req;   // 이미 확인된 품목은 "지난번 확인 그대로"가 기본 — 바꾸면 새 버전이 된다
+  let el = document.getElementById('purchaseReview');
+  if (!el) { el = document.createElement('div'); el.id = 'purchaseReview'; el.style.cssText = 'position:fixed;inset:0;overflow:auto;background:rgba(0,0,0,.45);z-index:60;padding:16px'; document.body.appendChild(el); }
+  el.innerHTML = `<div style="max-width:560px;margin:0 auto">${_purchaseReviewHtml(req)}</div>`;
+  el.style.display = 'block';
+}
+function _purchaseCloseReview() { const el = document.getElementById('purchaseReview'); if (el) { el.style.display = 'none'; el.innerHTML = ''; } _purchaseReviewReq = null; }
+function _purchaseFormValue(name) {
+  const root = document.getElementById('purchaseReview');
+  if (!root) return '';
+  const radio = root.querySelector(`input[type="radio"][name="${name}"]:checked`);
+  if (radio) return radio.value;
+  const el = root.querySelector(`[name="${name}"]`);
+  return el && el.type !== 'radio' ? el.value : '';
+}
+async function _purchaseSubmitReview() {
+  const req = _purchaseReviewReq;
+  if (!req) return;
+  const { lines, missing } = _purchaseReviewCollect(req, _purchaseFormValue);
+  const err = document.getElementById('prReviewError');
+  if (missing.length) { if (err) err.textContent = `아직 고르지 않았어요: ${missing.join(', ')}`; return; }
+  const body = await _purchasePost('CONFIRM_MAPPINGS', { store_id: Number(req.store_id), request_id: req.request_id, request_version: Number(req.request_version), lines });
+  if (!body) return;
+  if (body.code !== 'MAPPINGS_CONFIRMED') {
+    const msg = { STALE_VERSION: '그 사이 다른 확인이 반영됐어요 — 다시 열어 확인해 주세요', INVALID_CHOICE: '고른 제품이 이 품목의 후보가 아니에요 — 다시 골라 주세요', FORBIDDEN: '품목 확인 권한이 없어요' }[body.code];
+    if (err) err.textContent = `${msg || `확인하지 못했어요 (${body.code})`} — 아무것도 바뀌지 않았습니다.`;
+    return;
+  }
+  _purchaseCloseReview();
+  const r = body.request;
+  const s = r.summary || {};
+  if (r.status === 'READY_FOR_RESEARCH') addResult('품목 확인', _purchaseReadyText(r), 'ok');
+  else addResult('품목 확인', `${s.confirmed}개 매핑 완료 · ${s.unresolved}개는 아직 확인이 필요해요 (포장 단위를 모르면 공급처 조사 전에 확인합니다).`, 'warn');
+  _purchaseAttach(_purchaseResultButtons(r));
+  await _refreshPurchaseHome(_storeEpoch);
+}
+// 홈 카드 (발주요청을 받는 매장에서만): 받은 요청과 다음 할 일 하나
+function _purchaseHomeHtml(store, requests) {
+  if (!store) return '';
+  const prof = store.delivery_profile || {};
+  const where = prof.status === 'ACTIVE' ? `배송지 확인됨 (v${prof.version})` : `배송지 ${_prEsc(prof.branch_location || '')} — 주소 확인 전`;
+  const rows = (requests || []).filter(r => r.status !== 'CANCELLED').slice(0, 5).map(r => {
+    const act = r.status === 'MAPPING_REQUIRED' ? `<button class="v4-receive-btn" onclick="_purchaseOpenReview('${_prEsc(r.request_id)}')">품목 확인하기</button>`
+      : r.status === 'READY_FOR_RESEARCH' ? `<button class="v4-receive-btn" onclick="_purchaseResearchStart('${_prEsc(r.request_id)}')">공급처 조사 시작</button>` : '';
+    const label = r.status === 'MAPPING_REQUIRED' ? `품목 확인 필요 ${r.unresolved}개` : (_PR_STATUS_LABEL[r.status] || r.status);
+    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:13px;padding:4px 0">
+      <span>${_prEsc(_fmtKst(r.received_at) || '')} · ${Number(r.line_count)}개 · ${_prEsc(label)}${r.duplicate_of ? ' · 중복 접수' : ''}</span>${act}</div>`;
+  }).join('');
+  return `<div class="card" data-pr-home><div style="font-weight:700">${_prEsc(store.display_name)} 발주요청</div>
+    <div style="font-size:12px;color:var(--muted)">매니저 문자를 채팅창에 붙여넣으면 발주요청으로 받아요 (재고·주문은 바뀌지 않음) · ${where}</div>
+    ${rows || '<div style="font-size:13px;color:var(--muted)">받은 발주요청이 없어요</div>'}<div data-pr-pending></div></div>`;
+}
+async function _refreshPurchaseHome(ep) {
+  try { await _refreshPurchase(); } catch { /* 표시만 생략 */ }
+  if (typeof ep === 'number' && _storeChanged(ep)) return;
+  const el = document.getElementById('purchaseHome');
+  if (!el) return;
+  el.innerHTML = _purchaseHomeHtml(_purchaseStoreOf(SID), _purchase.requests);
+  _renderPurchasePendingBar();
+}
+
+/* ════════════════════════════════════════════════════════
    Pending → Confirmed 10초 구조
 ════════════════════════════════════════════════════════ */
 // ── 복잡도 판단 ──
@@ -8091,9 +8486,17 @@ function updateJustTalk() {
   if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
 }
 
+// 입력창: Enter = 보내기 (줄바꿈을 넣지 않는다), Shift+Enter = 줄바꿈. 붙여넣은 여러 줄은 그대로 남는다.
 document.addEventListener('keydown', e=>{
-  if (e.key==='Enter' && document.activeElement===document.getElementById('nlInput')) handleNaturalInput();
+  if (e.key==='Enter' && !e.shiftKey && document.activeElement===document.getElementById('nlInput')) { e.preventDefault(); handleNaturalInput(); }
 });
+// 입력창 높이: 내용만큼 (최대 몇 줄), 비우면 한 줄로
+function _nlAutosize(el) {
+  if (!el || !el.style) return;
+  el.style.height = 'auto';
+  if (el.value) el.style.height = Math.min(el.scrollHeight + 2, 132) + 'px';
+  else el.style.height = '';
+}
 
 // 음성인식: MediaRecorder + OpenAI + 음성 레벨 시각화
 let _micActive = false;
