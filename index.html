@@ -7322,8 +7322,124 @@ async function _refreshPurchaseHome(ep) {
   if (typeof ep === 'number' && _storeChanged(ep)) return;
   const el = document.getElementById('purchaseHome');
   if (!el) return;
-  el.innerHTML = _purchaseHomeHtml(_purchaseStoreOf(SID), _purchase.requests);
+  const store = _purchaseStoreOf(SID);
+  if (store) { try { await _refreshPurchaseExec(SID); } catch { _pe.view = null; } }
+  if (typeof ep === 'number' && _storeChanged(ep)) return;
+  el.innerHTML = _purchaseHomeHtml(store, _purchase.requests) + (store ? _purchaseExecHtml(_pe.view) : '');
   _renderPurchasePendingBar();
+}
+
+// ── 구매 실행: [결제 준비 승인](B) 과 [○○원 결제 승인](C) 는 서로 다른 화면·다른 버튼이다 (서버: purchase-execution)
+//   B = 장바구니 + 식봄 기본 배송지 전환 + 결제 직전 화면 읽기까지. 결제는 절대 아님.
+//   C = Agent가 대전 배송지·최종 금액을 확인한 결제 직전 화면 그대로에 대한 1회용 결제 승인.
+const _PE_API = 'pe-v1';
+const _PE_URL = `${SUPABASE_URL}/functions/v1/purchase-execution/web`;
+let _pe = { view: null };
+const _peBusy = {};   // 누르는 중인 버튼(더블클릭·새로고침 재전송 방지 — 서버도 1회용)
+const _peWon = n => `${Number(n || 0).toLocaleString('ko-KR')}원`;
+async function _refreshPurchaseExec(sid = SID) {
+  const token = await _writerToken();
+  if (!token) { _pe.view = null; return null; }
+  const res = await fetch(`${_PE_URL}?store_id=${encodeURIComponent(sid)}&view=purchases`, { method: 'GET', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY } });
+  const b = res.ok ? await res.json().catch(() => null) : null;
+  _pe.view = b && b.api_version === _PE_API && b.code === 'OK' ? b : null;
+  return _pe.view;
+}
+async function _pePost(action, fields) {
+  const token = await _writerToken();
+  if (!token) { showToast('다시 로그인해 주세요', 3000); return null; }
+  try {
+    const res = await fetch(_PE_URL, { method: 'POST', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ action, action_id: _newActionId(), ...fields }) });
+    const b = await res.json().catch(() => null);
+    return b && typeof b.code === 'string' ? b : null;
+  } catch { return null; }
+}
+function _peOrigLabel(a) { return (a.original_address && (a.original_address.label || a.original_address.address_text)) || '원래 배송지'; }
+// 주소 상태는 주문 상태와 다른 줄로 — "주문 완료"와 "원복 필요"를 한 문장으로 뭉개지 않는다
+function _peAddressLine(a) {
+  if (!a.address_switched) return '';
+  const s = a.address && a.address.state, o = _prEsc(_peOrigLabel(a));
+  if (s === 'ADDRESS_RESTORED') return `<div data-pe-addr="restored" style="font-size:13px">식봄 기본 배송지를 ${o}으로 되돌렸습니다.</div>`;
+  if (s === 'ADDRESS_RESTORE_REQUIRED') return `<div data-pe-addr="restore-required" style="font-size:13px;color:var(--danger,#c0392b);font-weight:700">⚠ 식봄 기본 배송지 원복 필요</div>
+    <div style="font-size:12px">${a.state === 'SUCCEEDED' ? '주문은 완료됐지만 ' : ''}식봄 기본 배송지를 ${o}으로 되돌리지 못했습니다. 식봄에서 직접 바꾼 뒤 눌러 주세요.</div>
+    <button class="v4-receive-btn" data-pe-btn="resolve" onclick="_peResolveRestore('${_prEsc(a.attempt_id)}')">직접 되돌렸어요</button>`;
+  if (s === 'RESTORE_PENDING' || s === 'ADDRESS_RESTORING') return `<div data-pe-addr="restoring" style="font-size:13px">식봄 기본 배송지를 ${o}으로 되돌리는 중</div>`;
+  return '';
+}
+function _peBasketHtml(view, b, g) {
+  const d = view.delivery || {};
+  const lines = (g.lines || []).map(l => `${_prEsc(l.name)} ${_prEsc(l.qty)}`).join(' · ');
+  const btn = !view.approver ? '<div style="font-size:12px;color:var(--muted)">대표(승인자)만 승인할 수 있어요</div>'
+    : !g.account_confirmed ? `<div style="font-size:12px;color:var(--muted)">${_prEsc(g.supplier_label)} 계정 확인 전 — 아직 결제 준비를 시작할 수 없어요</div>`
+    : `<button class="oai-create" data-pe-btn="B" onclick="_peApproveB('${_prEsc(b.basket_id)}','${_prEsc(g.supplier)}')">결제 준비 승인</button>`;
+  return `<div class="card" data-pe-basket="${_prEsc(b.basket_id)}"><div style="font-weight:700">${_prEsc(view.display_name)} 발주</div>
+    <div style="font-size:14px">${_prEsc(g.supplier_label)} ${Number(g.line_count)}품목 · 총 ${_peWon(g.total_krw)}</div>
+    <div style="font-size:12px;color:var(--muted)">${lines}</div>
+    <div style="font-size:13px">배송: ${_prEsc(d.branch_location || d.address_line || '')} · ${_prEsc(d.recipient || '')}</div>
+    <div style="font-size:12px;color:var(--muted)">결제 준비 중 ${_prEsc(g.supplier_label)} 기본 배송지를 ${_prEsc(view.display_name)}으로 변경합니다. 주문 완료 후 원래 배송지로 다시 되돌립니다. 결제는 다음 화면에서 따로 승인합니다.</div>
+    ${btn}</div>`;
+}
+function _peAttemptHtml(view, a) {
+  const pa = a.payment_approval, s = a.snapshot, label = _prEsc(a.supplier_label);
+  let head = '', body = '', btn = '';
+  if ((a.state === 'EXECUTING' || a.state === 'PREPARED') && pa && pa.state === 'ACTIVE') {
+    head = '결제 승인됨 — 결제 진행 중';   // C는 1회용: 재승인 버튼 없음
+  } else if (a.state === 'EXECUTING' && s && a.address && a.address.state === 'PRE_SUBMIT_READY') {
+    head = '결제 준비 완료';
+    body = `<div style="font-size:12px">${(s.lines || []).map(l => `${_prEsc(l.name || l.product_id)} ${_prEsc(l.qty)} · ${_peWon(l.line_total_krw)}`).join('<br>')}</div>
+      <div style="font-size:13px">배송비 ${_peWon(s.shipping_krw)} · 총 ${_peWon(s.total_krw)}</div>
+      <div style="font-size:13px">배송지: ${_prEsc(s.address && s.address.address_text)} · 수령인 ${_prEsc(s.address && s.address.recipient_name)}</div>
+      ${s.eta_text ? `<div style="font-size:12px;color:var(--muted)">도착 예정 ${_prEsc(s.eta_text)}</div>` : ''}`;
+    if (view.approver) btn = `<button class="oai-create" data-pe-btn="C" onclick="_peApproveC('${_prEsc(a.attempt_id)}')">${_peWon(s.total_krw)} 결제 승인</button>
+      <div style="font-size:11px;color:var(--muted)">${_prEsc(s.payment_text)}</div>`;
+  } else if (a.state === 'EXECUTING' || a.state === 'PREPARED') {
+    head = `결제 준비 중 — ${label} 배송지·장바구니 확인`;
+  } else if (a.state === 'SUBMITTING' || a.state === 'OUTCOME_UNKNOWN') {
+    head = '주문 결과를 확인하고 있습니다.';   // 결제 버튼·재승인·주소 복구 버튼 없음
+  } else if (a.state === 'SUCCEEDED') {
+    head = '주문 완료';
+    body = a.order ? `<div style="font-size:13px">${label} 결제 ${_peWon(a.order.paid_total_krw)}</div>` : '';
+  } else {
+    head = a.submitted ? '주문 확인 필요 — 식봄 주문내역을 확인해 주세요' : '결제 전 중단 — 결제되지 않았습니다';
+    body = a.reason ? `<div style="font-size:12px;color:var(--muted)">${_prEsc(a.reason)}</div>` : '';
+  }
+  return `<div class="card" data-pe-attempt="${_prEsc(a.attempt_id)}" data-pe-state="${_prEsc(a.state)}"><div style="font-weight:700" data-pe-head>${_prEsc(head)}</div>${body}${_peAddressLine(a)}${btn}</div>`;
+}
+function _purchaseExecHtml(view) {
+  if (!view) return '';
+  const baskets = (view.baskets || []).flatMap(b => (b.groups || []).map(g => _peBasketHtml(view, b, g)));
+  const attempts = (view.attempts || []).slice(0, 3).map(a => _peAttemptHtml(view, a));
+  return baskets.concat(attempts).join('');
+}
+async function _peApproveB(basketId, supplier) {
+  const b = ((_pe.view && _pe.view.baskets) || []).find(x => x.basket_id === basketId);
+  const g = b && (b.groups || []).find(x => x.supplier === supplier);
+  if (!g || _peBusy['B:' + basketId]) return null;
+  _peBusy['B:' + basketId] = true;
+  try {
+    const r = await _pePost('APPROVE_PURCHASE_BASKET', { basket_id: basketId, basket_hash: b.basket_hash, approval_text: g.presubmit_text, suppliers: [supplier], allow_address_switch: true });
+    showToast(r && r.code === 'PRESUBMIT_APPROVED' ? '결제 준비를 시작합니다 — 결제는 아직 아니에요' : `결제 준비를 시작하지 못했어요 (${(r && r.code) || '응답 없음'})`, 3500);
+    await _refreshPurchaseHome(_storeEpoch);
+    return r;
+  } finally { delete _peBusy['B:' + basketId]; }
+}
+async function _peApproveC(attemptId) {
+  const a = ((_pe.view && _pe.view.attempts) || []).find(x => x.attempt_id === attemptId);
+  if (!a || !a.snapshot || _peBusy['C:' + attemptId]) return null;
+  _peBusy['C:' + attemptId] = true;
+  try {
+    const r = await _pePost('APPROVE_PAYMENT', { attempt_id: attemptId, snapshot_hash: a.snapshot.snapshot_hash, payment_text: a.snapshot.payment_text });
+    showToast(r && (r.code === 'PAYMENT_APPROVED' || r.code === 'PAYMENT_ALREADY_APPROVED') ? `${_peWon(a.snapshot.total_krw)} 결제 승인 — 결제를 진행합니다` : `결제 승인을 기록하지 못했어요 (${(r && r.code) || '응답 없음'}) — 결제되지 않았습니다`, 3500);
+    await _refreshPurchaseHome(_storeEpoch);
+    return r;
+  } finally { delete _peBusy['C:' + attemptId]; }
+}
+async function _peResolveRestore(attemptId) {
+  if (!confirm('식봄에서 기본 배송지를 직접 원래대로 바꿨나요?')) return null;
+  const r = await _pePost('RESOLVE_ADDRESS_RESTORE', { attempt_id: attemptId, restored_by_hand: true });
+  showToast(r && r.code === 'ADDRESS_RESTORED' ? '배송지 원복을 기록했어요' : `기록하지 못했어요 (${(r && r.code) || '응답 없음'})`, 3000);
+  await _refreshPurchaseHome(_storeEpoch);
+  return r;
 }
 
 /* ════════════════════════════════════════════════════════
