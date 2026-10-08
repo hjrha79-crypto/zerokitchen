@@ -7334,9 +7334,9 @@ async function _refreshPurchaseHome(ep) {
 //   C = Agent가 대전 배송지·최종 금액을 확인한 결제 직전 화면 그대로에 대한 1회용 결제 승인.
 // 정확한 서버 버전 게이트: purchase-execution 이 "있다"는 이유만으로 구매 화면을 켜지 않는다 (api / package / build / capabilities 전부 일치해야 함)
 const _PE_API = 'pe-v2';
-const _PE_PACKAGE = 'store-purchase-sikbom-driver-004';
-const _PE_BUILD = 'a45e23b697ac2d52359a529a8ff533e0b6ad07819100f5c6ba5b81c15d315b23';
-const _PE_REQUIRED_CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V2', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'OPEN_ADDRESS_SELECTOR', 'EDGE_BUILD_BINDING'];
+const _PE_PACKAGE = 'store-purchase-sikbom-driver-005';
+const _PE_BUILD = '6f67eec92724be76bca7eba3ec78d05f1c2519a563b4cff3313b8ee08ceae526';
+const _PE_REQUIRED_CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V3', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'OPEN_ADDRESS_SELECTOR', 'PAYMENT_METHOD_GATE', 'ADDRESS_UNCHANGED_VERIFY', 'EDGE_BUILD_BINDING'];
 const _PE_URL = `${SUPABASE_URL}/functions/v1/purchase-execution/web`;
 const _PE_READY_URL = `${SUPABASE_URL}/functions/v1/purchase-execution/readiness`;
 let _pe = { view: null, notReady: null };
@@ -7412,7 +7412,11 @@ function _peAttemptHtml(view, a) {
       <div style="font-size:13px">배송지: ${_prEsc(s.address && s.address.address_text)} · 수령인 ${_prEsc(s.address && s.address.recipient_name)}</div>
       ${s.eta_text ? `<div style="font-size:12px;color:var(--muted)">도착 예정 ${_prEsc(s.eta_text)}</div>` : ''}`;
     // 결제 버튼은 서버가 "결제 가능"(실제 무결제 FIELD 인증 + 결제 파일럿 창)이라고 할 때만 — 서버 gate 가 최종 권한
-    if (!a.payment_allowed) btn = a.payment_block === 'PAYMENT_PILOT_WINDOW_REQUIRED'
+    // 결제수단 hard gate: 첫 결제 파일럿은 저장 카드만 (무통장입금 / 카드 미확인 / 간편결제 → 결제 불가)
+    const _pm = { BANK_TRANSFER: '무통장입금', CARD_SAVED_UNVERIFIED: '카드 (저장 카드 확인 안 됨)', CORPORATE_CARD_SAVED_UNVERIFIED: '법인카드 (저장 카드 확인 안 됨)', NAVER_PAY: '네이버페이', TOSS_PAY: '토스페이' };
+    if (!a.payment_allowed) btn = a.payment_block === 'PAYMENT_METHOD_NOT_ALLOWED'
+      ? `<div data-pe-cert="method" style="font-size:12px"><div>저장 카드가 선택되어 있지 않아 결제할 수 없습니다${s && _pm[s.payment_method_type] ? ` (식봄 주문서: ${_prEsc(_pm[s.payment_method_type])})` : ''}.</div><div>이번 실행은 결제 없이 종료하고 배송지와 장바구니를 복구합니다.</div></div>`
+      : a.payment_block === 'PAYMENT_PILOT_WINDOW_REQUIRED'
       ? `<div data-pe-cert="no-pilot" style="font-size:12px;color:var(--muted)">결제 파일럿이 열려 있지 않습니다 — 이번 실행은 결제 없이 종료하고 배송지와 장바구니를 복구합니다.</div>`
       : `<div data-pe-cert="missing" style="font-size:12px"><div>실제 무결제 실행 검증이 아직 완료되지 않았습니다.</div><div>이번 실행은 결제 없이 종료하고 배송지와 장바구니를 복구합니다.</div></div>`;
     else if (view.approver) btn = `<button class="oai-create" data-pe-btn="C" onclick="_peApproveC('${_prEsc(a.attempt_id)}')">${_peWon(s.total_krw)} 결제 승인</button>
