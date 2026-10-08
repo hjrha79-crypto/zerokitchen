@@ -8,10 +8,10 @@
 const fs = require('fs');
 const path = require('path');
 const HTML0 = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-const IDF = path.join(__dirname, '..', 'migration-packages', 'store-purchase-production-readiness-003', 'BUILD_IDENTITY.json');
+const IDF = path.join(__dirname, '..', 'migration-packages', 'store-purchase-sikbom-driver-004', 'BUILD_IDENTITY.json');
 const BUILD = (/const _PE_BUILD = '([0-9a-f]{64})'/.exec(HTML0) || [])[1];
-const CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V1', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'EDGE_BUILD_BINDING'];
-const READY = { code: 'READINESS', service: 'purchase-execution', api_version: 'pe-v2', package_version: 'store-purchase-production-readiness-003', build_hash: BUILD, capabilities: CAPS, db_build_match: true };
+const CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V2', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'OPEN_ADDRESS_SELECTOR', 'EDGE_BUILD_BINDING'];
+const READY = { code: 'READINESS', service: 'purchase-execution', api_version: 'pe-v2', package_version: 'store-purchase-sikbom-driver-004', build_hash: BUILD, capabilities: CAPS, db_build_match: true };
 
 function block(HTML) {
   const a = HTML.indexOf('const _PR_UNITS = '), b = HTML.lastIndexOf('/* ═', HTML.indexOf('   Pending → Confirmed 10초 구조'));
@@ -123,6 +123,15 @@ async function suite(html) {
   const hc = await e.render({ ...BASE, baskets: [], attempts: [att()] });
   check('WEB-PE-12 certified + payment pilot open (server payment_allowed) → [144,800원 결제 승인] shown; the server gate stays the final authority',
     buttons(hc).length === 1 && buttons(hc)[0].kind === 'C' && BUILD && (!fs.existsSync(IDF) || JSON.parse(fs.readFileSync(IDF, 'utf8')).build_hash === BUILD), { hc, BUILD });
+  // ── sikbom-driver-004: the Web pin = BUILD_IDENTITY (package / build / capabilities); the readiness-003 Edge (driver v1) is not ready
+  const id = fs.existsSync(IDF) ? JSON.parse(fs.readFileSync(IDF, 'utf8')) : null;
+  const pinCaps = JSON.parse(((/const _PE_REQUIRED_CAPS = (\[[^\]]*\]);/.exec(html) || [])[1] || '[]').replace(/'/g, '"'));
+  const e3 = makeEnv(html);
+  const h3 = await e3.render({ ...BASE, baskets: [BASKET], attempts: [att()] }, { ...READY, package_version: 'store-purchase-production-readiness-003', build_hash: '533ee5b0015adb9021ae29fa296c0bcde3a283529c13675171602f1f4d4ca64e',
+    capabilities: CAPS.filter(c => c !== 'SIKBOM_DRIVER_V2' && c !== 'OPEN_ADDRESS_SELECTOR').concat('SIKBOM_DRIVER_V1') });
+  check('WEB-PE-13 the Web pin = store-purchase-sikbom-driver-004 BUILD_IDENTITY (package, build, every capability incl. SIKBOM_DRIVER_V2 / OPEN_ADDRESS_SELECTOR); the readiness-003 Edge (driver v1) → not ready, no buttons',
+    !!id && id.package_version === (/const _PE_PACKAGE = '([^']+)'/.exec(html) || [])[1] && id.build_hash === BUILD && pinCaps.length === id.capabilities.length && pinCaps.every(c => id.capabilities.includes(c))
+    && /PURCHASE_EXECUTION_VERSION_NOT_READY/.test(h3) && buttons(h3).length === 0 && !e3.S.gets.includes('view'), { id: id && id.package_version, pinCaps });
   return out;
 }
 
