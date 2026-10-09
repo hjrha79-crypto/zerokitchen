@@ -7334,12 +7334,12 @@ async function _refreshPurchaseHome(ep) {
 //   C = Agent가 대전 배송지·최종 금액을 확인한 결제 직전 화면 그대로에 대한 1회용 결제 승인.
 // 정확한 서버 버전 게이트: purchase-execution 이 "있다"는 이유만으로 구매 화면을 켜지 않는다 (api / package / build / capabilities 전부 일치해야 함)
 const _PE_API = 'pe-v2';
-const _PE_PACKAGE = 'store-purchase-sikbom-driver-008';
-const _PE_BUILD = 'ea5a546d2095e5982d1ab39bdcea0c653549a118e0cb6e8d12aac15b6dd94a66';
-const _PE_REQUIRED_CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V3_2', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'OPEN_ADDRESS_SELECTOR', 'PAYMENT_METHOD_GATE', 'ADDRESS_UNCHANGED_VERIFY', 'EDGE_BUILD_BINDING'];
+const _PE_PACKAGE = 'purchase-exception-resume-001';
+const _PE_BUILD = 'b99b8fda95f7d3775a3291576a251208db25a7e330cee0cadc0de4f3f533296a';
+const _PE_REQUIRED_CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V3_2', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'OPEN_ADDRESS_SELECTOR', 'PAYMENT_METHOD_GATE', 'ADDRESS_UNCHANGED_VERIFY', 'EDGE_BUILD_BINDING', 'PURCHASE_EXCEPTION_RESUME'];
 const _PE_URL = `${SUPABASE_URL}/functions/v1/purchase-execution/web`;
 const _PE_READY_URL = `${SUPABASE_URL}/functions/v1/purchase-execution/readiness`;
-let _pe = { view: null, notReady: null };
+let _pe = { view: null, notReady: null, current: null };
 function _peReadinessReason(r) {
   if (!r || typeof r !== 'object') return 'NO_READINESS';
   if (r.api_version !== _PE_API) return `API_${r.api_version || 'NONE'}`;
@@ -7362,6 +7362,9 @@ async function _refreshPurchaseExec(sid = SID) {
   const b = res.ok ? await res.json().catch(() => null) : null;
   if (b && (b.api_version !== _PE_API || b.edge_build_hash !== _PE_BUILD)) { _pe.notReady = 'VIEW_BUILD'; _pe.view = null; return null; }
   _pe.view = b && b.code === 'OK' ? b : null;
+  // 구매 예외 루프: 지금 대표에게 보여줄 "한 가지 현재 행동" (서버가 고름 — 결정 카드 / 진행 중 / 결과 확인 중)
+  _pe.current = null;
+  if (_pe.view && _pe.view.approver) { const c = await _pePost('GET_CURRENT_PURCHASE_ACTION', { store_id: Number(sid) }); _pe.current = c && c.code === 'CURRENT_ACTION' && c.action ? c : null; }
   return _pe.view;
 }
 async function _pePost(action, fields) {
@@ -7434,9 +7437,39 @@ function _peAttemptHtml(view, a) {
   }
   return `<div class="card" data-pe-attempt="${_prEsc(a.attempt_id)}" data-pe-state="${_prEsc(a.state)}"><div style="font-weight:700" data-pe-head>${_prEsc(head)}</div>${body}${_peAddressLine(a)}${btn}</div>`;
 }
+// 구매 예외 루프 (purchase-exception-resume-001): 대표에게는 지금 필요한 한 가지만 — 결정 카드 / 다시 진행 중 / 결과 확인 중.
+//   선택지는 서버가 공급처 화면에서 실제로 본 것만 만든다. 웹은 고르지 않고, 결제하지 않고, 대표의 선택 1건만 기록한다.
+const _PE_ONE_ACTION = ['PAYMENT_EXCEPTION_DECISION', 'EXTERNAL_AUTH_REQUIRED', 'PRICE_REAPPROVAL_REQUIRED', 'PURCHASE_BLOCKED', 'RESUMING', 'OUTCOME_CHECK', 'PARTIAL', 'CANCELLED'];
+function _peCurrentHtml(view, c) {
+  const a = c.action, decide = !!a.decision_ref && view.approver;
+  const opts = decide ? (a.options || []).map(o => o.enabled
+    ? `<button class="${o.label === '주문 중단' ? 'oai-cancel' : 'oai-create'}" data-pe-btn="X" data-pe-option="${_prEsc(o.option_id)}" onclick="_peDecide('${_prEsc(o.option_id)}')">${_prEsc(o.label)}</button>`
+    : `<div data-pe-option-disabled style="font-size:12px;color:var(--muted)">${_prEsc(o.label)} — ${_prEsc(o.info || '현재 사용할 수 없습니다.')}</div>`).join('') : '';
+  const addr = (view.attempts || []).map(_peAddressLine).join('');
+  return `<div class="card" data-pe-current="${decide ? 'decision' : 'status'}">${a.supplier ? `<div style="font-size:12px;color:var(--muted)">${_prEsc(a.supplier)}</div>` : ''}
+    <div style="font-weight:700" data-pe-head>${_prEsc(a.title || a.message)}</div>${a.title && a.message ? `<div style="font-size:13px">${_prEsc(a.message)}</div>` : ''}
+    ${a.context ? `<div style="font-size:12px;color:var(--muted)">${_prEsc(a.context)}</div>` : ''}${opts}${addr}</div>`;
+}
+async function _peDecide(optionId) {
+  const a = _pe.current && _pe.current.action, ref = a && a.decision_ref;
+  const o = a && (a.options || []).find(x => x.option_id === optionId && x.enabled);
+  if (!ref || !o || _peBusy['D:' + ref.exception_id]) return null;   // 비활성 선택지(무통장입금 등)는 보내지 않는다
+  if (o.label === '주문 중단' && !confirm('이 주문을 중단할까요? 다시 결제하지 않습니다.')) return null;
+  _peBusy['D:' + ref.exception_id] = true;
+  try {
+    const r = await _pePost('DECIDE_EXCEPTION', { exception_id: ref.exception_id, exception_version: ref.exception_version, options_hash: ref.options_hash, option_id: optionId, expected_revision: ref.expected_revision });
+    showToast(r && r.code === 'DECISION_RECORDED' ? (o.label === '주문 중단' ? '주문을 중단했습니다' : o.label.startsWith('다른 저장 결제수단') ? '다른 결제수단으로 다시 진행합니다' : '선택을 기록했습니다')
+      : r && r.code === 'STALE_EXCEPTION' ? '상황이 바뀌었어요 — 최신 화면을 다시 확인해 주세요' : `기록하지 못했어요 (${(r && r.code) || '응답 없음'})`, 3500);
+    await _refreshPurchaseHome(_storeEpoch);
+    return r;
+  } finally { delete _peBusy['D:' + ref.exception_id]; }
+}
 function _purchaseExecHtml(view) {
   if (_pe.notReady) return `<div class="card" data-pe-not-ready="${_prEsc(_pe.notReady)}" style="font-size:13px">구매 실행 서버 버전을 확인하지 못했어요 — 구매 버튼을 비활성화했습니다.<div style="font-size:11px;color:var(--muted)">PURCHASE_EXECUTION_VERSION_NOT_READY (${_prEsc(_pe.notReady)})</div></div>`;
   if (!view) return '';
+  const cur = _pe.current && _pe.current.action;
+  const needsButton = (view.baskets || []).length > 0 || (view.attempts || []).some(a => a.state === 'EXECUTING' && a.payment_allowed);
+  if (cur && (_PE_ONE_ACTION.includes(cur.type) || (cur.type === 'IN_PROGRESS' && !needsButton))) return _peCurrentHtml(view, _pe.current);
   const baskets = (view.baskets || []).flatMap(b => (b.groups || []).map(g => _peBasketHtml(view, b, g)));
   const attempts = (view.attempts || []).slice(0, 3).map(a => _peAttemptHtml(view, a));
   return baskets.concat(attempts).join('');
