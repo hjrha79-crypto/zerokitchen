@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 const HTML0 = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-const IDF = path.join(__dirname, '..', 'migration-packages', 'purchase-exception-resume-001', 'BUILD_IDENTITY.json');
+const IDF = path.join(__dirname, '..', 'migration-packages', 'purchase-vertical-slice-line-fix-001', 'BUILD_IDENTITY.json');   // the current pin
 const ID = JSON.parse(fs.readFileSync(IDF, 'utf8'));
 const READY = { code: 'READINESS', service: 'purchase-execution', api_version: 'pe-v2', package_version: ID.package_version, build_hash: ID.build_hash, capabilities: ID.capabilities, db_build_match: true };
 

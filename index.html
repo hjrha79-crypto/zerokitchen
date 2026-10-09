@@ -7184,9 +7184,22 @@ async function _purchaseCancel(requestId) {
   showToast(body.code === 'CANCELLED' ? '발주요청을 취소했어요' : body.code === 'ALREADY_CANCELLED' ? '이미 취소된 요청이에요' : `취소하지 못했어요 (${body.code})`, 3000);
   await _refreshPurchaseHome(_storeEpoch);
 }
-function _purchaseResearchStart(requestId) {
-  // 다음 단계(공급처 조사)에서 연결한다. 지금은 조사·장바구니·주문·결제를 하지 않는다.
-  showToast('공급처 조사는 다음 단계에서 연결됩니다 — 장바구니·주문·결제는 하지 않았어요', 3500);
+// [공급처 조사 시작] → 서버의 공급처 조사 mission (같은 요청·버전에는 하나만; 다시 눌러도 같은 조사). 조사는 읽기만 한다 — 장바구니·주문·결제 없음.
+// 결과(구매안 / 확인할 제품 / 실패)는 "지금 할 일" 카드로 이어진다.
+const _prResearchBusy = {};
+async function _purchaseResearchStart(requestId) {
+  const req = (_purchase.requests || []).find(r => r.request_id === requestId);
+  if (!req || _prResearchBusy[requestId]) return null;
+  _prResearchBusy[requestId] = true;
+  try {
+    const r = await _pePost('START_PURCHASE_RESEARCH', { request_id: requestId, request_version: Number(req.request_version) });
+    const code = r && r.code;
+    showToast(code === 'RESEARCH_REQUESTED' || code === 'RESEARCH_IN_PROGRESS' ? '공급처 조사를 시작했어요 — 구매안이 준비되면 여기 표시됩니다'
+      : code === 'RESEARCH_DONE' ? '구매안이 이미 준비돼 있어요' : code === 'STALE_REQUEST' ? '발주요청이 바뀌었어요 — 다시 확인해 주세요'
+      : code === 'NOT_READY_FOR_RESEARCH' ? '품목 확인이 먼저 필요해요' : `공급처 조사를 시작하지 못했어요 (${code || '응답 없음'})`, 3500);
+    await _refreshPurchaseHome(_storeEpoch);
+    return r;
+  } finally { delete _prResearchBusy[requestId]; }
 }
 
 // ── 품목 확인 (한 화면 묶음 review) ──
@@ -7334,9 +7347,9 @@ async function _refreshPurchaseHome(ep) {
 //   C = Agent가 대전 배송지·최종 금액을 확인한 결제 직전 화면 그대로에 대한 1회용 결제 승인.
 // 정확한 서버 버전 게이트: purchase-execution 이 "있다"는 이유만으로 구매 화면을 켜지 않는다 (api / package / build / capabilities 전부 일치해야 함)
 const _PE_API = 'pe-v2';
-const _PE_PACKAGE = 'purchase-exception-resume-001';
-const _PE_BUILD = 'b99b8fda95f7d3775a3291576a251208db25a7e330cee0cadc0de4f3f533296a';
-const _PE_REQUIRED_CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V3_2', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'OPEN_ADDRESS_SELECTOR', 'PAYMENT_METHOD_GATE', 'ADDRESS_UNCHANGED_VERIFY', 'EDGE_BUILD_BINDING', 'PURCHASE_EXCEPTION_RESUME'];
+const _PE_PACKAGE = 'purchase-vertical-slice-line-fix-001';
+const _PE_BUILD = 'c7de366ddd209620e6fc763086daf61057efeba5a39ce81f9550ee06ca671306';
+const _PE_REQUIRED_CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V3_3', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'OPEN_ADDRESS_SELECTOR', 'PAYMENT_METHOD_GATE', 'ADDRESS_UNCHANGED_VERIFY', 'EDGE_BUILD_BINDING', 'PURCHASE_EXCEPTION_RESUME', 'PROVIDER_STORED_PAYMENT_METHOD', 'PAYMENT_RESULT_EXCEPTION_ADAPTER', 'PURCHASE_RESEARCH_DISPATCH', 'STORE3_RECEIPT_ACTION'];
 const _PE_URL = `${SUPABASE_URL}/functions/v1/purchase-execution/web`;
 const _PE_READY_URL = `${SUPABASE_URL}/functions/v1/purchase-execution/readiness`;
 let _pe = { view: null, notReady: null, current: null };
@@ -7365,6 +7378,8 @@ async function _refreshPurchaseExec(sid = SID) {
   // 구매 예외 루프: 지금 대표에게 보여줄 "한 가지 현재 행동" (서버가 고름 — 결정 카드 / 진행 중 / 결과 확인 중)
   _pe.current = null;
   if (_pe.view && _pe.view.approver) { const c = await _pePost('GET_CURRENT_PURCHASE_ACTION', { store_id: Number(sid) }); _pe.current = c && c.code === 'CURRENT_ACTION' && c.action ? c : null; }
+  // 조사 중이면 결과가 나올 때까지 화면이 스스로 다시 확인한다 (한 번에 하나의 타이머)
+  if (_pe.current && _pe.current.action.type === 'RESEARCHING' && !_pe.poll && typeof setTimeout === 'function') _pe.poll = setTimeout(() => { _pe.poll = null; _refreshPurchaseHome(_storeEpoch); }, 10000);
   return _pe.view;
 }
 async function _pePost(action, fields) {
@@ -7401,6 +7416,7 @@ function _peBasketHtml(view, b, g) {
     <div style="font-size:12px;color:var(--muted)">${lines}</div>
     <div style="font-size:13px">배송: ${_prEsc(d.branch_location || d.address_line || '')} · ${_prEsc(d.recipient || '')}</div>
     <div style="font-size:12px;color:var(--muted)">결제 준비 중 ${_prEsc(g.supplier_label)} 기본 배송지를 ${_prEsc(view.display_name)}으로 변경합니다. 주문 완료 후 원래 배송지로 다시 되돌립니다. 결제는 다음 화면에서 따로 승인합니다.</div>
+    <div data-pe-pay-policy style="font-size:12px">결제수단: ${_prEsc(g.supplier_label)}에 등록된 기본 즉시결제 수단 사용 (여러 개이거나 없으면 다시 여쭤봅니다)</div>
     ${btn}</div>`;
 }
 function _peAttemptHtml(view, a) {
@@ -7439,9 +7455,27 @@ function _peAttemptHtml(view, a) {
 }
 // 구매 예외 루프 (purchase-exception-resume-001): 대표에게는 지금 필요한 한 가지만 — 결정 카드 / 다시 진행 중 / 결과 확인 중.
 //   선택지는 서버가 공급처 화면에서 실제로 본 것만 만든다. 웹은 고르지 않고, 결제하지 않고, 대표의 선택 1건만 기록한다.
-const _PE_ONE_ACTION = ['PAYMENT_EXCEPTION_DECISION', 'EXTERNAL_AUTH_REQUIRED', 'PRICE_REAPPROVAL_REQUIRED', 'PURCHASE_BLOCKED', 'RESUMING', 'OUTCOME_CHECK', 'PARTIAL', 'CANCELLED'];
+const _PE_ONE_ACTION = ['PAYMENT_EXCEPTION_DECISION', 'EXTERNAL_AUTH_REQUIRED', 'PRICE_REAPPROVAL_REQUIRED', 'PURCHASE_BLOCKED', 'RESUMING', 'OUTCOME_CHECK', 'PARTIAL', 'CANCELLED',
+  'RESEARCHING', 'RESEARCH_MAPPING_REQUIRED', 'RESEARCH_FAILED', 'RECEIPT'];
+const _peQty = n => Number(n || 0).toLocaleString('ko-KR', { maximumFractionDigits: 3 });
 function _peCurrentHtml(view, c) {
   const a = c.action, decide = !!a.decision_ref && view.approver;
+  // 실제 수령 (Store-3): 배송 상태 ≠ 받음. 받은 수량만 기록하고, 모르는 재고는 모르는 채로 둔다 (받은 수량을 현재 재고로 표시하지 않음)
+  if (a.type === 'RECEIPT') {
+    const rows = (a.orders || []).map(o => `<div data-pe-rcv="${_prEsc(o.order_id)}" style="font-size:13px">${_prEsc(o.name)} ${_peQty(o.ordered_qty)}${_prEsc(o.unit)} 중 ${_peQty(o.received_qty)} 받음 · 남은 ${_peQty(o.remaining)}${_prEsc(o.unit)}</div>`).join('');
+    return `<div class="card" data-pe-current="receipt"><div style="font-weight:700" data-pe-head>${_prEsc(a.message)}</div>${rows}
+      ${a.stock_note ? `<div data-pe-stock-note style="font-size:12px;color:var(--muted)">${_prEsc(a.stock_note)}</div>` : ''}
+      ${view.approver ? `<button class="oai-create" data-pe-btn="RCV_ALL" onclick="_peReceiveAll()">전부 받았어요</button><button class="oai-edit" data-pe-btn="RCV_PART" onclick="_peReceivePartial()">일부만 받았어요</button>` : ''}
+      ${(view.attempts || []).map(_peAddressLine).join('')}</div>`;
+  }
+  // 공급처 조사: 진행 중 / 확인할 제품 / 실패(다시 조사)
+  if (a.type === 'RESEARCHING' || a.type === 'RESEARCH_MAPPING_REQUIRED' || a.type === 'RESEARCH_FAILED') {
+    const rid = a.request_ref && a.request_ref.request_id;
+    const items = (a.items || []).length ? `<div style="font-size:13px">${(a.items || []).map(_prEsc).join(' · ')}</div>` : '';
+    const btn = a.type === 'RESEARCH_MAPPING_REQUIRED' && rid ? `<button class="v4-receive-btn" data-pe-btn="REVIEW" onclick="_purchaseOpenReview('${_prEsc(rid)}')">품목 확인하기</button>`
+      : a.type === 'RESEARCH_FAILED' && rid ? `<button class="v4-receive-btn" data-pe-btn="RESEARCH_RETRY" onclick="_purchaseResearchStart('${_prEsc(rid)}')">다시 조사하기</button>` : '';
+    return `<div class="card" data-pe-current="research"><div style="font-weight:700" data-pe-head>${_prEsc(a.message)}</div>${items}${btn}</div>`;
+  }
   const opts = decide ? (a.options || []).map(o => o.enabled
     ? `<button class="${o.label === '주문 중단' ? 'oai-cancel' : 'oai-create'}" data-pe-btn="X" data-pe-option="${_prEsc(o.option_id)}" onclick="_peDecide('${_prEsc(o.option_id)}')">${_prEsc(o.label)}</button>`
     : `<div data-pe-option-disabled style="font-size:12px;color:var(--muted)">${_prEsc(o.label)} — ${_prEsc(o.info || '현재 사용할 수 없습니다.')}</div>`).join('') : '';
@@ -7449,6 +7483,38 @@ function _peCurrentHtml(view, c) {
   return `<div class="card" data-pe-current="${decide ? 'decision' : 'status'}">${a.supplier ? `<div style="font-size:12px;color:var(--muted)">${_prEsc(a.supplier)}</div>` : ''}
     <div style="font-weight:700" data-pe-head>${_prEsc(a.title || a.message)}</div>${a.title && a.message ? `<div style="font-size:13px">${_prEsc(a.message)}</div>` : ''}
     ${a.context ? `<div style="font-size:12px;color:var(--muted)">${_prEsc(a.context)}</div>` : ''}${opts}${addr}</div>`;
+}
+// Store-3 실제 수령: purchase-execution 의 RECORD_PURCHASE_RECEIPT (Store-1 입고 경로 _writerAct / complete_order_receiving 은 쓰지 않는다)
+const _peRcvKey = (o, q) => `zkr:${o.order_id}:${Number(o.received_qty)}:${q}`;
+async function _peReceiveSend(list) {
+  const out = [];
+  for (const [o, q] of list) out.push(await _pePost('RECORD_PURCHASE_RECEIPT', { order_id: o.order_id, received_qty: q, idempotency_key: _peRcvKey(o, q), physical_receipt_confirmed: true }));
+  const okN = out.filter(r => r && (r.code === 'RECEIPT_RECORDED' || r.code === 'ALREADY_RECORDED')).length;
+  showToast(okN === out.length ? '받은 수량을 기록했어요' : `일부를 기록하지 못했어요 (${out.filter(r => !r || (r.code !== 'RECEIPT_RECORDED' && r.code !== 'ALREADY_RECORDED')).map(r => (r && r.code) || '응답 없음').join(', ')})`, 3500);
+  await _refreshPurchaseHome(_storeEpoch);
+  return out;
+}
+async function _peReceiveAll() {
+  const a = _pe.current && _pe.current.action;
+  if (!a || a.type !== 'RECEIPT' || _peBusy.RCV) return null;
+  if (!confirm('주문한 상품을 전부 실제로 받았나요?')) return null;
+  _peBusy.RCV = true;
+  try { return await _peReceiveSend((a.orders || []).filter(o => Number(o.remaining) > 0).map(o => [o, Number(o.remaining)])); } finally { delete _peBusy.RCV; }
+}
+async function _peReceivePartial() {
+  const a = _pe.current && _pe.current.action;
+  if (!a || a.type !== 'RECEIPT' || _peBusy.RCV) return null;
+  const list = [];
+  for (const o of (a.orders || []).filter(x => Number(x.remaining) > 0)) {
+    const v = prompt(`${o.name} — 받은 수량 (남은 ${_peQty(o.remaining)}${o.unit}). 안 받았으면 비워 두세요.`);
+    if (v == null || String(v).trim() === '') continue;
+    const q = Number(String(v).trim());
+    if (!(q > 0) || q > Number(o.remaining)) { showToast(`${o.name}: 0보다 크고 남은 수량 이하로 입력해 주세요`, 3000); continue; }
+    list.push([o, q]);
+  }
+  if (!list.length) return null;
+  _peBusy.RCV = true;
+  try { return await _peReceiveSend(list); } finally { delete _peBusy.RCV; }
 }
 async function _peDecide(optionId) {
   const a = _pe.current && _pe.current.action, ref = a && a.decision_ref;
@@ -7470,9 +7536,11 @@ function _purchaseExecHtml(view) {
   const cur = _pe.current && _pe.current.action;
   const needsButton = (view.baskets || []).length > 0 || (view.attempts || []).some(a => a.state === 'EXECUTING' && a.payment_allowed);
   if (cur && (_PE_ONE_ACTION.includes(cur.type) || (cur.type === 'IN_PROGRESS' && !needsButton))) return _peCurrentHtml(view, _pe.current);
+  // 조사 완료: "구매안을 준비했습니다." 바로 아래가 그 구매안(결제 준비 승인 카드)
+  const head = cur && cur.type === 'BASKET_READY' ? `<div class="card" data-pe-current="basket-ready"><div style="font-weight:700" data-pe-head>${_prEsc(cur.message)}</div></div>` : '';
   const baskets = (view.baskets || []).flatMap(b => (b.groups || []).map(g => _peBasketHtml(view, b, g)));
   const attempts = (view.attempts || []).slice(0, 3).map(a => _peAttemptHtml(view, a));
-  return baskets.concat(attempts).join('');
+  return head + baskets.concat(attempts).join('');
 }
 async function _peApproveB(basketId, supplier) {
   const b = ((_pe.view && _pe.view.baskets) || []).find(x => x.basket_id === basketId);
@@ -7480,7 +7548,9 @@ async function _peApproveB(basketId, supplier) {
   if (!g || _peBusy['B:' + basketId]) return null;
   _peBusy['B:' + basketId] = true;
   try {
-    const r = await _pePost('APPROVE_PURCHASE_BASKET', { basket_id: basketId, basket_hash: b.basket_hash, approval_text: g.presubmit_text, suppliers: [supplier], allow_address_switch: true });
+    // 대표가 본 카드의 결제수단 문구 그대로: 공급처에 등록된 기본 즉시결제 수단 (카드 정보는 ZeroKitchen에 없다)
+    const r = await _pePost('APPROVE_PURCHASE_BASKET', { basket_id: basketId, basket_hash: b.basket_hash, approval_text: g.presubmit_text, suppliers: [supplier], allow_address_switch: true,
+      payment_method_policy: 'PROVIDER_DEFAULT_STORED_METHOD' });
     showToast(r && r.code === 'PRESUBMIT_APPROVED' ? '결제 준비를 시작합니다 — 결제는 아직 아니에요' : `결제 준비를 시작하지 못했어요 (${(r && r.code) || '응답 없음'})`, 3500);
     await _refreshPurchaseHome(_storeEpoch);
     return r;
