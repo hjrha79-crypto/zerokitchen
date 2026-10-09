@@ -3,17 +3,17 @@
  *   WEB-PE-01..07 on the REAL purchase block of index.html (_purchaseHomeHtml … _peApproveB / _peApproveC / _peResolveRestore),
  *   NC-SAFE-07: a mutated copy where the B button also sends the payment approval (one button for B + C) must FAIL the suite.
  *   readiness-003: WEB-PE-08..12 — exact server version gate (pe-v2 / package / build / capabilities) and the field-certification gate on the C button.
- *   sikbom-driver-007: WEB-PE-13 (pin = BUILD_IDENTITY, the 005 Edge not ready); sikbom-driver-005:, WEB-PE-14 (payment method gate: 무통장입금 → no payment button).
+ *   sikbom-driver-008: WEB-PE-13 (pin = BUILD_IDENTITY, the 007 Edge not ready); sikbom-driver-005:, WEB-PE-14 (payment method gate: 무통장입금 → no payment button).
  * SPIES: fetch (a fake purchase-request + purchase-execution server that records every envelope). No network.
  */
 const fs = require('fs');
 const path = require('path');
 const HTML0 = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-const IDF = path.join(__dirname, '..', 'migration-packages', 'store-purchase-sikbom-driver-007', 'BUILD_IDENTITY.json');
-const ID4 = path.join(__dirname, '..', 'migration-packages', 'store-purchase-sikbom-driver-005', 'BUILD_IDENTITY.json');
+const IDF = path.join(__dirname, '..', 'migration-packages', 'store-purchase-sikbom-driver-008', 'BUILD_IDENTITY.json');
+const ID4 = path.join(__dirname, '..', 'migration-packages', 'store-purchase-sikbom-driver-007', 'BUILD_IDENTITY.json');
 const BUILD = (/const _PE_BUILD = '([0-9a-f]{64})'/.exec(HTML0) || [])[1];
-const CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V3_1', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'OPEN_ADDRESS_SELECTOR', 'PAYMENT_METHOD_GATE', 'ADDRESS_UNCHANGED_VERIFY', 'EDGE_BUILD_BINDING'];
-const READY = { code: 'READINESS', service: 'purchase-execution', api_version: 'pe-v2', package_version: 'store-purchase-sikbom-driver-007', build_hash: BUILD, capabilities: CAPS, db_build_match: true };
+const CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V3_2', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'OPEN_ADDRESS_SELECTOR', 'PAYMENT_METHOD_GATE', 'ADDRESS_UNCHANGED_VERIFY', 'EDGE_BUILD_BINDING'];
+const READY = { code: 'READINESS', service: 'purchase-execution', api_version: 'pe-v2', package_version: 'store-purchase-sikbom-driver-008', build_hash: BUILD, capabilities: CAPS, db_build_match: true };
 
 function block(HTML) {
   const a = HTML.indexOf('const _PR_UNITS = '), b = HTML.lastIndexOf('/* ═', HTML.indexOf('   Pending → Confirmed 10초 구조'));
@@ -130,8 +130,8 @@ async function suite(html) {
   const id4 = fs.existsSync(ID4) ? JSON.parse(fs.readFileSync(ID4, 'utf8')) : null;
   const pinCaps = JSON.parse(((/const _PE_REQUIRED_CAPS = (\[[^\]]*\]);/.exec(html) || [])[1] || '[]').replace(/'/g, '"'));
   const e3 = makeEnv(html);
-  const h3 = await e3.render({ ...BASE, baskets: [BASKET], attempts: [att()] }, { ...READY, package_version: 'store-purchase-sikbom-driver-005', build_hash: id4 ? id4.build_hash : 'a'.repeat(64), capabilities: id4 ? id4.capabilities : [] });
-  check('WEB-PE-13 the Web pin = store-purchase-sikbom-driver-007 BUILD_IDENTITY (package, build, every capability incl. SIKBOM_DRIVER_V3_1 / PAYMENT_METHOD_GATE / ADDRESS_UNCHANGED_VERIFY); the driver-005 Edge → not ready, no buttons',
+  const h3 = await e3.render({ ...BASE, baskets: [BASKET], attempts: [att()] }, { ...READY, package_version: 'store-purchase-sikbom-driver-007', build_hash: id4 ? id4.build_hash : 'a'.repeat(64), capabilities: id4 ? id4.capabilities : [] });
+  check('WEB-PE-13 the Web pin = store-purchase-sikbom-driver-008 BUILD_IDENTITY (package, build, every capability incl. SIKBOM_DRIVER_V3_2 / PAYMENT_METHOD_GATE / ADDRESS_UNCHANGED_VERIFY); the driver-007 Edge → not ready, no buttons',
     !!id && id.package_version === (/const _PE_PACKAGE = '([^']+)'/.exec(html) || [])[1] && id.build_hash === BUILD && pinCaps.length === id.capabilities.length && pinCaps.every(c => id.capabilities.includes(c))
     && /PURCHASE_EXECUTION_VERSION_NOT_READY/.test(h3) && buttons(h3).length === 0 && !e3.S.gets.includes('view'), { id: id && id.package_version, pinCaps });
   // ── payment method hard gate: the sheet says 무통장입금 → the server blocks C (PAYMENT_METHOD_NOT_ALLOWED) → no payment button, no C request, the reason named
