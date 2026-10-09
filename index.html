@@ -7334,9 +7334,9 @@ async function _refreshPurchaseHome(ep) {
 //   C = Agent가 대전 배송지·최종 금액을 확인한 결제 직전 화면 그대로에 대한 1회용 결제 승인.
 // 정확한 서버 버전 게이트: purchase-execution 이 "있다"는 이유만으로 구매 화면을 켜지 않는다 (api / package / build / capabilities 전부 일치해야 함)
 const _PE_API = 'pe-v2';
-const _PE_PACKAGE = 'store-purchase-sikbom-driver-005';
-const _PE_BUILD = '6f67eec92724be76bca7eba3ec78d05f1c2519a563b4cff3313b8ee08ceae526';
-const _PE_REQUIRED_CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V3', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'OPEN_ADDRESS_SELECTOR', 'PAYMENT_METHOD_GATE', 'ADDRESS_UNCHANGED_VERIFY', 'EDGE_BUILD_BINDING'];
+const _PE_PACKAGE = 'store-purchase-sikbom-driver-007';
+const _PE_BUILD = '6ab7000336ce520327c7a56ac423279baffb5b7d6c46fd61a790a989b585444e';
+const _PE_REQUIRED_CAPS = ['APPROVAL_B', 'APPROVAL_C', 'PAYMENT_APPROVAL_REQUIRED', 'ADDRESS_LIFECYCLE', 'FIELD_CERTIFICATION', 'SIKBOM_DRIVER_V3_1', 'SAFE_DEFAULT_KILL_SWITCH', 'PURCHASE_EXECUTION_ORDER_INGEST', 'EXPLICIT_OPEN_CHECKOUT', 'OPEN_ADDRESS_SELECTOR', 'PAYMENT_METHOD_GATE', 'ADDRESS_UNCHANGED_VERIFY', 'EDGE_BUILD_BINDING'];
 const _PE_URL = `${SUPABASE_URL}/functions/v1/purchase-execution/web`;
 const _PE_READY_URL = `${SUPABASE_URL}/functions/v1/purchase-execution/readiness`;
 let _pe = { view: null, notReady: null };
