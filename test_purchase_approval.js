@@ -9,11 +9,11 @@
 const fs = require('fs');
 const path = require('path');
 const HTML0 = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
-const IDF = path.join(__dirname, '..', 'migration-packages', 'purchase-vertical-slice-line-fix-001', 'BUILD_IDENTITY.json');
-const ID4 = path.join(__dirname, '..', 'migration-packages', 'purchase-exception-resume-001', 'BUILD_IDENTITY.json');
+const IDF = path.join(__dirname, '..', 'migration-packages', 'purchase-address-kind-001', 'BUILD_IDENTITY.json');
+const ID4 = path.join(__dirname, '..', 'migration-packages', 'purchase-vertical-slice-line-fix-001', 'BUILD_IDENTITY.json');
 const BUILD = (/const _PE_BUILD = '([0-9a-f]{64})'/.exec(HTML0) || [])[1];
 const CAPS = JSON.parse(fs.readFileSync(IDF, 'utf8')).capabilities;   // the pinned build's capabilities
-const READY = { code: 'READINESS', service: 'purchase-execution', api_version: 'pe-v2', package_version: 'purchase-vertical-slice-line-fix-001', build_hash: BUILD, capabilities: CAPS, db_build_match: true };
+const READY = { code: 'READINESS', service: 'purchase-execution', api_version: 'pe-v2', package_version: 'purchase-address-kind-001', build_hash: BUILD, capabilities: CAPS, db_build_match: true };
 
 function block(HTML) {
   const a = HTML.indexOf('const _PR_UNITS = '), b = HTML.lastIndexOf('/* ═', HTML.indexOf('   Pending → Confirmed 10초 구조'));
@@ -131,8 +131,8 @@ async function suite(html) {
   const id4 = fs.existsSync(ID4) ? JSON.parse(fs.readFileSync(ID4, 'utf8')) : null;
   const pinCaps = JSON.parse(((/const _PE_REQUIRED_CAPS = (\[[^\]]*\]);/.exec(html) || [])[1] || '[]').replace(/'/g, '"'));
   const e3 = makeEnv(html);
-  const h3 = await e3.render({ ...BASE, baskets: [BASKET], attempts: [att()] }, { ...READY, package_version: 'purchase-exception-resume-001', build_hash: id4 ? id4.build_hash : 'a'.repeat(64), capabilities: id4 ? id4.capabilities : [] });
-  check('WEB-PE-13 the Web pin = purchase-vertical-slice-line-fix-001 BUILD_IDENTITY (package, build, every capability incl. SIKBOM_DRIVER_V3_3 / PROVIDER_STORED_PAYMENT_METHOD / STORE3_RECEIPT_ACTION); the exception-resume Edge → not ready, no buttons',
+  const h3 = await e3.render({ ...BASE, baskets: [BASKET], attempts: [att()] }, { ...READY, package_version: 'purchase-vertical-slice-line-fix-001', build_hash: id4 ? id4.build_hash : 'a'.repeat(64), capabilities: id4 ? id4.capabilities : [] });
+  check('WEB-PE-13 the Web pin = purchase-address-kind-001 BUILD_IDENTITY (package, build, every capability incl. SIKBOM_DRIVER_V3_3 / STORE3_RECEIPT_ACTION / ADDRESS_APPLICATION_KIND); the line-fix Edge → not ready, no buttons',
     !!id && id.package_version === (/const _PE_PACKAGE = '([^']+)'/.exec(html) || [])[1] && id.build_hash === BUILD && pinCaps.length === id.capabilities.length && pinCaps.every(c => id.capabilities.includes(c))
     && /PURCHASE_EXECUTION_VERSION_NOT_READY/.test(h3) && buttons(h3).length === 0 && !e3.S.gets.includes('view'), { id: id && id.package_version, pinCaps });
   // ── payment method hard gate: the sheet says 무통장입금 → the server blocks C (PAYMENT_METHOD_NOT_ALLOWED) → no payment button, no C request, the reason named
