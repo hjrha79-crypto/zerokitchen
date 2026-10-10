@@ -264,6 +264,47 @@ tr.ot-done .ot-name{text-decoration:line-through;color:var(--dim)}
 /* 공통 버튼 */
 .btn-run{width:100%;padding:13px;background:var(--accent);border:none;border-radius:10px;color:#fff;font-family:inherit;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px}
 .btn-run:disabled{opacity:.5}
+/* 거래처 발주 (supplier-route-line-001) — 전체 화면 한 흐름 */
+.sr-ov{position:fixed;inset:0;background:#dce8f0;z-index:60;display:none;flex-direction:column}
+.sr-ov.on{display:flex}
+.sr-hd{background:var(--surface);border-bottom:1px solid var(--border);height:52px;display:flex;align-items:center;gap:8px;padding:0 14px;flex-shrink:0}
+.sr-hd .x{margin-left:auto;background:none;border:1px solid var(--border);border-radius:16px;padding:5px 12px;font:600 13px inherit;font-family:inherit;color:var(--dim);cursor:pointer}
+.sr-body{flex:1;overflow-y:auto}
+.sr-wrap{max-width:480px;margin:0 auto;padding:16px 14px 90px;display:flex;flex-direction:column;gap:12px}
+.sr-h1{font-size:20px;font-weight:700;margin:4px 2px 2px}
+.sr-lead{font-size:14px;color:var(--dim);margin:0 2px;line-height:1.5}
+.sr-helper{font-size:12.5px;color:var(--muted);margin:0 2px;line-height:1.5}
+.sr-q{font-size:14px;font-weight:700;margin-bottom:8px}
+.sr-ta{width:100%;min-height:100px;border:1px solid var(--border);border-radius:12px;padding:12px;font:15px/1.6 inherit;font-family:inherit;resize:vertical;background:#fbfdfb}
+.sr-in{border:1px solid var(--border);border-radius:10px;padding:8px 10px;font:600 14px inherit;font-family:inherit;background:#fff;min-width:0}
+.sr-in.big{width:100%;padding:12px;font-size:17px}
+.sr-btn{display:block;width:100%;padding:14px;border-radius:12px;border:none;background:var(--accent);color:#fff;font:700 15px inherit;font-family:inherit;cursor:pointer}
+.sr-btn:disabled{background:#b9c9bf;cursor:default}
+.sr-btn2{display:block;width:100%;padding:12px;border-radius:12px;border:1px solid var(--border);background:var(--surface);color:var(--dim);font:600 14px inherit;font-family:inherit;cursor:pointer}
+.sr-link{background:none;border:none;color:var(--muted);font:500 13px inherit;font-family:inherit;cursor:pointer;text-decoration:underline;align-self:center}
+.sr-kv{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--surface2);font-size:14px}
+.sr-kv:last-child{border-bottom:none}
+.sr-kv .k{color:var(--muted);flex-shrink:0}.sr-kv .v{font-weight:600;text-align:right}
+.sr-unk{color:var(--muted);font-weight:500}
+.sr-soft{background:var(--surface2);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--dim);line-height:1.6}
+.sr-soft.warn{background:var(--warn-dim);color:var(--warn)}
+.sr-choice{display:flex;flex-direction:column;gap:8px}
+.sr-opt{display:flex;align-items:flex-start;gap:12px;padding:14px;border:1.5px solid var(--border);border-radius:12px;background:var(--surface);cursor:pointer;text-align:left;font-family:inherit;width:100%}
+.sr-opt .ic{font-size:20px;line-height:1}.sr-opt .t{font-size:15px;font-weight:700;color:var(--text)}.sr-opt .d{font-size:12.5px;color:var(--dim);margin-top:3px;line-height:1.45}
+.sr-opt.sel{border-color:var(--accent);background:var(--accent-lt)}.sr-opt.off{opacity:.45}
+.sr-tag{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:9px;margin-left:6px;vertical-align:1px}
+.sr-tag.rec{background:var(--accent);color:#fff}.sr-tag.def{background:#3a7bd5;color:#fff}.sr-tag.bak{background:var(--surface2);color:var(--dim)}
+.sr-chips{display:flex;flex-wrap:wrap;gap:6px}
+.sr-chip{padding:8px 13px;border-radius:18px;border:1px solid var(--border);background:var(--surface);font:600 13px inherit;font-family:inherit;color:var(--dim);cursor:pointer}
+.sr-chip.sel{background:var(--accent);border-color:var(--accent);color:#fff}
+.sr-bubble{background:#fffbe6;border:1px solid #e6dc8a;border-radius:14px 14px 14px 4px;padding:12px 14px;font-size:14.5px;line-height:1.65;white-space:pre-wrap}
+.sr-bubble.sms{background:#e9f1ff;border-color:#c8dafc}
+.sr-reply{align-self:flex-end;background:var(--accent);color:#fff;border-radius:14px 14px 4px 14px;padding:10px 13px;font-size:14px;max-width:80%;white-space:pre-wrap}
+.sr-row{display:flex;align-items:center;gap:8px}
+.sr-prog{display:flex;gap:4px;margin:0 2px}.sr-prog i{flex:1;height:4px;border-radius:2px;background:#c9d7cd}.sr-prog i.on{background:var(--accent)}
+.sr-vs{display:flex;gap:8px}.sr-vs>div{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px;text-align:center}
+.sr-vs .l{font-size:12px;color:var(--muted)}.sr-vs .n{font-size:18px;font-weight:700;margin-top:4px}.sr-vs .n.chg{color:var(--warn)}
+.sr-done{font-size:40px;text-align:center}
 /* no item */
 .no-item{text-align:center;padding:40px;color:var(--muted);font-size:14px;grid-column:1/-1}
 /* ResultCard */
@@ -748,6 +789,7 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
       <button onclick="toggleVendorMgmt()" style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 10px;font-size:12px;color:var(--dim);cursor:pointer" id="vendorMgmtToggle">펼치기</button>
     </div>
     <div id="vendorMgmtBody" style="display:none">
+      <button class="btn-run" style="margin:0 0 10px" onclick="_srOpenAdd()">+ 거래처 추가 — 어떤 거래처인지 말씀해 주세요</button>
       <div id="vendorList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
       <div style="display:flex;gap:8px">
         <input id="newVendorInp" class="nl-input" style="font-size:14px;padding:10px 12px" placeholder="새 거래처 이름">
@@ -8073,10 +8115,384 @@ function toggleVendorMgmt() {
     body.style.flexDirection = 'column';
     btn.textContent = '접기';
     renderVendorList();
+    _srLoad().then(() => renderVendorList());   // 주문 방식이 기록된 거래처에 [자세히 ›]
   } else {
     btn.textContent = '펼치기';
   }
 }
+
+/* ══ 거래처 발주 LINE (supplier-route-line-001) ══
+   거래처 소개(말로) → 주문 방법·결제·배송을 기억 → 문자 발주: 문구 복사 → 사장님이 직접 보냄 → [보냈어요] → 답장 붙여넣기 →
+   ZeroKitchen이 답장을 해석 → 바뀐 내용이면 사장님이 결정 → 주문 확인. 기록·판단은 서버(zk_sr_* — 로그인한 매장 운영자만)가 한다.
+   문자·전화 자동 발송 없음 · 결제/정산 없음 · 재고 변경 없음. 등록 때 수량은 저장하지 않는다(예시일 뿐). */
+const _SR_BRAND = '로사안젤라';
+const _SR_ROUTES = {
+  SMS:   { ic: '💬', t: '문자', d: '주문 내용과 회신이 기록으로 남습니다.' },
+  PHONE: { ic: '📞', t: '전화', d: '통화로 주문합니다. 주문 결과는 직접 확인해 주세요.' },
+  KAKAO: { ic: '🟡', t: '카카오톡', d: '카톡으로 보내고 답장을 받습니다.' },
+  WEB:   { ic: '🌐', t: '웹사이트 / 앱', d: '사이트에서 주문합니다.' },
+};
+const _SR_PAY = { BANK_TRANSFER: '계좌이체', CARD: '카드', DEFERRED_MONTHLY: '월말 후불', ON_DELIVERY: '배송 시 결제', SITE_PAYMENT: '사이트에서 결제', UNKNOWN: '아직 몰라요' };
+const _SR_PAY_WHEN = { AFTER_CONFIRMATION: '주문 확정 후', PREPAY: '주문할 때 먼저', ON_DELIVERY: '받을 때', MONTH_END_SETTLEMENT: '월말에 모아서', UNKNOWN: '아직 몰라요' };
+const _SR_FUL = { SUPPLIER_DELIVERY: '거래처가 배송', PARCEL: '택배', PICKUP: '직접 픽업', REGULAR_DELIVERY: '정기 배송', UNKNOWN: '아직 모름' };
+const _SR_LEAD = { SAME_DAY: '당일', NEXT_DAY: '다음날', NEXT_BUSINESS_DAY: '평일 기준 다음날', CUSTOM: '직접 입력', UNKNOWN: '모름' };
+const _SR_UNITS = ['kg', 'g', '박스', '봉', '단', '개'];
+const _SR_PHONE_RE = /^0[0-9]{1,2}-?[0-9]{3,4}-?[0-9]{4}$/;
+let _SR = { view: null, screen: null, d: null, vendorId: null, order: null, busy: false, note: '' };
+const _srEsc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const _srUuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => (Math.random() * 16 | 0).toString(16)));
+const _srStoreName = () => (_stores.find(s => s.store_id === SID) || {}).store_name || '';
+const _srQty = n => String(Number(n));
+
+// 서버 호출: 서버 함수 supplier-route(Edge)만 부른다 — 로그인 세션 토큰을 보내면 서버가 사용자를 확인하고 DB가 매장 권한을 판단한다.
+// 이 앱은 DB 함수를 직접 부르지 않는다. 실패도 { ok:false, code } 하나의 모양으로.
+const _SR_URL = `${SUPABASE_URL}/functions/v1/supplier-route/web`;
+const _SR_ACTION = { zk_sr_view: 'VIEW', zk_sr_register: 'REGISTER', zk_sr_order_draft: 'DRAFT', zk_sr_order_sent: 'SENT', zk_sr_order_reply: 'REPLY', zk_sr_order_decide: 'DECIDE' };
+async function _srRpc(fn, args) {
+  const token = await _writerToken();
+  if (!token) return { ok: false, code: 'SIGN_IN' };
+  const body = fn === 'zk_sr_view' ? { action: 'VIEW', store_id: args.p_store } : { action: _SR_ACTION[fn], ...args.p };
+  try {
+    const r = await fetch(_SR_URL, { method: 'POST', headers: { apikey: SUPABASE_KEY, authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    const b = await r.json().catch(() => null);
+    if (r.status === 401) return { ok: false, code: 'SIGN_IN' };
+    if (!b || typeof b.code !== 'string') return { ok: false, code: 'NETWORK' };
+    return b;
+  } catch { return { ok: false, code: 'NETWORK' }; }
+}
+async function _srLoad() {
+  const r = await _srRpc('zk_sr_view', { p_store: SID });
+  _SR.view = r && r.ok ? r : null;
+  return r;
+}
+const _srContract = vid => ((_SR.view && _SR.view.contracts) || []).find(c => c.vendor_id === vid) || null;
+const _srOrdersOf = vid => ((_SR.view && _SR.view.orders) || []).filter(o => o.vendor_id === vid);
+const _srOpenStates = ['DRAFT', 'WAITING_CONFIRMATION', 'CHANGE_PROPOSED', 'ACTION_REQUIRED'];
+const _srFail = r => ({ SIGN_IN: '거래처 발주는 로그인한 매장 운영자만 쓸 수 있어요. 먼저 로그인해 주세요.', FORBIDDEN: '이 매장의 운영자 권한이 없어요.',
+  NETWORK: '연결이 안 됐어요. 잠시 후 다시 해주세요.', OPEN_ORDER_EXISTS: '이 품목은 아직 끝나지 않은 주문이 있어요. 그 주문부터 마무리해 주세요.',
+  QTY_REQUIRED: '수량을 넣어주세요.', DESTINATION_REQUIRED: '번호를 확인해 주세요.', MESSAGE_CHANGED: '문구가 바뀌었어요. 다시 복사해 주세요.',
+  NO_PHONE_ROUTE: '이 거래처는 전화 번호가 등록되어 있지 않아요.', UNIT_MISMATCH: '거래처가 말한 단위가 달라요. 전화로 확인해 주세요.',
+  NOTE_REQUIRED: '무엇이 달라졌는지 적어주세요.', DECISION_DOES_NOT_MATCH_REPLY: '답장 내용과 맞지 않는 선택이에요.' }[r && r.code] || `처리하지 못했어요 (${(r && r.code) || 'ERROR'})`);
+
+/* ── 진입점 ── */
+async function _srOpenAdd() {
+  _SR.d = null; _SR.vendorId = null; _SR.order = null; _SR.note = '';
+  _srShow('add');
+}
+async function _srOpenDetail(vendorId) {
+  _SR.vendorId = vendorId; _SR.order = null; _SR.note = '';
+  const r = await _srLoad();
+  if (!r.ok) { showToast(_srFail(r)); return; }
+  _srShow('detail');
+}
+function _srShow(screen) {
+  _SR.screen = screen;
+  const ov = document.getElementById('srOverlay'); if (ov) ov.classList.add('on');
+  _srRender();
+}
+function _srClose() {
+  const ov = document.getElementById('srOverlay'); if (ov) ov.classList.remove('on');
+  _SR.screen = null;
+  if (typeof renderVendorList === 'function') renderVendorList();
+}
+
+/* ── 말로 소개한 내용 읽기 (규칙 · 비용 0). 모르는 건 모른다고 둔다. ── */
+function _srUnderstand(text) {
+  const t = String(text || '').replace(/\s+/g, ' ');
+  const hits = _items.filter(i => i.item_name && t.includes(i.item_name)).sort((a, b) => b.item_name.length - a.item_name.length);
+  const m = t.match(/([가-힣A-Za-z]+?)(?:를|을)?\s*(?:재배|키우|기르|만드|파는|팔)/);
+  const word = (hits[0] && hits[0].item_name) || (m && m[1]) || '';
+  const grower = /재배|키우|기르|농사|농장|농가/.test(t);
+  const routes = [];
+  if (/문자|메시지|sms/i.test(t)) routes.push('SMS');
+  if (/전화|통화/.test(t)) routes.push('PHONE');
+  if (/카톡|카카오/.test(t)) routes.push('KAKAO');
+  if (/사이트|웹|앱|쇼핑몰/.test(t)) routes.push('WEB');
+  const no = (t.match(/0[0-9]{1,2}-?[0-9]{3,4}-?[0-9]{4}/) || [])[0] || '';
+  return { text, name: word ? `${word} ${grower ? '농가' : '거래처'}` : '', itemId: hits[0] ? hits[0].item_id : null, routes,
+    delivers: /배송|갖다|가져다|배달/.test(t), def: null, backup: undefined, smsNo: no, phoneNo: '', phoneSame: null,
+    pay: null, payWhen: null, ful: /배송|갖다|가져다|배달/.test(t) ? 'SUPPLIER_DELIVERY' : null, lead: null, leadText: '',
+    makeDefault: null, exQty: 2, greet: `안녕하세요.\n${_SR_BRAND} ${_srStoreName()}입니다.`, close: '배송 부탁드립니다.', editMsg: false, vendorIdReuse: null };
+}
+const _srItem = id => _items.find(i => i.item_id === id) || null;
+const _srNeedsNo = d => d.routes.filter(r => r === d.def || r === d.backup).some(r => r === 'SMS' || r === 'PHONE');
+// 이 품목을 지금 다른 거래처에서 사고 있으면 한 번만 묻는다
+const _srCurrentDefault = d => { const it = _srItem(d.itemId); const vid = it && it.vendor_id; return vid ? (_vendors.find(v => v.vendor_id === vid) || null) : null; };
+
+/* ── 화면 ── */
+const _srProg = n => `<div class="sr-prog">${[1, 2, 3, 4, 5, 6, 7].map(i => `<i class="${i <= n ? 'on' : ''}"></i>`).join('')}</div>`;
+const _srKv = (k, v) => `<div class="sr-kv"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+const _srUnk = s => `<span class="sr-unk">${s}</span>`;
+const _srLeadWords = d => d.lead === 'CUSTOM' ? (d.leadText || '').trim() : (d.lead && d.lead !== 'UNKNOWN' ? _SR_LEAD[d.lead] : '');
+const _srMsg = (d, qty, unit) => `${d.greet}\n\n${(_srItem(d.itemId) || {}).item_name || ''} ${_srQty(qty)}${unit} 부탁드립니다.\n${d.close}`;
+function _srSummary(d) {
+  const it = _srItem(d.itemId);
+  return `<div class="card">${_srKv('거래처', _srEsc(d.name))}${_srKv('사용 매장', _srEsc(_srStoreName()))}
+    ${_srKv('기본 발주', _SR_ROUTES[d.def].t)}${d.backup ? _srKv('긴급 발주', _SR_ROUTES[d.backup].t) : ''}
+    ${_srNeedsNo(d) ? _srKv('번호', _srEsc(d.smsNo || d.phoneNo) + (d.backup === 'PHONE' && d.phoneNo && d.phoneNo !== d.smsNo ? ` · 전화 ${_srEsc(d.phoneNo)}` : '')) : ''}
+    ${_srKv('결제', d.pay === 'UNKNOWN' ? _srUnk('아직 모름') : `${_SR_PAY[d.pay]}${d.payWhen && d.payWhen !== 'UNKNOWN' ? ` · ${_SR_PAY_WHEN[d.payWhen]}` : ''}`)}
+    ${_srKv('배송', d.ful === 'UNKNOWN' ? _srUnk('아직 모름') : `${_SR_FUL[d.ful]}${_srLeadWords(d) ? ` · ${_srEsc(_srLeadWords(d))}` : ''}`)}
+    ${_srKv('주문 품목', it ? `${_srEsc(it.item_name)} ${_srUnk(`(${_srEsc(it.unit || '')} 단위)`)}` : _srUnk('아직 모름'))}
+    ${d.makeDefault ? _srKv('기본 거래처', `${_srEsc(it ? it.item_name : '')} → ${_srEsc(d.name)}`) : ''}</div>`;
+}
+
+const _SR_V = {
+  add: () => `${_srProg(1)}<h1 class="sr-h1">새 거래처 추가</h1><p class="sr-lead">이 거래처에 대해 편하게 말씀해주세요.</p>
+    <textarea id="srText" class="sr-ta" placeholder="예) 루꼴라 재배하시는 분인데 전화나 문자로 주문하면 배송해준대.">${_srEsc((_SR.d && _SR.d.text) || '')}</textarea>
+    <button class="sr-btn" onclick="_srAct('understand')">계속</button>`,
+  understand: () => { const d = _SR.d, it = _srItem(d.itemId); return `${_srProg(2)}<h1 class="sr-h1">이렇게 이해했어요</h1>
+    <div class="card">
+      <div class="sr-kv"><span class="k">거래처</span><input id="srName" class="sr-in" value="${_srEsc(d.name)}" placeholder="거래처 이름"></div>
+      ${_srKv('사용 매장', _srEsc(_srStoreName()))}
+      <div class="sr-kv"><span class="k">품목</span>${it ? `<span class="v">${_srEsc(it.item_name)} ${_srUnk(_srEsc(it.unit || ''))}</span>` :
+        `<select id="srItem" class="sr-in"><option value="">품목 고르기</option>${_items.map(i => `<option value="${i.item_id}">${_srEsc(i.item_name)}</option>`).join('')}</select>`}</div>
+      ${_srKv('가능한 주문 방식', d.routes.length ? d.routes.map(r => _SR_ROUTES[r].t).join(' / ') : _srUnk('아직 모름'))}
+      ${_srKv('배송', d.delivers ? '직접 배송 가능' : _srUnk('아직 모름'))}
+    </div>
+    <div class="sr-soft">아직 모르는 것: 가격 · 결제 방식 · 최소 주문량 · 주문 마감시간<br>지금 몰라도 괜찮아요. 거래하면서 채워갈게요.</div>
+    <button class="sr-btn" onclick="_srAct('toRoute')">맞아요, 계속</button><button class="sr-link" onclick="_srShow('add')">수정</button>`; },
+  route: () => { const d = _SR.d; const rec = d.routes.includes('SMS') ? 'SMS' : d.routes[0]; const others = d.def ? d.routes.filter(r => r !== d.def) : [];
+    return `${_srProg(3)}<h1 class="sr-h1">보통 어떻게 주문할까요?</h1>
+    ${rec === 'SMS' && d.routes.includes('PHONE') ? '<p class="sr-lead">주문 기록이 남는 문자 주문을 기본으로 추천합니다.</p>' : ''}
+    <div class="sr-choice">${Object.entries(_SR_ROUTES).map(([k, r]) => { const on = d.routes.includes(k); return `
+      <button class="sr-opt ${d.def === k ? 'sel' : ''} ${on ? '' : 'off'}" onclick="_srAct('def','${k}')"><span class="ic">${r.ic}</span><span><span class="t">${r.t}${k === rec ? '<span class="sr-tag rec">추천</span>' : ''}${d.def === k ? '<span class="sr-tag def">기본</span>' : ''}${d.backup === k ? '<span class="sr-tag bak">급할 때</span>' : ''}</span>
+      <div class="d">${on ? r.d : '이 거래처가 말한 방법은 아니에요 (눌러서 추가할 수 있어요)'}</div></span></button>`; }).join('')}</div>
+    ${others.length ? `<div class="card"><div class="sr-q">급할 때 다른 방법도 사용할까요?</div><div class="sr-chips">
+      ${others.map(r => `<button class="sr-chip ${d.backup === r ? 'sel' : ''}" onclick="_srAct('backup','${r}')">${_SR_ROUTES[r].ic} ${_SR_ROUTES[r].t}</button>`).join('')}
+      <button class="sr-chip ${d.backup === null ? 'sel' : ''}" onclick="_srAct('backup','')">없음</button></div></div>` : ''}
+    <button class="sr-btn" onclick="_srAct('toContact')" ${d.def && (!others.length || d.backup !== undefined) ? '' : 'disabled'}>${!d.def ? '기본 주문 방법을 골라주세요' : others.length && d.backup === undefined ? '급할 때 방법을 골라주세요 (없음도 괜찮아요)' : `${_SR_ROUTES[d.def].t}로 주문할게요`}</button>`; },
+  contact: () => { const d = _SR.d; const sms = d.def === 'SMS' || d.backup === 'SMS'; const ph = d.def === 'PHONE' || d.backup === 'PHONE';
+    return `${_srProg(3)}<h1 class="sr-h1">${sms ? '문자 보낼 번호를 알려주세요' : '전화 번호를 알려주세요'}</h1>
+    <input id="srNo" class="sr-in big" inputmode="tel" placeholder="010-0000-0000" value="${_srEsc(sms ? d.smsNo : d.phoneNo)}">
+    ${sms && ph ? `<div class="card"><div class="sr-q">전화 번호도 같은 번호인가요?</div><div class="sr-chips">
+      <button class="sr-chip ${d.phoneSame === true ? 'sel' : ''}" onclick="_srAct('phoneSame',true)">같아요</button><button class="sr-chip ${d.phoneSame === false ? 'sel' : ''}" onclick="_srAct('phoneSame',false)">달라요</button></div>
+      ${d.phoneSame === false ? `<input id="srPhoneNo" class="sr-in big" style="margin-top:10px" inputmode="tel" placeholder="전화 번호" value="${_srEsc(d.phoneNo)}">` : ''}</div>` : ''}
+    <p class="sr-helper">번호는 이 매장 운영자만 볼 수 있어요. ZeroKitchen이 직접 문자를 보내거나 전화를 걸지는 않아요.</p>
+    <button class="sr-btn" onclick="_srAct('toPay')">계속</button>`; },
+  pay: () => { const d = _SR.d; return `${_srProg(4)}<h1 class="sr-h1">결제는 어떻게 하나요?</h1>
+    <div class="sr-chips">${Object.entries(_SR_PAY).map(([k, v]) => `<button class="sr-chip ${d.pay === k ? 'sel' : ''}" onclick="_srAct('pay','${k}')">${v}</button>`).join('')}</div>
+    ${d.pay && d.pay !== 'UNKNOWN' ? `<div class="card"><div class="sr-q">언제 결제하나요?</div><div class="sr-chips">${Object.entries(_SR_PAY_WHEN).map(([k, v]) => `<button class="sr-chip ${d.payWhen === k ? 'sel' : ''}" onclick="_srAct('payWhen','${k}')">${v}</button>`).join('')}</div></div>` : ''}
+    ${d.pay === 'UNKNOWN' ? '<div class="sr-soft">괜찮아요. 첫 주문 때 거래처에 여쭤보고 채워둘게요.</div>' : ''}
+    <button class="sr-btn" onclick="_srShow('ful')" ${d.pay ? '' : 'disabled'}>계속</button>`; },
+  ful: () => { const d = _SR.d; return `${_srProg(5)}<h1 class="sr-h1">물건은 어떻게 받나요?</h1>
+    <div class="sr-chips">${Object.entries(_SR_FUL).map(([k, v]) => `<button class="sr-chip ${d.ful === k ? 'sel' : ''}" onclick="_srAct('ful','${k}')">${v}</button>`).join('')}</div>
+    ${d.ful && d.ful !== 'UNKNOWN' && d.ful !== 'PICKUP' ? `<div class="card"><div class="sr-q">주문하면 보통 언제 오나요?</div><div class="sr-chips">${Object.entries(_SR_LEAD).map(([k, v]) => `<button class="sr-chip ${d.lead === k ? 'sel' : ''}" onclick="_srAct('lead','${k}')">${v}</button>`).join('')}</div>
+      ${d.lead === 'CUSTOM' ? `<input id="srLeadText" class="sr-in" style="margin-top:10px" placeholder="예) 주문 후 2~3일 · 월·수·금 배송" value="${_srEsc(d.leadText)}">` : ''}</div>` : ''}
+    <button class="sr-btn" onclick="_srAct('toItemDefault')" ${d.ful ? '' : 'disabled'}>계속</button>`; },
+  itemDefault: () => { const d = _SR.d, it = _srItem(d.itemId), cur = _srCurrentDefault(d); return `${_srProg(6)}<h1 class="sr-h1">${_srEsc(it.item_name)}의 기본 거래처를 바꿀까요?</h1>
+    <p class="sr-lead">지금 ${_srEsc(it.item_name)}은(는) <b>${_srEsc(cur.vendor_name)}</b>에서 주문하고 있어요.</p>
+    <div class="sr-choice"><button class="sr-opt ${d.makeDefault === true ? 'sel' : ''}" onclick="_srAct('makeDefault',true)"><span class="ic">🔁</span><span><span class="t">${_srEsc(d.name)}로 바꿔요</span><div class="d">다음 발주부터 ${_srEsc(it.item_name)}은(는) ${_srEsc(d.name)}에 주문해요.</div></span></button>
+      <button class="sr-opt ${d.makeDefault === false ? 'sel' : ''}" onclick="_srAct('makeDefault',false)"><span class="ic">➕</span><span><span class="t">지금은 그대로</span><div class="d">${_srEsc(cur.vendor_name)}은(는) 그대로 두고, ${_srEsc(d.name)}도 거래처로 연결만 해둘게요.</div></span></button></div>
+    <button class="sr-btn" onclick="_srShow('preview')" ${d.makeDefault === null ? 'disabled' : ''}>계속</button>`; },
+  preview: () => { const d = _SR.d, it = _srItem(d.itemId), unit = (it && it.unit) || ''; return `${_srProg(6)}<h1 class="sr-h1">${d.def === 'PHONE' ? '주문할 때 이렇게 말할게요' : '주문할 때 이렇게 보낼게요'}</h1>
+    <p class="sr-helper">사용 매장: ${_srEsc(_srStoreName())}</p>
+    <div class="card"><div class="sr-q" style="font-size:12px;color:var(--muted)">예시 수량</div><div class="sr-row"><span style="flex:1;font-weight:700">${_srEsc(it ? it.item_name : '')}</span>
+      <input id="srExQty" class="sr-in" style="width:70px;text-align:center" type="number" min="0.1" step="0.1" value="${d.exQty}" oninput="_srAct('exQty',this.value)"><span>${_srEsc(unit)}</span></div>
+      <p class="sr-helper" style="margin:6px 0 0">실제 발주할 때는 그때 필요한 수량이 들어갑니다. 이 수량은 저장하지 않아요.</p></div>
+    ${d.editMsg ? `<div class="card"><div class="sr-q">처음 인사</div><textarea id="srGreet" class="sr-ta" style="min-height:60px">${_srEsc(d.greet)}</textarea>
+      <div class="sr-q">끝 인사</div><textarea id="srClose" class="sr-ta" style="min-height:44px">${_srEsc(d.close)}</textarea>
+      <p class="sr-helper">품목과 수량 줄은 발주할 때 자동으로 들어가요.</p></div><button class="sr-btn" onclick="_srAct('saveMsg')">수정 완료</button>` :
+      `<div class="sr-bubble" id="srPv">${_srEsc(_srMsg(d, d.exQty, unit))}</div><button class="sr-btn" onclick="_srShow('confirm')">이대로 사용</button>
+      <button class="sr-link" onclick="_srAct('editMsg')">문구 수정</button>`}`; },
+  confirm: () => `${_srProg(7)}<h1 class="sr-h1">이렇게 등록할까요?</h1>${_srSummary(_SR.d)}
+    ${_SR.note ? `<div class="sr-soft warn">${_srEsc(_SR.note)}</div>` : ''}
+    ${_SR.d.vendorIdReuse ? `<button class="sr-btn" onclick="_srAct('register',true)">이 거래처에 기록할게요</button>` : `<button class="sr-btn" onclick="_srAct('register')" ${_SR.busy ? 'disabled' : ''}>등록</button>`}
+    <button class="sr-link" onclick="_srShow('route')">주문 방식 다시 고르기</button>`,
+  done: () => { const d = _SR.d, it = _srItem(d.itemId); return `<div class="sr-done">✅</div><h1 class="sr-h1" style="text-align:center">거래처를 추가했어요</h1>${_srSummary(d)}
+    <div class="sr-soft">다음부터 ${_srEsc(it ? it.item_name : '')} 발주가 필요하면 이 방식으로 준비할게요.</div>
+    <button class="sr-btn" onclick="_srOpenDetail(${_SR.vendorId})">완료</button>`; },
+
+  detail: () => { const c = _srContract(_SR.vendorId); if (!c) return `<div class="sr-soft">이 거래처의 주문 방식이 아직 기록되지 않았어요.</div><button class="sr-btn" onclick="_srOpenAdd()">거래처 추가</button>`;
+    const def = c.routes.find(r => r.role === 'DEFAULT'), sec = c.routes.find(r => r.role === 'SECONDARY');
+    const orders = _srOrdersOf(c.vendor_id), open = orders.find(o => _srOpenStates.includes(o.state) && o.mode === 'REAL');
+    const last = orders.find(o => o.state === 'CONFIRMED');
+    return `<h1 class="sr-h1">${_srEsc(c.vendor_name)}</h1><p class="sr-lead">${c.items.map(i => _srEsc(i.item_name)).join(' · ')} 공급</p>
+    <div class="card">${_srKv('사용 매장', _srEsc(_srStoreName()))}
+      ${_srKv('기본 주문', `${_SR_ROUTES[def.kind].t}${def.destination ? ` ${_srUnk(_srEsc(def.destination))}` : ''}`)}
+      ${sec ? _srKv('급할 때', `${_SR_ROUTES[sec.kind].t}${sec.destination ? ` ${_srUnk(_srEsc(sec.destination))}` : ''}`) : ''}
+      ${_srKv('결제', c.payment_method === 'UNKNOWN' ? _srUnk('아직 모름') : `${_SR_PAY[c.payment_method]}${c.payment_timing !== 'UNKNOWN' ? ` · ${_SR_PAY_WHEN[c.payment_timing]}` : ''}`)}
+      ${_srKv('배송', c.fulfillment === 'UNKNOWN' ? _srUnk('아직 모름') : `${_SR_FUL[c.fulfillment]}${c.lead_time_words ? ` · ${_srEsc(c.lead_time_words)}` : ''}`)}
+      ${_srKv('품목', c.items.map(i => `${_srEsc(i.item_name)} · ${_srEsc(i.unit || '')}`).join(', '))}
+      ${_srKv('최근 주문', last ? `${_srEsc(last.item_name)} ${_srQty(last.final_qty)}${_srEsc(last.unit)} ${_srUnk(new Date(last.confirmed_at).toLocaleDateString('ko-KR'))}` : _srUnk('없음'))}</div>
+    ${open ? `<div class="sr-soft">진행 중인 주문이 있어요: ${_srEsc(open.item_name)} ${_srQty(open.requested_qty)}${_srEsc(open.unit)}</div><button class="sr-btn" onclick="_srAct('resume','${open.order_id}')">이어서 하기</button>`
+      : `<button class="sr-btn" onclick="_srAct('prepare')">발주 준비</button>`}
+    <button class="sr-link" onclick="_srClose()">닫기</button>`; },
+
+  prepare: () => { const c = _srContract(_SR.vendorId); const o = _SR.order; return `<h1 class="sr-h1">${_srEsc(c.vendor_name)} 발주</h1>
+    <div class="card">${c.items.length > 1 ? `<div class="sr-kv"><span class="k">품목</span><select id="srOItem" class="sr-in" onchange="_srAct('oItem',this.value)">${c.items.map(i => `<option value="${i.item_id}" ${i.item_id === o.itemId ? 'selected' : ''}>${_srEsc(i.item_name)}</option>`).join('')}</select></div>` : _srKv('품목', _srEsc(c.items[0].item_name))}
+      ${_srKv('매장', _srEsc(_srStoreName()))}
+      <div class="sr-kv"><span class="k">지금 필요한 수량</span><span class="sr-row"><input id="srOQty" class="sr-in" style="width:80px;text-align:center" type="number" min="0.1" step="0.1" value="${o.qty || ''}" oninput="_srAct('oQty',this.value)"> ${_srEsc((c.items.find(i => i.item_id === o.itemId) || {}).unit || '')}</span></div></div>
+    <label class="sr-row sr-helper"><input type="checkbox" id="srDraftOnly" ${o.draftOnly ? 'checked' : ''} onchange="_srAct('draftOnly',this.checked)"> 보내지 않고 문구만 확인 (연결 확인용)</label>
+    ${_SR.note ? `<div class="sr-soft warn">${_srEsc(_SR.note)}</div>` : ''}
+    <button class="sr-btn" onclick="_srAct('draft')" ${_SR.busy ? 'disabled' : ''}>보낼 내용 만들기</button><button class="sr-link" onclick="_srShow('detail')">돌아가기</button>`; },
+
+  order: () => _srOrderView(),
+};
+
+// 주문 한 건 — 지금 할 일 하나만
+function _srOrderView() {
+  const c = _srContract(_SR.vendorId) || { routes: [] }; const o = (_SR.view.orders || []).find(x => x.order_id === _SR.order.id);
+  if (!o) return '<div class="sr-soft">주문을 찾지 못했어요.</div>';
+  const route = o.route_kind, phone = (c.routes || []).find(r => r.kind === 'PHONE'), def = (c.routes || []).find(r => r.role === 'DEFAULT') || {};
+  const head = `<h1 class="sr-h1">${_srEsc(o.item_name)} 발주</h1><div class="card">${_srKv('거래처', _srEsc(c.vendor_name || ''))}${_srKv('매장', _srEsc(_srStoreName()))}
+    ${_srKv('주문 방식', `${_SR_ROUTES[route] ? _SR_ROUTES[route].t : route}${route !== def.kind ? ' (이번만)' : ''}`)}${_srKv('수량', `${_srQty(o.requested_qty)}${_srEsc(o.unit)}`)}</div>`;
+  const note = _SR.note ? `<div class="sr-soft warn">${_srEsc(_SR.note)}</div>` : '';
+  const callBtn = phone && route !== 'PHONE' ? `<button class="sr-btn2" onclick="_srDecide('CALL')">${o.state === 'DRAFT' ? '이번엔 전화로' : '전화해서 확인'}</button>` : '';
+  const cancelBtn = (label = '이번 주문 취소') => `<button class="sr-btn2" onclick="_srDecide('CANCEL')">${label}</button>`;
+  const replyBox = `<textarea id="srReply" class="sr-ta" placeholder="거래처 답장을 붙여넣어 주세요"></textarea><button class="sr-btn" onclick="_srAct('reply')" ${_SR.busy ? 'disabled' : ''}>답장 확인</button>`;
+  const lastReply = ((o.events || []).filter(e => e.kind === 'REPLY_RECORDED').pop() || {}).payload;
+  const replyQuote = lastReply ? `<div class="sr-bubble">${_srEsc(o.message_text)}</div><div class="sr-reply">${_srEsc(lastReply.reply_text)}</div>` : '';
+  const p = o.proposal || {};
+  if (o.mode === 'DRAFT_ONLY') return `${head}<div class="sr-bubble">${_srEsc(o.message_text)}</div>
+    <div class="sr-soft">연결 확인용 문구예요. 보내지 않고, 주문으로 기록되지 않아요.</div>${o.state === 'CANCELLED' ? '' : `<button class="sr-btn" onclick="_srDecide('CANCEL')">확인 — 닫기</button>`}<button class="sr-link" onclick="_srShow('detail')">거래처 보기</button>`;
+  if (o.state === 'DRAFT' && route === 'PHONE') return `${head}<div class="sr-q">통화할 때</div><div class="sr-bubble">${_srEsc(o.message_text)}</div>${note}
+    <button class="sr-btn" onclick="_srDecide('CALL')">전화할게요</button><p class="sr-helper">ZeroKitchen이 전화를 걸지는 않아요. 통화 뒤 결과를 알려주세요.</p>${cancelBtn()}`;
+  if (o.state === 'DRAFT') return `${head}<div class="sr-q">보낼 내용</div><div class="sr-bubble sms">${_srEsc(o.message_text)}</div>${note}
+    <button class="sr-btn" onclick="_srAct('copy')">${_SR.order.copied ? '다시 복사' : route === 'KAKAO' ? '카톡 문구 복사' : '문자 복사'}</button>
+    ${_SR.order.copied ? `<button class="sr-btn" onclick="_srAct('sent')">보냈어요</button><p class="sr-helper">복사한 내용을 문자 앱에서 ${_srEsc(def.destination || '')}로 보낸 뒤 눌러주세요.</p>` : ''}
+    ${callBtn}<p class="sr-helper">이 거래처의 기본 발주 방식은 ${_SR_ROUTES[def.kind] ? _SR_ROUTES[def.kind].t : ''}입니다.</p>${cancelBtn()}`;
+  if (route === 'PHONE' && ['WAITING_CONFIRMATION', 'CHANGE_PROPOSED'].includes(o.state)) {
+    const ph = _SR.order.phoneDiff;
+    return `${head}<div class="sr-q">통화할 때</div><div class="sr-bubble">안녕하세요.\n${_srEsc(_SR_BRAND)}입니다.\n${_srEsc(o.item_name)} ${_srQty(o.requested_qty)}${_srEsc(o.unit)} 부탁드립니다.</div>
+      <div class="sr-soft">전화 번호: <b>${_srEsc((phone || {}).destination || '')}</b> — 통화가 끝나면 결과를 알려주세요.</div>${note}
+      ${ph ? `<div class="sr-q">무엇이 달라졌나요?</div><textarea id="srPhNote" class="sr-ta" placeholder="예) 1kg만 된대요, 모레 온대요"></textarea>
+        <div class="sr-row"><span>최종 수량</span><input id="srPhQty" class="sr-in" style="width:80px;text-align:center" type="number" min="0.1" step="0.1" value="${_srQty(o.requested_qty)}"> ${_srEsc(o.unit)}</div>
+        <input id="srPhWhen" class="sr-in" placeholder="배송 (예: 모레) — 그대로면 비워두세요">
+        <button class="sr-btn" onclick="_srAct('phoneChanged')">이 내용으로 주문 확정</button>${cancelBtn()}` :
+      `<div class="sr-q">주문됐나요?</div><div class="sr-choice">
+        <button class="sr-opt" onclick="_srDecide('PHONE_CONFIRMED')"><span class="ic">✅</span><span><span class="t">주문 완료</span></span></button>
+        <button class="sr-opt" onclick="_srAct('phoneDiff')"><span class="ic">✏️</span><span><span class="t">내용이 달라졌어요</span><div class="d">수량·가격·날짜가 바뀐 경우</div></span></button>
+        <button class="sr-opt" onclick="_srDecide('PHONE_FAILED')"><span class="ic">⚠️</span><span><span class="t">주문 실패</span><div class="d">안 받으셨거나 못 한다고 하신 경우</div></span></button></div>`}`;
+  }
+  if (o.state === 'WAITING_CONFIRMATION' && o.last_reply_kind === 'CONFIRM') return `${head}${replyQuote}<h1 class="sr-h1" style="font-size:17px">주문이 확인됐어요</h1>
+    <div class="card">${_srKv('품목', `${_srEsc(o.item_name)} ${_srQty(o.requested_qty)}${_srEsc(o.unit)}`)}${_srKv('배송 예정', _srEsc(p.when || o.expected_delivery || '거래처 답장 기준'))}${_srKv('주문 방식', '문자')}</div>
+    <button class="sr-btn" onclick="_srDecide('ACCEPT')">확인</button>${note}`;
+  if (o.state === 'WAITING_CONFIRMATION') return `${head}<div class="sr-bubble sms">${_srEsc(o.message_text)}</div>
+    ${o.last_reply_kind === 'UNCLEAR' ? `<div class="sr-reply">${_srEsc(lastReply.reply_text)}</div><div class="sr-soft warn">아직 주문 확정 답변은 아닙니다. 답장이 더 오면 붙여넣어 주세요.</div>` : `<div class="sr-soft">거래처 답장을 기다리고 있어요.</div>`}
+    ${note}${replyBox}${callBtn}${cancelBtn()}`;
+  if (o.state === 'CHANGE_PROPOSED') {
+    const tail = `${cancelBtn(o.last_reply_kind === 'PRICE_CHANGE' || o.last_reply_kind === 'DELIVERY_CHANGE' ? '취소' : '이번 주문 취소')}${phone ? `<button class="sr-btn2" onclick="_srDecide('CALL')">전화해서 확인</button>` : ''}`;
+    if (o.last_reply_kind === 'QUANTITY_CHANGE') return `${head}${replyQuote}<h1 class="sr-h1" style="font-size:17px">거래처에서 수량을 바꿔 제안했어요</h1>
+      <div class="sr-vs"><div><div class="l">요청</div><div class="n">${_srQty(o.requested_qty)}${_srEsc(o.unit)}</div></div><div><div class="l">가능</div><div class="n chg">${_srQty(p.qty)}${_srEsc(p.unit)}</div></div></div>
+      <p class="sr-helper">어떻게 할까요?</p>${note}<button class="sr-btn" onclick="_srDecide('ACCEPT_QTY')">${_srQty(p.qty)}${_srEsc(p.unit)}로 주문</button>${tail}`;
+    if (o.last_reply_kind === 'PRICE_CHANGE') return `${head}${replyQuote}<h1 class="sr-h1" style="font-size:17px">가격 확인이 필요해요</h1>
+      <div class="card">${p.price_per_unit ? _srKv('거래처 제안', `${_srEsc(p.price_unit || o.unit)}당 ${Number(p.price_per_unit).toLocaleString('ko-KR')}원`) : ''}
+        ${_srKv('수량', `${_srQty(o.requested_qty)}${_srEsc(o.unit)}`)}${_srKv('예상 합계', `${Number(p.total_krw || Math.round((p.price_per_unit || 0) * o.requested_qty)).toLocaleString('ko-KR')}원`)}
+        ${_srKv('이전 가격', _srUnk('아직 모름'))}</div>${note}<button class="sr-btn" onclick="_srDecide('ACCEPT_PRICE')">이 가격으로 주문</button>${tail}`;
+    if (o.last_reply_kind === 'DELIVERY_CHANGE') return `${head}${replyQuote}<h1 class="sr-h1" style="font-size:17px">배송일이 달라졌어요</h1>
+      <div class="sr-vs"><div><div class="l">기존 기대</div><div class="n" style="font-size:15px">${_srEsc(o.expected_delivery || '아직 모름')}</div></div><div><div class="l">거래처 제안</div><div class="n chg">${_srEsc(p.when)}</div></div></div>
+      ${note}<button class="sr-btn" onclick="_srDecide('ACCEPT_DELIVERY')">${_srEsc(p.when)} 받아요</button>${tail}`;
+    return `${head}${replyQuote}<h1 class="sr-h1" style="font-size:17px">이번에는 주문하기 어려워요</h1>
+      <div class="card">${_srKv('거래처', _srEsc(c.vendor_name || ''))}${_srKv('이유', _srEsc(p.reason || lastReply && lastReply.reply_text || ''))}</div>${note}
+      <button class="sr-btn" onclick="_srDecide('FIND_OTHER')">다른 거래처 찾기</button>${tail}`;
+  }
+  if (o.state === 'ACTION_REQUIRED') return `${head}<div class="sr-soft warn">다른 거래처를 찾아 주문하는 기능은 아직 연결되지 않았어요. 다른 곳에 직접 주문하신 뒤 이 주문은 취소해 주세요.</div>${note}${cancelBtn()}`;
+  if (o.state === 'CONFIRMED') return `<div class="sr-done">✅</div><h1 class="sr-h1" style="text-align:center">주문이 확인됐어요</h1>
+    <div class="card">${_srKv('품목', `${_srEsc(o.item_name)} ${_srQty(o.final_qty)}${_srEsc(o.unit)}`)}${_srKv('배송', _srEsc(o.final_delivery_text || '아직 모름'))}
+      ${o.final_price_per_unit ? _srKv('가격', `${Number(o.final_price_per_unit).toLocaleString('ko-KR')}원 · 총 ${Number(o.final_total_krw || 0).toLocaleString('ko-KR')}원`) : ''}
+      ${_srKv('거래처', _srEsc(c.vendor_name || ''))}${_srKv('주문 확인', o.route_kind === 'PHONE' ? '통화 후 사장님 확인' : '보낸 문자 + 거래처 답장')}
+      ${_srKv('결제', c.payment_timing === 'MONTH_END_SETTLEMENT' ? '월말에 모아서 (아직 안 함)' : '아직 안 함')}</div>
+    <p class="sr-helper">도착하면 입고는 따로 확인해요. 재고는 지금 바뀌지 않았어요.</p><button class="sr-btn" onclick="_srShow('detail')">완료</button>`;
+  return `${head}<div class="sr-soft">${o.state === 'CANCELLED' ? '이번 주문을 취소했어요.' : '이번 주문은 실패로 남겨뒀어요.'}</div><button class="sr-btn" onclick="_srShow('detail')">거래처 보기</button>`;
+}
+
+function _srRender() {
+  const app = document.getElementById('srApp'); if (!app || !_SR.screen) return;
+  app.innerHTML = (_SR_V[_SR.screen] || (() => ''))();
+}
+const _srVal = id => { const e = document.getElementById(id); return e ? e.value : ''; };
+
+async function _srDecide(decision, extra = {}) {
+  if (_SR.busy) return; _SR.busy = true; _SR.note = '';
+  const r = await _srRpc('zk_sr_order_decide', { p: { order_id: _SR.order.id, decision, ...extra } });
+  _SR.busy = false;
+  if (!r.ok) { _SR.note = _srFail(r); _srRender(); return; }
+  _SR.order.phoneDiff = false;
+  await _srLoad(); _srShow('order');
+}
+
+async function _srAct(a, v) {
+  const d = _SR.d;
+  switch (a) {
+    case 'understand': { const t = _srVal('srText').trim(); if (!t) { showToast('거래처에 대해 한 줄만 적어주세요.'); return; } _SR.d = _srUnderstand(t); return _srShow('understand'); }
+    case 'toRoute': { d.name = _srVal('srName').trim(); if (!d.itemId) d.itemId = Number(_srVal('srItem')) || null;
+      if (!d.name) { showToast('거래처 이름을 적어주세요.'); return; } if (!d.itemId) { showToast('어떤 품목을 사는 거래처인지 골라주세요.'); return; } return _srShow('route'); }
+    case 'def': if (!d.routes.includes(v)) d.routes.push(v); if (d.def !== v) d.backup = undefined; d.def = v; return _srRender();
+    case 'backup': d.backup = v || null; return _srRender();
+    case 'toContact': return _srNeedsNo(d) ? _srShow('contact') : _srShow('pay');
+    case 'phoneSame': d.smsNo = _srVal('srNo').trim() || d.smsNo; d.phoneSame = v; return _srRender();
+    case 'toPay': { const no = _srVal('srNo').trim(); const sms = d.def === 'SMS' || d.backup === 'SMS', ph = d.def === 'PHONE' || d.backup === 'PHONE';
+      if (!_SR_PHONE_RE.test(no)) { showToast('번호를 확인해 주세요 (예: 010-1234-5678).'); return; }
+      if (sms) d.smsNo = no; else d.phoneNo = no;
+      if (sms && ph) { if (d.phoneSame === null) { showToast('전화 번호가 같은지 골라주세요.'); return; }
+        d.phoneNo = d.phoneSame ? no : _srVal('srPhoneNo').trim(); if (!_SR_PHONE_RE.test(d.phoneNo)) { showToast('전화 번호를 확인해 주세요.'); return; } }
+      return _srShow('pay'); }
+    case 'pay': d.pay = v; if (v === 'UNKNOWN') d.payWhen = 'UNKNOWN'; else if (d.payWhen === 'UNKNOWN') d.payWhen = null; return _srRender();
+    case 'payWhen': d.payWhen = v; return _srRender();
+    case 'ful': d.ful = v; if (v === 'UNKNOWN' || v === 'PICKUP') d.lead = 'UNKNOWN'; return _srRender();
+    case 'lead': d.leadText = _srVal('srLeadText') || d.leadText; d.lead = v; return _srRender();
+    case 'toItemDefault': { if (d.lead === 'CUSTOM') { d.leadText = _srVal('srLeadText').trim(); if (!d.leadText) { showToast('언제 오는지 적어주세요.'); return; } }
+      const cur = _srCurrentDefault(d); if (cur && !String(cur.vendor_name).includes(d.name)) { d.makeDefault = null; return _srShow('itemDefault'); }
+      d.makeDefault = false; return _srShow('preview'); }   // no current default → nothing is assumed
+    case 'makeDefault': d.makeDefault = v; return _srRender();
+    case 'exQty': { const n = Number(v); if (n > 0) { d.exQty = n; const pv = document.getElementById('srPv'); if (pv) pv.textContent = _srMsg(d, n, (_srItem(d.itemId) || {}).unit || ''); } return; }
+    case 'editMsg': d.editMsg = true; return _srRender();
+    case 'saveMsg': d.greet = _srVal('srGreet').trim() || d.greet; d.close = _srVal('srClose').trim() || d.close; d.editMsg = false; return _srRender();
+    case 'register': {
+      if (_SR.busy) return; _SR.busy = true; _SR.note = ''; _srRender();
+      const routes = [{ kind: d.def, role: 'DEFAULT', destination: d.def === 'SMS' ? d.smsNo : d.def === 'PHONE' ? d.phoneNo : null }];
+      if (d.backup) routes.push({ kind: d.backup, role: 'SECONDARY', destination: d.backup === 'SMS' ? d.smsNo : d.backup === 'PHONE' ? d.phoneNo : null });
+      d.key = d.key || _srUuid();
+      const p = { store_id: SID, vendor_name: d.name, description: d.text, idempotency_key: d.key, items: [{ item_id: d.itemId, make_default: !!d.makeDefault }], routes,
+        payment_method: d.pay || 'UNKNOWN', payment_timing: d.payWhen || 'UNKNOWN', fulfillment: d.ful || 'UNKNOWN', lead_time: d.lead || 'UNKNOWN',
+        lead_time_text: d.lead === 'CUSTOM' ? d.leadText : null, greeting: d.greet, closing: d.close };
+      if (v === true && d.vendorIdReuse) p.vendor_id = d.vendorIdReuse;
+      const r = await _srRpc('zk_sr_register', { p });
+      _SR.busy = false;
+      if (r.code === 'VENDOR_NAME_EXISTS') { d.vendorIdReuse = Number(r.detail); d.key = _srUuid(); _SR.note = `"${d.name}" 거래처가 이미 있어요. 그 거래처에 이 주문 방식을 기록할까요?`; return _srRender(); }
+      if (!r.ok) { _SR.note = _srFail(r); return _srRender(); }
+      _SR.vendorId = r.vendor_id;
+      try { const nv = (await db.from('vendors').select('*').eq('store_id', SID)).data; if (nv) _vendors = nv; } catch { /* 목록은 다음 새로고침 때 */ }
+      if (d.makeDefault) { const it = _srItem(d.itemId); if (it) it.vendor_id = r.vendor_id; }
+      await _srLoad(); return _srShow('done'); }
+    case 'prepare': { const c = _srContract(_SR.vendorId); _SR.order = { itemId: c.items[0].item_id, qty: '', draftOnly: false }; _SR.note = ''; return _srShow('prepare'); }
+    case 'oItem': _SR.order.itemId = Number(v); return _srRender();
+    case 'oQty': _SR.order.qty = v; return;
+    case 'draftOnly': _SR.order.draftOnly = !!v; return;
+    case 'draft': {
+      if (_SR.busy) return; const q = Number(_SR.order.qty);
+      if (!(q > 0)) { _SR.note = '지금 필요한 수량을 넣어주세요.'; return _srRender(); }
+      _SR.busy = true; _SR.order.key = _SR.order.key || _srUuid();
+      const r = await _srRpc('zk_sr_order_draft', { p: { store_id: SID, vendor_id: _SR.vendorId, item_id: _SR.order.itemId, qty: q, mode: _SR.order.draftOnly ? 'DRAFT_ONLY' : 'REAL', idempotency_key: _SR.order.key } });
+      _SR.busy = false;
+      if (!r.ok) { _SR.note = _srFail(r); return _srRender(); }
+      _SR.order = { id: r.order_id, hash: r.message_hash, copied: false }; _SR.note = '';
+      await _srLoad(); return _srShow('order'); }
+    case 'resume': _SR.order = { id: v, copied: false }; _SR.note = ''; return _srShow('order');
+    case 'copy': { const o = (_SR.view.orders || []).find(x => x.order_id === _SR.order.id);
+      try { await navigator.clipboard.writeText(o.message_text); _SR.order.copied = true; _SR.order.hash = o.message_hash; showToast('📋 문자 내용을 복사했어요'); }
+      catch { showToast('복사하지 못했어요. 길게 눌러 직접 복사해 주세요.'); _SR.order.copied = true; _SR.order.hash = o.message_hash; }
+      return _srRender(); }
+    case 'sent': {
+      if (_SR.busy) return; _SR.busy = true;
+      const r = await _srRpc('zk_sr_order_sent', { p: { order_id: _SR.order.id, message_hash: _SR.order.hash } });
+      _SR.busy = false;
+      if (!r.ok) { _SR.note = _srFail(r); return _srRender(); }
+      _SR.note = ''; await _srLoad(); return _srShow('order'); }
+    case 'reply': {
+      const t = _srVal('srReply').trim(); if (!t) { showToast('거래처 답장을 붙여넣어 주세요.'); return; }
+      if (_SR.busy) return; _SR.busy = true;
+      const r = await _srRpc('zk_sr_order_reply', { p: { order_id: _SR.order.id, reply_text: t } });
+      _SR.busy = false;
+      if (!r.ok) { _SR.note = _srFail(r); return _srRender(); }
+      _SR.note = ''; await _srLoad(); return _srShow('order'); }
+    case 'phoneDiff': _SR.order.phoneDiff = true; return _srRender();
+    case 'phoneChanged': { const note = _srVal('srPhNote').trim(); const q = Number(_srVal('srPhQty'));
+      if (!note) { _SR.note = '무엇이 달라졌는지 적어주세요.'; return _srRender(); }
+      return _srDecide('PHONE_CHANGED', { note, final_qty: q > 0 ? q : undefined, delivery_text: _srVal('srPhWhen').trim() || undefined }); }
+  }
+}
+/* ══ 거래처 발주 LINE 끝 ══ */
 
 function renderVendorList() {
   const list = document.getElementById('vendorList');
@@ -8092,6 +8508,7 @@ function renderVendorList() {
         <option value="sms"   ${v.order_method==='sms'  ?'selected':''}>📲 문자</option>
         <option value="call"  ${v.order_method==='call' ?'selected':''}>📞 전화</option>
       </select>
+      ${_srContract(v.vendor_id) ? `<button onclick="_srOpenDetail(${v.vendor_id})" style="background:none;border:1px solid var(--accent);border-radius:6px;padding:5px 8px;font-size:12px;color:var(--accent);cursor:pointer;white-space:nowrap">자세히 ›</button>` : ''}
       <button onclick="deleteVendor(${v.vendor_id},'${v.vendor_name.replace(/'/g,"&#39;")}')"
         style="background:none;border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:13px;color:var(--text-muted);cursor:pointer">🗑</button>
     </div>`
@@ -10261,5 +10678,7 @@ async function v3Feedback(itemId, wasCorrect) {
 
 setTimeout(()=>init(), 500);
 </script>
+<div id="srOverlay" class="sr-ov"><div class="sr-hd"><span class="logo">ZeroKitchen</span><span class="store-nm">거래처</span><button class="x" onclick="_srClose()">닫기</button></div>
+<div class="sr-body"><div class="sr-wrap" id="srApp"></div></div></div>
 </body>
 </html>
