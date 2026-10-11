@@ -172,9 +172,11 @@ async function scenario(raw, opts) { const e = makeEnv(opts); const err = await 
   const vals = { 'pr-pick-1': 'ev:7', 'pr-conv-1': 'SAME_UNIT', 'pr-pick-2': '', 'pr-conv-2': '', 'pr-pick-3': 'new', 'pr-conv-3': 'FACTOR', 'pr-factor-3': '0', 'pr-sunit-3': '' };
   const part = f._purchaseReviewCollect(req, k => vals[k]);
   const full = f._purchaseReviewCollect(req, k => ({ ...vals, 'pr-pick-2': 'ev:9', 'pr-conv-2': 'UNKNOWN', 'pr-factor-3': '4', 'pr-sunit-3': '개' })[k]);
-  check('UX-02 one grouped review screen (all lines, one "N개 품목 확인 완료" button): the single candidate pre-selected, two candidates NOT pre-selected, no-candidate → "새 품목으로 등록"; parse confidence ≠ product confidence shown; other-store items only as "참고(다른 매장)"',
-    (html.match(/data-pr-line=/g) || []).length === 3 && /3개 품목 확인 완료/.test(html) && /value="ev:7" checked/.test(html) && !/value="ev:8" checked/.test(html) && !/value="ev:9" checked/.test(html)
-    && /value="new" checked> 새 품목으로 등록/.test(html) && /읽기 확실 · 제품 확신도 낮음/.test(html) && /참고\(다른 매장\): 테스트매장 품목 치즈 \(item 100\) — 이 매장 제품으로 쓰지 않음/.test(html), html.slice(0, 400));
+  // (PURCHASE_ITEM_REVIEW_SIMPLIFY_V0_1: 버튼 "확인하고 계속", 처음 구매 품목 = 크게 + "어디에서 찾아볼까요?" — 선택 규칙은 그대로)
+  check('UX-02 one grouped review screen (all lines, one "확인하고 계속" button): the single candidate pre-selected, two candidates NOT pre-selected, no-candidate → new-item card ("처음 구매하는 품목" + where to look); other-store items only as "참고(다른 매장)"',
+    (html.match(/data-pr-line=/g) || []).length === 3 && /확인하고 계속/.test(html) && /value="ev:7" checked/.test(html) && !/value="ev:8" checked/.test(html) && !/value="ev:9" checked/.test(html)
+    && /data-pr-need="new"/.test(html) && /value="new" checked hidden/.test(html) && /처음 구매하는 품목입니다/.test(html) && /어디에서 찾아볼까요\?/.test(html)
+    && /참고\(다른 매장\): 테스트매장 품목 치즈 \(item 100\) — 이 매장 제품으로 쓰지 않음/.test(html), html.slice(0, 400));
   check('UX-03 nothing is guessed: an unpicked product / package or an invalid "1통 = ?" blocks sending (listed by name); a complete screen → exactly one decision per line (CANDIDATE evidence / NEW_PRODUCT, SAME_UNIT / UNKNOWN / FACTOR 4 개)',
     part.missing.length === 2 && /파인애플 \(제품\)/.test(part.missing.join()) && /파프리카 분말 \(포장 수량·단위\)/.test(part.missing.join())
     && J(full.lines) === J([{ line_no: 1, choice: 'CANDIDATE', evidence_id: 7, conversion: 'SAME_UNIT' }, { line_no: 2, choice: 'CANDIDATE', evidence_id: 9, conversion: 'UNKNOWN' },

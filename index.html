@@ -663,6 +663,27 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 .dock-sub{font-size:13px;font-weight:700;color:var(--dim);padding:10px 4px 4px}
 [data-dock-slot="other-today"] .agent-sum{display:block;font-size:13px;color:var(--dim);padding:6px 0 2px}
 [data-dock-slot="other-today"] .agent-none{display:none}
+.pr-review .pr-sec{font-size:13px;font-weight:700;margin:12px 0 4px;color:var(--muted)}
+.pr-auto{display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px 8px;padding:6px 0;border-top:1px solid var(--border)}
+.pr-auto-main{flex:1 1 0;min-width:0}
+.pr-auto-name{font-size:14px;font-weight:600}
+.pr-auto-sub{font-size:12px;color:var(--muted);overflow-wrap:anywhere}
+.pr-changed{font-size:12px;color:var(--accent);font-weight:600}
+.pr-change{background:none;border:none;color:var(--accent);font-size:12px;padding:2px 4px;cursor:pointer;font-family:inherit}
+.pr-detail{flex-basis:100%;display:flex;flex-direction:column;gap:4px;font-size:13px;padding:4px 0 4px 8px;border-left:2px solid var(--border)}
+.pr-detail[hidden]{display:none}
+.pr-opts{display:flex;flex-direction:column;gap:2px;font-size:13px;margin-top:4px}
+.pr-need{border:1.5px solid var(--accent);border-radius:10px;padding:10px 12px;margin:6px 0;display:flex;flex-direction:column;gap:6px}
+.pr-need-name{font-size:18px;font-weight:700}
+.pr-need-why{font-size:13px}
+.pr-q{font-size:14px;font-weight:600}
+.pr-src{display:flex;flex-wrap:wrap;gap:6px}
+.pr-src button{border:1px solid var(--border);background:var(--surface);border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;color:var(--text);cursor:pointer}
+.pr-src button.on{border-color:var(--accent);background:var(--accent);color:#fff}
+.pr-src button[data-pr-src="HISTORY"]{flex-basis:100%}
+.pr-rec{font-size:11px;opacity:.75}
+.pr-src-note{font-size:12px;color:var(--muted)}
+.pr-src-note:empty{display:none}
 .chat-history-top{align-self:center;font-size:11px;color:var(--dim);padding:2px 10px;display:flex;gap:8px;align-items:center}
 .chat-history-top:empty{display:none}
 .chat-restored-sep{align-self:center;font-size:11px;color:var(--dim);padding:2px 10px;margin:2px 0 6px;border-radius:10px;background:rgba(255,255,255,.55)}
@@ -7671,46 +7692,134 @@ async function _purchaseResearchStart(requestId) {
   } finally { delete _prResearchBusy[requestId]; }
 }
 
-// ── 품목 확인 (한 화면 묶음 review) ──
-function _purchaseLineIcon(l) { return l.mapping_status === 'ACTIVE' ? '✅' : (l.candidates || []).length === 1 ? '✅' : (l.candidates || []).length > 1 ? '⚠️' : '❓'; }
-function _purchaseLineState(l) {
-  if (l.mapping_status === 'ACTIVE') return 'CONFIRMED';
-  if (l.mapping_status === 'HUMAN_CONFIRMED' || (l.candidates || []).length) return 'CANDIDATE';
-  return 'UNRESOLVED';
+// ── 품목 확인 화면 (한 화면 묶음 review): 이미 아는 것은 한 줄, 모르는 것만 크게 ──
+// 자동 확인됨 = 사람이 확정한 ACTIVE 매핑 + 정확한 구매처(1곳) + 정확한 상품(상품번호) + 포장 환산. 하나라도 없으면 "확인 필요".
+// 아래 radio / 포장 칸은 기존 그대로 (같은 name) — 자동 확인 품목은 [변경]을 눌렀을 때만 보인다. 서버로 보내는 결정은 바뀌지 않는다.
+const _PR_SUPPLIER_NAME = { SIKBOM: '식봄', COUPANG: '쿠팡', NAVER: '네이버' };
+const _prSupplierName = s => _PR_SUPPLIER_NAME[s] || '';
+function _prAutoConfirmed(l) {
+  const m = l.mapping;
+  if (l.mapping_status !== 'ACTIVE' || !m || m.status !== 'ACTIVE') return false;
+  if (!_prSupplierName(m.supplier) || m.product_precision !== 'EXACT_PRODUCT' || !m.supplier_sku || !(Number(m.conversion_factor) > 0) || !m.supplier_unit) return false;
+  // 같은 품목에 다른 구매처의 확정 매핑이 함께 있으면 기본 구매처가 하나로 정해진 것이 아니다
+  return !(l.supplier_mappings || []).some(x => x.status === 'ACTIVE' && x.supplier && x.supplier !== m.supplier);
 }
-const _PR_STATE_LABEL = { CONFIRMED: '확인됨', CANDIDATE: '후보', UNRESOLVED: '미확인' };
-const _PR_CONF_LABEL = { NONE: '없음', LOW: '낮음', MEDIUM: '보통', CONFIRMED: '확인됨' };
+function _prPackText(l, m) {
+  const unit = l.requested_unit, f = Number(m.conversion_factor);
+  const conv = f === 1 && m.supplier_unit === unit ? '' : `1${unit} = ${_prQty(f)}${m.supplier_unit}`;
+  return [m.package_spec, conv].filter(Boolean).join(' · ');
+}
+// 확인 필요한 이유 (사람 말로)
+function _prReviewReason(l) {
+  const m = l.mapping;
+  if (!m || l.mapping_status !== 'ACTIVE') return (l.candidates || []).length ? '어떤 제품인지 골라 주세요.' : '처음 구매하는 품목입니다. 정확한 상품과 구매처를 확인할게요.';
+  const sups = [...new Set((l.supplier_mappings || []).filter(x => x.status === 'ACTIVE' && x.supplier).map(x => x.supplier))];
+  if (sups.length > 1) return `구매처가 하나로 정해지지 않았어요 (${sups.map(s => _prSupplierName(s) || '다른 거래처').join(' / ')}).`;
+  if (!_prSupplierName(m.supplier)) return '구매처가 기록되어 있지 않아요.';
+  if (m.product_precision !== 'EXACT_PRODUCT' || !m.supplier_sku) return '정확한 상품(상품번호)이 정해지지 않았어요.';
+  return '포장 단위를 확인해 주세요.';
+}
+// 신규 품목: 어디에서 찾을지 (사람이 고른다). 실제로 자동 실행되는 것은 "과거 구매"(이 매장 주문 기록 후보)뿐 — 나머지는 자동 검색인 척하지 않는다.
+const _PR_SOURCES = [['HISTORY', '과거 구매 먼저 찾기'], ['SIKBOM', '식봄'], ['COUPANG', '쿠팡'], ['NAVER', '네이버'], ['ALL', '전체 찾아보기']];
+const _PR_SOURCE_NOTE = {
+  SIKBOM: '식봄에서 새 상품 찾기는 아직 자동으로 하지 않아요 — 식봄에서 직접 확인이 필요합니다.',
+  COUPANG: '쿠팡에서 새 상품 찾기는 아직 직접 확인이 필요합니다.',
+  NAVER: '네이버에서 새 상품 찾기는 아직 직접 확인이 필요합니다.',
+  ALL: '식봄·쿠팡·네이버 등에서 찾아보기는 아직 자동으로 하지 않아요 — 직접 확인이 필요합니다.' };
+let _prSource = {};   // line_no → 고른 조사 범위 (이 화면에서만)
+function _prSourceNote(l, src) {
+  if (!src) return '';
+  if (src !== 'HISTORY') return _PR_SOURCE_NOTE[src];
+  const hist = (l.candidates || []).filter(c => c.scope === 'STORE_ORDER_HISTORY');
+  return hist.length === 1 ? '과거 구매에서 1개를 찾았어요 — 맞으면 골라 주세요.' : hist.length ? `과거 구매에서 ${hist.length}개를 찾았어요 — 하나를 골라 주세요.` : '과거 구매가 없습니다. 어디에서 찾아볼까요?';
+}
+function _purchaseSource(n, src) {
+  const req = _purchaseReviewReq, l = req && (req.lines || []).find(x => x.line_no === n);
+  if (!l) return;
+  _prSource[n] = src;
+  const card = document.querySelector(`.pr-review [data-pr-line="${n}"]`);
+  if (!card) return;
+  card.querySelectorAll('[data-pr-src]').forEach(b => b.classList.toggle('on', b.dataset.prSrc === src));
+  const note = card.querySelector('[data-pr-src-note]'); if (note) note.textContent = _prSourceNote(l, src);
+}
+function _purchaseToggleDetail(n) {   // [변경]: 한 번에 한 품목만 펼친다
+  document.querySelectorAll('.pr-review [data-pr-detail]').forEach(d => {
+    const open = Number(d.dataset.prDetail) === n ? d.hidden : false;
+    d.hidden = !open;
+    const row = d.closest('[data-pr-line]'), btn = row && row.querySelector('[data-pr-change]');
+    if (btn) btn.textContent = open ? '닫기' : '변경';
+    if (row && !open) _prMarkChanged(row);
+  });
+}
+function _purchaseKeep(n) {   // 변경 취소: 지금 기본 그대로
+  const r = document.querySelector(`.pr-review input[name="pr-pick-${n}"][value="keep"]`); if (r) r.checked = true;
+  _purchaseToggleDetail(-1);
+}
+function _prMarkChanged(row) {
+  const n = row.dataset.prLine, sel = row.querySelector(`input[name="pr-pick-${n}"]:checked`), mark = row.querySelector('[data-pr-changed]');
+  if (mark) mark.hidden = !sel || sel.value === 'keep';
+}
 function _purchaseReviewHtml(req) {
+  _prSource = {};
   const lines = req.lines || [];
-  const rows = lines.map(l => {
-    const n = l.line_no, cands = l.candidates || [], unit = _prEsc(l.requested_unit);
-    const title = `${_purchaseLineIcon(l)} ${_prEsc(l.raw_item_text)}${l.specification_text ? ' ' + _prEsc(l.specification_text) : ''} ${_prQty(l.requested_qty)}${unit}`;
-    const meta = `읽기 확실 · 제품 확신도 ${_PR_CONF_LABEL[l.mapping_confidence] || l.mapping_confidence} · <b>${_PR_STATE_LABEL[_purchaseLineState(l)]}</b>`;
-    const opts = [];
-    if (l.mapping_status === 'ACTIVE' && l.mapping) {
-      opts.push(`<label><input type="radio" name="pr-pick-${n}" value="keep" checked> 지난번 확인 그대로: ${_prEsc(l.mapping.product_name)} · 1${unit} = ${_prQty(l.mapping.conversion_factor)}${_prEsc(l.mapping.supplier_unit)}</label>`);
+  const auto = lines.filter(_prAutoConfirmed), review = lines.filter(l => !_prAutoConfirmed(l));
+  const name = l => `${_prEsc(l.raw_item_text)}${l.specification_text ? ' ' + _prEsc(l.specification_text) : ''} ${_prQty(l.requested_qty)}${_prEsc(l.requested_unit)}`;
+  const candLabel = c => `${_PR_SCOPE_LABEL[c.scope] || '후보'}${_prSupplierName(c.supplier) ? ' · ' + _prSupplierName(c.supplier) : ''} · ${_prEsc(c.product_name)}${c.package_spec ? ' · ' + _prEsc(c.package_spec) : ''}${c.spelling_variant ? ' · 다른 표기' : ''}`;
+  const convHtml = (l, pre) => {
+    const n = l.line_no, unit = _prEsc(l.requested_unit), f = pre && pre.f, u = pre && pre.u;
+    return `<div class="pr-conv">포장 단위: <select name="pr-conv-${n}" onchange="_purchaseConvChanged(${n})">
+      <option value="">선택…</option><option value="SAME_UNIT">1${unit} 그대로 구매</option><option value="FACTOR"${f ? ' selected' : ''}>1${unit} = 직접 입력</option><option value="UNKNOWN">모름 (조사 전에 확인 필요)</option></select>
+      <span class="pr-factor" data-pr-factor="${n}" style="display:${f ? 'inline' : 'none'}"><input name="pr-factor-${n}" type="number" min="0" step="any" style="width:64px" placeholder="수량"${f ? ` value="${_prEsc(f)}"` : ''}><input name="pr-sunit-${n}" type="text" maxlength="10" style="width:56px" placeholder="단위"${u ? ` value="${_prEsc(u)}"` : ''}></span></div>`;
+  };
+  const refsHtml = l => (l.references || []).map(r => `참고(다른 매장): ${_prEsc(r.product_name)} — 이 매장 제품으로 쓰지 않음`).join('<br>');
+  // A. 자동 확인됨: 한 줄 (구매처 · 상품 · 포장) + [변경] → 기존 선택지
+  const autoRows = auto.map(l => {
+    const n = l.line_no, m = l.mapping, cands = l.candidates || [];
+    const opts = [`<label><input type="radio" name="pr-pick-${n}" value="keep" checked> 지금 기본: ${_prSupplierName(m.supplier)} · ${_prEsc(m.product_name)} · ${_prEsc(_prPackText(l, m))}</label>`]
+      .concat(cands.filter(c => c.evidence_id !== m.evidence_id).map(c => `<label><input type="radio" name="pr-pick-${n}" value="ev:${Number(c.evidence_id)}"> ${candLabel(c)}</label>`))
+      .concat(`<label><input type="radio" name="pr-pick-${n}" value="new"> 다른 제품 (공급처 조사 때 찾기)</label>`);
+    return `<div class="pr-auto" data-pr-line="${n}" data-pr-auto>
+      <div class="pr-auto-main"><div class="pr-auto-name">✓ ${name(l)} <span class="pr-changed" data-pr-changed hidden>· 바꿈</span></div>
+        <div class="pr-auto-sub" data-pr-supplier="${_prEsc(m.supplier)}">${_prSupplierName(m.supplier)} · ${_prEsc(m.product_name)}${_prPackText(l, m) ? ' · ' + _prEsc(_prPackText(l, m)) : ''}</div></div>
+      <button type="button" class="pr-change" data-pr-change onclick="_purchaseToggleDetail(${n})">변경</button>
+      <div class="pr-detail" data-pr-detail="${n}" hidden><div class="pr-opts">${opts.join('')}</div>${convHtml(l)}
+        ${refsHtml(l) ? `<div style="font-size:11px;color:var(--muted)">${refsHtml(l)}</div>` : ''}<button type="button" class="pr-change" onclick="_purchaseKeep(${n})">변경 취소</button></div></div>`;
+  }).join('');
+  // B. 확인 필요: 크게 — 이유 + 고를 것만
+  const reviewRows = review.map(l => {
+    const n = l.line_no, m = l.mapping, cands = l.candidates || [], known = l.mapping_status === 'ACTIVE' && m;
+    const isNew = !known && !cands.length;
+    let body = '';
+    if (isNew) {   // 처음 구매 (이 매장 주문 기록 후보 없음): 어디에서 찾을지 + 포장
+      body = `<div class="pr-q">어디에서 찾아볼까요?</div>
+        <div class="pr-src">${_PR_SOURCES.map(([k, t]) => `<button type="button" data-pr-src="${k}" onclick="_purchaseSource(${n},'${k}')">${t}${k === 'HISTORY' ? ' <span class="pr-rec">추천</span>' : ''}</button>`).join('')}</div>
+        <div class="pr-src-note" data-pr-src-note></div>
+        <input type="radio" name="pr-pick-${n}" value="new" checked hidden>
+${convHtml(l)}`;
+    } else {
+      const sameAsMap = c => known && c.product_name === m.product_name;
+      const opts = (known ? [`<label><input type="radio" name="pr-pick-${n}" value="keep"> 지금 기록 그대로: ${_prSupplierName(m.supplier) ? _prSupplierName(m.supplier) + ' · ' : '구매처 미정 · '}${_prEsc(m.product_name)}${_prPackText(l, m) ? ' · ' + _prEsc(_prPackText(l, m)) : ''}</label>`] : [])
+        .concat(cands.map(c => `<label><input type="radio" name="pr-pick-${n}" value="ev:${Number(c.evidence_id)}"${!known && cands.length === 1 ? ' checked' : ''}> ${candLabel(c)}</label>`))
+        .concat(`<label><input type="radio" name="pr-pick-${n}" value="new"> 다른 제품 (공급처 조사 때 찾기)</label>`);
+      const others = known ? (l.supplier_mappings || []).filter(x => x.status === 'ACTIVE' && x.mapping_id !== m.mapping_id)
+        .map(x => `다른 확정 기록: ${_prSupplierName(x.supplier) || '다른 거래처'} · ${_prEsc(x.product_name)}`).join('<br>') : '';
+      // 지금 기록과 같은 제품의 과거 구매 후보를 고르면 지금 기록의 포장 환산을 미리 채운다 (보이는 값 — 사람이 바꿀 수 있음)
+      const pre = known && cands.some(sameAsMap) && Number(m.conversion_factor) > 0 && m.supplier_unit !== l.requested_unit ? { f: Number(m.conversion_factor), u: m.supplier_unit } : null;
+      body = `<div class="pr-opts">${opts.join('')}</div>${others ? `<div style="font-size:12px;color:var(--muted)">${others}</div>` : ''}${convHtml(l, pre)}`;
     }
-    const preset = l.mapping_status !== 'ACTIVE' && cands.length === 1;
-    cands.forEach(c => opts.push(`<label><input type="radio" name="pr-pick-${n}" value="ev:${Number(c.evidence_id)}"${preset || (l.mapping && l.mapping.evidence_id === c.evidence_id && l.mapping_status !== 'ACTIVE') ? ' checked' : ''}>
-      ${_PR_SCOPE_LABEL[c.scope] || '후보'}: ${_prEsc(c.product_name)}${c.package_spec ? ' · ' + _prEsc(c.package_spec) : ''}${c.supplier ? ' (' + _prEsc(_PR_SUPPLIER_LABEL[c.supplier] || c.supplier) + ')' : ''}${c.spelling_variant ? ' · 다른 표기' : ''}</label>`));
-    opts.push(`<label><input type="radio" name="pr-pick-${n}" value="new"${!cands.length && l.mapping_status !== 'ACTIVE' ? ' checked' : ''}> ${cands.length ? '다른 제품' : '새 품목으로 등록'} (공급처 조사 때 찾기)</label>`);
-    const refs = (l.references || []).map(r => `참고(다른 매장): ${_prEsc(r.product_name)} — 이 매장 제품으로 쓰지 않음`).join('<br>');
-    const conv = l.mapping_status === 'ACTIVE' ? '' : `<div class="pr-conv">포장 단위: <select name="pr-conv-${n}" onchange="_purchaseConvChanged(${n})">
-        <option value="">선택…</option><option value="SAME_UNIT">1${unit} 그대로 구매</option><option value="FACTOR">1${unit} = 직접 입력</option><option value="UNKNOWN">모름 (조사 전에 확인 필요)</option></select>
-        <span class="pr-factor" data-pr-factor="${n}" style="display:none"><input name="pr-factor-${n}" type="number" min="0" step="any" style="width:64px" placeholder="수량"><input name="pr-sunit-${n}" type="text" maxlength="10" style="width:56px" placeholder="단위"></span></div>`;
-    return `<div class="pr-row" data-pr-line="${n}" style="border-top:1px solid var(--border);padding:8px 0">
-      <div style="font-weight:600">${title}</div><div style="font-size:12px;color:var(--muted)">${meta}</div>
-      <div class="pr-opts" style="display:flex;flex-direction:column;gap:2px;font-size:13px;margin-top:4px">${opts.join('')}</div>
-      ${refs ? `<div style="font-size:11px;color:var(--muted)">${refs}</div>` : ''}${conv}</div>`;
+    return `<div class="pr-need" data-pr-line="${n}" data-pr-need="${isNew ? 'new' : 'check'}">
+      <div class="pr-need-name">${name(l)}</div><div class="pr-need-why">${_prReviewReason(l)}</div>${body}
+      ${refsHtml(l) ? `<div style="font-size:11px;color:var(--muted)">${refsHtml(l)}</div>` : ''}</div>`;
   }).join('');
   const s = req.summary || {};
+  const newCount = review.filter(l => !(l.mapping_status === 'ACTIVE' && l.mapping) && !(l.candidates || []).length).length;
   return `<div class="card pr-review" data-pr-request="${_prEsc(req.request_id)}" data-pr-version="${Number(req.request_version)}">
-    <div style="font-weight:700">${_prEsc(req.display_name || '')} 발주 품목 확인 · ${s.line_count}개</div>
-    <div style="font-size:12px;color:var(--muted)">문자 읽기는 확실하고, 제품(SKU)은 아직 확정 전이에요. 맞는 제품과 포장만 골라 주세요 — 재고·주문은 바뀌지 않습니다.</div>
-    <label style="font-size:13px"><input type="checkbox" onchange="_purchaseAllSameUnit(this.checked)"> 고르지 않은 포장은 모두 "요청 단위 그대로 구매"</label>
-    ${rows}
+    <div style="font-weight:700">${_prEsc(req.display_name || '')} 발주 · ${s.line_count}개</div>
+    <div style="font-size:12px;color:var(--muted)">재고·주문은 바뀌지 않습니다.</div>
+    ${auto.length ? `<div class="pr-sec" data-pr-sec="auto">자동 확인됨 · ${auto.length}개</div>${autoRows}` : ''}
+    ${review.length ? `<div class="pr-sec" data-pr-sec="review">확인이 필요한 품목 · ${review.length}개</div>${newCount >= 2 ? `<label style="font-size:13px"><input type="checkbox" onchange="_purchaseAllSameUnit(this.checked)"> 고르지 않은 포장은 모두 "요청 단위 그대로 구매"</label>` : ''}${reviewRows}` : ''}
     <div id="prReviewError" style="color:var(--danger,#c00);font-size:13px"></div>
-    <div style="display:flex;gap:8px;margin-top:8px"><button class="oai-create" onclick="_purchaseSubmitReview()">${s.line_count}개 품목 확인 완료</button>
+    <div style="display:flex;gap:8px;margin-top:8px"><button class="oai-create" data-pr-submit onclick="_purchaseSubmitReview()">확인하고 계속</button>
     <button class="oai-cancel" onclick="_purchaseCloseReview()">닫기</button></div></div>`;
 }
 // 화면 값 → 서버 결정 목록. 고르지 않은 품목이 있으면 보내지 않는다 (추측해서 채우지 않는다).
@@ -7766,6 +7875,9 @@ async function _purchaseSubmitReview() {
   const req = _purchaseReviewReq;
   if (!req) return;
   const { lines, missing } = _purchaseReviewCollect(req, _purchaseFormValue);
+  // 처음 구매하는 품목은 어디에서 찾을지 사람이 고른다 (ZeroKitchen 이 구매처를 정하지 않는다)
+  const fresh = (req.lines || []).filter(l => document.querySelector(`.pr-review [data-pr-need="new"][data-pr-line="${l.line_no}"]`));
+  fresh.filter(l => !_prSource[l.line_no]).forEach(l => missing.unshift(`${l.raw_item_text} (어디에서 찾을지)`));
   const err = document.getElementById('prReviewError');
   if (missing.length) { if (err) err.textContent = `아직 고르지 않았어요: ${missing.join(', ')}`; return; }
   const body = await _purchasePost('CONFIRM_MAPPINGS', { store_id: Number(req.store_id), request_id: req.request_id, request_version: Number(req.request_version), lines });
@@ -7775,11 +7887,13 @@ async function _purchaseSubmitReview() {
     if (err) err.textContent = `${msg || `확인하지 못했어요 (${body.code})`} — 아무것도 바뀌지 않았습니다.`;
     return;
   }
+  const srcNotes = fresh.map(l => `${l.raw_item_text} ${_prQty(l.requested_qty)}${l.requested_unit}: ${(_PR_SOURCES.find(x => x[0] === _prSource[l.line_no]) || [])[1] || ''} — ${_prSourceNote(l, _prSource[l.line_no])}`);
   _purchaseCloseReview();
   const r = body.request;
   const s = r.summary || {};
-  if (r.status === 'READY_FOR_RESEARCH') addResult('품목 확인', _purchaseReadyText(r), 'ok');
-  else addResult('품목 확인', `${s.confirmed}개 매핑 완료 · ${s.unresolved}개는 아직 확인이 필요해요 (포장 단위를 모르면 공급처 조사 전에 확인합니다).`, 'warn');
+  const tail = srcNotes.length ? '\n' + srcNotes.join('\n') : '';   // 고른 조사 범위는 대화에 남는다 (구매 상태에는 넣지 않음)
+  if (r.status === 'READY_FOR_RESEARCH') addResult('품목 확인', _purchaseReadyText(r) + tail, 'ok');
+  else addResult('품목 확인', `${s.confirmed}개 매핑 완료 · ${s.unresolved}개는 아직 확인이 필요해요 (포장 단위를 모르면 공급처 조사 전에 확인합니다).` + tail, 'warn');
   if (typeof _chatTag === 'function') _chatTag(r.request_id, body.code);
   _purchaseAttach(_purchaseResultButtons(r));
   await _refreshPurchaseHome(_storeEpoch);
