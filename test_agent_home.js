@@ -303,7 +303,7 @@ const ofItem = (r, id) => [...r.primary, ...r.moreChecks, ...r.waiting].filter(a
     const home = HTML.slice(HTML.indexOf('<div id="tab-input"'), HTML.indexOf('<!-- 재고탭 -->'));
     const hdr = HTML.slice(HTML.indexOf('<div class="hdr">'), HTML.indexOf('<div class="api-key-popup"'));
     check('LAYOUT Home starts with 오늘 할 일; reminder & recommendation cards not on Home; need table folded', home.indexOf('id="agentHome"') < home.indexOf('id="homeOrderSection"')
-      && !home.includes('v3NotifContainer') && !home.includes('suggestBar') && /<div class="dock-panel" id="dockPanel-detail" hidden>[\s\S]*id="orderNeedCard"/.test(home), '');
+      && !home.includes('v3NotifContainer') && !home.includes('suggestBar') && /<div class="dock-panel" id="dockPanel-other" hidden>[\s\S]*id="orderNeedCard"/.test(home), '');   // (Home Focus V0.1) 재고·목표 = 기타 정보 안
     check('LAYOUT header has no API-key control (moved to 설정)', !hdr.includes('apiKeyBtn') && !hdr.includes('apiKeyDot') && HTML.slice(HTML.indexOf('<div id="tab-settings"')).includes('id="apiKeyBtn"'), '');
   }
 

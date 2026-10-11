@@ -1,184 +1,137 @@
-// test_chat_dock.js — Chat Workspace Collapse V0.1 (U1–U12)
-// 실제 브라우저(headless Edge/Chrome, CDP)에서 index.html 을 연다. 네트워크는 supabase-js CDN 만 허용, 나머지(Supabase 등)는 전부 차단 → DB Write 0.
-// 상단 블록(발주 진행 / 오늘 할 일 / 재고 확인 / 발주표 / 자세히)은 접힌 요약 줄, 지금 해야 할 발주 행동 하나만 자동으로 펼친다.
-const fs = require('fs'), os = require('os'), path = require('path');
-const { spawn, execFileSync } = require('child_process');
+// test_chat_dock.js — Home Focus V0.1 (H1–H6) + 접힘 동작 (Chat Workspace Collapse V0.1)
+// 실제 브라우저(headless Edge/Chrome)에서 index.html 을 연다. 네트워크 차단 → DB Write 0.
+// 홈 상단 = 현재 action 한 줄 (+ 기타 정보 한 줄). 진행 중인 발주가 있으면 그 발주가 첫 줄, "할 일 없음" 줄과 동시에 보이지 않는다.
+const fs = require('fs'), path = require('path');
+const { launch, oldHtml, checker } = require('./browser_harness.js');
+const { check, done } = checker();
+const NEW = fs.readFileSync(path.join(__dirname, 'index.html')), OLD = oldHtml(__dirname);
 
-const BROWSERS = ['C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', 'C:/Program Files/Google/Chrome/Application/chrome.exe'];
-const NEW_HTML = fs.readFileSync(path.join(__dirname, 'index.html'));
-// before/after 비교용: dock 이 들어오기 직전 버전 (없으면 비교만 생략)
-let OLD_HTML = null;
-try {
-  const git = (...a) => execFileSync('git', a, { cwd: __dirname, maxBuffer: 64 << 20 });
-  const intro = git('log', '-1', '--format=%H', '-S', 'id="homeDock"', '--', 'index.html').toString().trim();
-  OLD_HTML = git('show', `${intro || 'HEAD'}${intro ? '~1' : ''}:index.html`);
-  if (OLD_HTML.includes('id="homeDock"')) OLD_HTML = null;
-} catch { OLD_HTML = null; }
-
-let pass = 0, fail = 0; const blocked = new Set();
-const check = (name, ok, info) => { ok ? pass++ : fail++; console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${ok ? '' : '  — ' + info}`); };
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-async function launch() {
-  const exe = BROWSERS.find(p => fs.existsSync(p)); if (!exe) throw new Error('no Edge/Chrome');
-  const port = 9300 + Math.floor(Math.random() * 500);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zk-dock-'));
-  const proc = spawn(exe, ['--headless=new', `--remote-debugging-port=${port}`, `--user-data-dir=${dir}`, '--no-first-run', '--no-default-browser-check', '--disable-extensions', 'about:blank'], { stdio: 'ignore' });
-  let list;
-  for (let i = 0; i < 100 && !list; i++) { try { list = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json(); } catch { await sleep(100); } }
-  const page = list.find(t => t.type === 'page');
-  const ws = new WebSocket(page.webSocketDebuggerUrl); await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
-  let id = 0; const waits = new Map(), handlers = [];
-  ws.onmessage = ev => { const m = JSON.parse(ev.data); if (m.id && waits.has(m.id)) { const w = waits.get(m.id); waits.delete(m.id); m.error ? w.rej(new Error(m.error.message)) : w.res(m.result); } else handlers.forEach(h => h(m)); };
-  const send = (method, params = {}) => new Promise((res, rej) => { const i = ++id; waits.set(i, { res, rej }); ws.send(JSON.stringify({ id: i, method, params })); });
-  handlers.push(m => {
-    if (m.method !== 'Fetch.requestPaused') return;
-    const u = m.params.request.url, rid = m.params.requestId;
-    if (u.startsWith('http://zk.test/')) {
-      const body = (u.includes('/old') ? OLD_HTML : NEW_HTML).toString('base64');
-      send('Fetch.fulfillRequest', { requestId: rid, responseCode: 200, responseHeaders: [{ name: 'content-type', value: 'text/html; charset=utf-8' }], body }).catch(() => {});
-    } else if (/^https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2/.test(u)) send('Fetch.continueRequest', { requestId: rid }).catch(() => {});
-    else { blocked.add(new URL(u).host); send('Fetch.failRequest', { requestId: rid, errorReason: 'BlockedByClient' }).catch(() => {}); }
-  });
-  await send('Fetch.enable', { patterns: [{ urlPattern: '*' }] });
-  await send('Runtime.enable'); await send('Page.enable');
-  const ev = async (expr) => { const r = await send('Runtime.evaluate', { expression: `(async()=>{${expr}})()`, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || r.exceptionDetails.text); return r.result.value; };
-  const open = async (url, w, h, mobile) => {
-    await send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: !!mobile });
-    await send('Page.navigate', { url });
-    for (let i = 0; i < 100; i++) { await sleep(100); try { if (await ev(`return document.readyState === 'complete' && typeof _renderAgentHome === 'function'`)) break; } catch {} }
-    await sleep(300);
-    // 로그인/오버레이 없이 홈 탭만 측정 (fixture 는 실제 렌더 함수가 그리는 그대로)
-    await ev(`document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.id === 'tab-input')); ['loginOverlay','authOverlay','authGate'].forEach(i => { const e = document.getElementById(i); if (e) e.style.display = 'none'; }); return 1`);
-  };
-  const key = async (sel, k) => {
-    await ev(`document.querySelector(${JSON.stringify(sel)}).focus(); return 1`);
-    const code = k === ' ' ? 'Space' : k, vk = k === ' ' ? 32 : 13, text = k === ' ' ? ' ' : '\r';
-    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: k, code, windowsVirtualKeyCode: vk, text });
-    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k, code, windowsVirtualKeyCode: vk });
-    await sleep(50);
-  };
-  const close = () => { try { ws.close(); } catch {} try { proc.kill(); } catch {} setTimeout(() => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch {} }, 1500); };
-  return { ev, open, key, close, send };
-}
-
-// ── fixtures: 실제 렌더 함수로 그린다 (발주/오늘 할 일/재고 확인/발주표/자세히)
+// fixtures: 실제 렌더 함수와 실제 상태 변수로 그린다 (발주 = _purchase / _pe, 오늘 할 일 / 재고 확인 / 발주표 / 재고·목표)
 const FX = `
-  const store = { display_name: '대전점', delivery_profile: { status: 'ACTIVE', version: 1 } };
-  window.__req = (status, extra) => _purchaseHomeHtml(store, [Object.assign({ request_id: 'r1', status, line_count: 3, unresolved: 1, received_at: '2026-10-11T01:00:00Z' }, extra || {})]);
+  const R = '5ce5171f-76d0-4608-a5a0-ce8baa464aee';
+  const store = { store_id: 3, display_name: '신세계 대전점', purchasing_enabled: true, authority: ['PURCHASE_APPROVER'], delivery_profile: { status: 'ACTIVE', version: 1 } };
+  window.__store = store; window.__R = R;
   window.__fill = (o) => {
-    document.getElementById('purchaseHome').innerHTML = o.purchase || '';
+    SID = o.sid || 3;
+    _purchase = { loaded: true, ready: true, stores: o.purchaseStore === false ? [] : [store], requests: o.requests || [], sid: SID, reason: 'READY' };
+    _pe = { view: o.view || null, notReady: null, current: o.cur ? { code: 'CURRENT_ACTION', action: o.cur } : null };
+    const ph = document.getElementById('purchaseHome');
+    ph.innerHTML = o.purchaseStore === false ? '' : _purchaseHomeHtml(store, _purchase.requests) + (o.cur ? _peCurrentHtml(_pe.view || {}, _pe.current) : '') + (o.attemptHtml || '');
     const ah = document.getElementById('agentHome');
     ah.innerHTML = o.today ? '<div class="agent-home"><div class="agent-sum">오늘 할 일 ' + o.today + '개</div>' + Array.from({ length: o.today }, (_, i) => '<div class="agent-card" data-agent-type="ORDER_NOW"><button class="agent-btn" onclick="void 0">주문 준비</button> 품목' + i + '</div>').join('') + '</div>'
-      : '<div class="agent-home"><div class="agent-sum agent-none">오늘은 바로 처리할 일이 없습니다.</div></div>';   // 품목이 있고 할 일이 0 일 때 _renderAgentHome 이 그리는 것
+      : '<div class="agent-home"><div class="agent-sum agent-none">오늘은 바로 처리할 일이 없습니다.</div></div>';
     ah.dataset.today = String(o.today || 0);
     document.getElementById('agentChecks').innerHTML = o.checks ? '<div class="agent-home" data-agent-checks="' + o.checks + '">' + Array.from({ length: o.checks }, (_, i) => '<div class="agent-card" data-agent-type="CHECK_STOCK">확인' + i + '</div>').join('') + '</div>' : '';
     document.getElementById('orderList').innerHTML = o.sheet ? '<table><tbody id="otBody">' + Array.from({ length: o.sheet }, (_, i) => '<tr data-iid="' + (i + 1) + '"><td>품목' + i + '</td><td><button onclick="void 0">수정</button></td></tr>').join('') + '</tbody></table>' : '<div class="v4-empty-hint home-sheet-empty">발주표가 비어 있어요</div>';
     document.getElementById('orderNeedCard').innerHTML = '<div class="card">재고·목표 표</div>';
   };
+  // 지금 대전점 화면: 새 발주요청(제로콜라만 확인 필요) + 지난 실행의 "결제 전 중단" 카드 + 할 일 없음
+  window.__daejeon = { requests: [{ request_id: R, status: 'MAPPING_REQUIRED', unresolved: 1, line_count: 6, received_at: '2026-10-11T02:11:13Z', request_version: 1 }],
+    attemptHtml: '<div class="card" data-pe-attempt="a1" data-pe-state="ABORTED"><div style="font-weight:700" data-pe-head>결제 전 중단 — 결제되지 않았습니다</div></div>', today: 0, checks: 0, sheet: 0 };
   return 1;`;
 const STATE = `
-  const sec = [...document.querySelectorAll('#homeDock .dock-sec')].map(s => ({ k: s.dataset.dock, shown: !s.hidden, open: s.querySelector('.dock-hdr').getAttribute('aria-expanded') === 'true',
-    panelHidden: s.querySelector('.dock-panel').hidden, title: s.querySelector('[data-dock-title]').textContent, action: s.classList.contains('dock-action') }));
-  return sec;`;
+  return [...document.querySelectorAll('#homeDock .dock-sec')].map(s => ({ k: s.dataset.dock, shown: !s.hidden, open: s.querySelector('.dock-hdr').getAttribute('aria-expanded') === 'true',
+    title: s.querySelector('[data-dock-title]').textContent, action: s.classList.contains('dock-action'), empty: s.classList.contains('dock-empty') }));`;
 const settle = `await new Promise(r => setTimeout(r, 30)); `;
+const visible = s => s.filter(x => x.shown);
+const openK = s => s.filter(x => x.open).map(x => x.k).join();
 
 (async () => {
-  const b = await launch();
+  const b = await launch({ newHtml: NEW, old: OLD });
   try {
-    const W = [[390, 844, true, 'mobile 390×844'], [1280, 900, false, 'desktop 1280×900']];
-    // ── U1 새로 연 화면(= 새로고침)은 모두 접혀 있다
-    await b.open('http://zk.test/', 390, 844, true);
+    await b.open('http://zk.test/');
     let s = await b.ev(STATE);
-    check('U1 fresh load / reload: every block is a collapsed summary row (aria-expanded=false, panel hidden)', s.length === 5 && s.every(x => !x.open && x.panelHidden), JSON.stringify(s));
+    check('U1 fresh load / reload: every row collapsed (aria-expanded=false)', s.length === 3 && s.every(x => !x.open), JSON.stringify(s));
     await b.ev(FX);
-    // ── U2 요약 줄 제목: 오늘 할 일 N개 / 재고 확인 필요 N개 / 발주 진행 N건 / 발주표 N건
-    await b.ev(`__fill({ purchase: __req('RESEARCH_DONE'), today: 3, checks: 10, sheet: 2 }); ${settle} return 1`);
-    s = await b.ev(STATE); const T = Object.fromEntries(s.map(x => [x.k, x]));
-    check('U2 summary titles: 발주 진행 N건 · 오늘 할 일 N개 · 재고 확인 필요 N개 · 발주표 N건 · 자세히', T.purchase.title === '대전점 발주 진행 1건' && T.today.title === '오늘 할 일 3개' && T.checks.title === '재고 확인 필요 10개'
-      && T.sheet.title === '발주표 2건' && T.detail.title === '재고·목표 자세히 보기' && s.every(x => x.shown && !x.open), JSON.stringify(s));
-    // ── U3 비어 있는 블록은 줄도 숨긴다 (발주 0 / 재고 확인 0 / 빈 발주표)
-    await b.ev(`__fill({ today: 0, checks: 0, sheet: 0 }); ${settle} return 1`);
-    s = await b.ev(STATE); const E = Object.fromEntries(s.map(x => [x.k, x]));
-    check('U3 empty blocks: purchase / checks / sheet rows hidden; 오늘 할 일 says nothing to do; all collapsed', !E.purchase.shown && !E.checks.shown && !E.sheet.shown && E.today.shown && E.today.title === '오늘은 바로 처리할 일이 없습니다' && s.every(x => !x.open), JSON.stringify(s));
-    // ── U4 헤더 클릭 → 펼침 / 다시 클릭 → 접힘
-    await b.ev(`_dockReset(); __fill({ purchase: __req('RESEARCH_DONE'), today: 3, checks: 10, sheet: 2 }); ${settle} return 1`);
-    await b.ev(`document.querySelector('[data-dock="today"] .dock-hdr').click(); return 1`);
-    const u4a = await b.ev(`const s = document.querySelector('[data-dock="today"]'); return [s.querySelector('.dock-hdr').getAttribute('aria-expanded'), s.querySelector('.dock-panel').hidden, s.querySelector('.dock-chev').textContent, document.querySelector('#agentHome').getBoundingClientRect().height > 0]`);
-    await b.ev(`document.querySelector('[data-dock="today"] .dock-hdr').click(); return 1`);
-    const u4b = await b.ev(`const s = document.querySelector('[data-dock="today"]'); return [s.querySelector('.dock-hdr').getAttribute('aria-expanded'), s.querySelector('.dock-panel').hidden]`);
-    check('U4 header click expands (aria-expanded=true, ▾, content visible); second click collapses', JSON.stringify(u4a) === '["true",false,"▾",true]' && JSON.stringify(u4b) === '["false",true]', JSON.stringify([u4a, u4b]));
-    // ── U5 아코디언: 하나 펼치면 나머지는 접힌다
-    await b.ev(`document.querySelector('[data-dock="checks"] .dock-hdr').click(); document.querySelector('[data-dock="sheet"] .dock-hdr').click(); return 1`);
+    // ── H1 진행 중인 발주 → 첫 줄 = 그 발주 한 줄 (지난 실행 카드 제목이 아니라 canonical 상태로)
+    await b.ev(`_dockReset(); __fill(__daejeon); ${settle} return 1`);
     s = await b.ev(STATE);
-    check('U5 accordion: opening 발주표 closes 재고 확인 — exactly one open', s.filter(x => x.open).map(x => x.k).join() === 'sheet', JSON.stringify(s.map(x => [x.k, x.open])));
-    // ── U6 키보드: Enter / Space 로 펼치고 접기, aria-controls 연결
-    await b.ev(`_dockOpen(null); return 1`);
-    await b.key('[data-dock="checks"] .dock-hdr', 'Enter');
-    const u6a = await b.ev(`return document.querySelector('[data-dock="checks"] .dock-hdr').getAttribute('aria-expanded')`);
-    await b.key('[data-dock="checks"] .dock-hdr', ' ');
-    const u6b = await b.ev(`return document.querySelector('[data-dock="checks"] .dock-hdr').getAttribute('aria-expanded')`);
-    const u6c = await b.ev(`return [...document.querySelectorAll('#homeDock .dock-hdr')].every(h => h.tagName === 'BUTTON' && document.getElementById(h.getAttribute('aria-controls')) === h.parentElement.querySelector('.dock-panel'))`);
-    check('U6 keyboard: Enter expands, Space collapses; every header is a <button> with aria-controls → its panel', u6a === 'true' && u6b === 'false' && u6c, JSON.stringify([u6a, u6b, u6c]));
-    // ── U7 발주 행동이 없으면(조사 중 등) 발주 줄도 접힌 채
-    await b.ev(`_dockReset(); __fill({ purchase: _peCurrentHtml({}, { action: { type: 'RESEARCHING', message: '공급처를 조사하고 있어요', items: ['웰치스 2박스'] } }) + __req('RESEARCHING'), today: 3, checks: 10, sheet: 2 }); ${settle} return 1`);
+    const vis = visible(s);
+    check('H1 active purchase → first row = "신세계 대전점 발주 · 품목 확인 필요 1개" (not the stale "결제 전 중단" card head); persistent rows ≤ 2',
+      vis[0] && vis[0].k === 'purchase' && vis[0].title === '신세계 대전점 발주 · 품목 확인 필요 1개' && vis.length <= 2, JSON.stringify(s));
+    // ── H2 현재 action 이 있으면 "오늘은 바로 처리할 일이 없습니다" 는 어디에도 보이지 않는다
+    const h2 = await b.ev(`document.querySelector('[data-dock="other"] .dock-hdr').click(); ${settle}
+      const txt = [...document.querySelectorAll('#homeDock *')].filter(e => e.offsetParent !== null && e.children.length === 0).map(e => e.textContent).join('|');
+      return { hasNone: txt.includes('바로 처리할 일이 없습니다'), todayRow: !document.querySelector('[data-dock="today"]').hidden }`);
+    check('H2 active action → "오늘은 바로 처리할 일이 없습니다" hidden (no row, not inside 기타 정보 either)', !h2.hasNone && !h2.todayRow, JSON.stringify(h2));
+    // ── H3 재고·목표는 상시 줄이 아니라 기타 정보 안
+    const h3 = await b.ev(`const sec = document.getElementById('orderNeedCard').closest('.dock-sec'); return { in: sec && sec.dataset.dock, rows: [...document.querySelectorAll('#homeDock .dock-sec:not([hidden]) [data-dock-title]')].map(t => t.textContent) }`);
+    check('H3 재고·목표 is not a persistent row — it lives inside "기타 정보"', h3.in === 'other' && !h3.rows.some(t => t.includes('재고·목표')), JSON.stringify(h3));
+    // ── H4 진행 중인 발주가 없으면: 빈 상태 한 줄 (펼칠 것 없음) + 기타 정보
+    await b.ev(`_dockReset(); __fill({ sid: 1, purchaseStore: false, today: 0, checks: 0, sheet: 0 }); ${settle} return 1`);
     s = await b.ev(STATE);
-    check('U7 no human action (조사 중) → nothing auto-opens; purchase row shows the current status as its title', s.every(x => !x.open) && s[0].title === '공급처를 조사하고 있어요' && !s[0].action, JSON.stringify(s));
-    // ── U8 ONE CURRENT ACTION: 사람이 할 발주 행동 하나만 자동으로 펼친다
-    await b.ev(`__fill({ purchase: __req('READY_FOR_RESEARCH'), today: 3, checks: 10, sheet: 2 }); ${settle} return 1`);
+    await b.ev(`document.querySelector('[data-dock="today"] .dock-hdr').click(); ${settle} return 1`);
+    const s4 = await b.ev(STATE);
+    check('H4 no active action → empty state "오늘은 바로 처리할 일이 없습니다" (not expandable) + 기타 정보; nothing open', visible(s).map(x => x.k).join() === 'today,other'
+      && s[1].title === '오늘은 바로 처리할 일이 없습니다' && s[1].empty && openK(s4) === '', JSON.stringify(s4));
+    await b.ev(`_dockReset(); __fill({ sid: 1, purchaseStore: false, today: 3, checks: 10, sheet: 2 }); ${settle} return 1`);
     s = await b.ev(STATE);
-    const u8btn = await b.ev(`const b = [...document.querySelectorAll('#purchaseHome button')].find(x => x.textContent === '공급처 조사 시작'); const r = b && b.getBoundingClientRect(); return !!(r && r.height > 0 && r.bottom <= innerHeight)`);
-    check('U8 current action (공급처 조사 시작) → only the purchase block auto-opens, highlighted, its button on screen', s.filter(x => x.open).map(x => x.k).join() === 'purchase' && s[0].action && s[0].title.endsWith('· 확인할 일 있음') && u8btn, JSON.stringify(s) + ' btn=' + u8btn);
-    const dec = `_peCurrentHtml({ approver: true }, { action: { type: 'DECISION', title: '결제수단을 선택해 주세요', message: '저장 카드 결제가 실패했어요', decision_ref: { exception_id: 'e1' }, options: [{ option_id: 'o1', label: '다른 저장 결제수단으로 다시 시도', enabled: true }, { option_id: 'o2', label: '주문 중단', enabled: true }] } })`;
-    // ── U9 사람이 접은 같은 행동은 다시 자동으로 펼치지 않는다; 새 행동이 오면 다시 그 하나만 펼친다
-    await b.ev(`document.querySelector('[data-dock="purchase"] .dock-hdr').click(); __fill({ purchase: __req('READY_FOR_RESEARCH'), today: 3, checks: 10, sheet: 2 }); ${settle} return 1`);
-    const u9a = (await b.ev(STATE)).filter(x => x.open).map(x => x.k).join();
-    await b.ev(`document.querySelector('[data-dock="today"] .dock-hdr').click(); __fill({ purchase: ${dec} + __req('RESEARCH_DONE'), today: 3, checks: 10, sheet: 2 }); ${settle} return 1`);
+    check('H4b no purchase, 3 tasks → "오늘 할 일 3개" first row + 기타 정보 (재고 확인 / 발주표 / 재고·목표 inside); 2 rows', visible(s).map(x => x.k + ':' + x.title).join() === 'today:오늘 할 일 3개,other:기타 정보'
+      && await b.ev(`return [...document.querySelectorAll('[data-dock-sub]:not([hidden])')].map(d => d.textContent).join()`) === '재고 확인 필요 10개,발주표 2건,재고·목표', JSON.stringify(s));
+    // ── H5 ONE CURRENT ACTION: 사람 행동이 있는 발주 줄 하나만 자동으로 펼침, 사람이 접으면 그대로, 새 행동이면 다시
+    await b.ev(`_dockReset(); __fill({ ...__daejeon, today: 3, checks: 10, sheet: 2 }); ${settle} return 1`);
+    const h5a = openK(await b.ev(STATE));
+    await b.ev(`document.querySelector('[data-dock="purchase"] .dock-hdr').click(); __fill({ ...__daejeon, today: 3, checks: 10, sheet: 2 }); ${settle} return 1`);
+    const h5b = openK(await b.ev(STATE));
+    await b.ev(`__fill({ requests: [{ ...__daejeon.requests[0], status: 'READY_FOR_RESEARCH' }], cur: { type: 'PAYMENT_EXCEPTION_DECISION', title: '결제수단을 선택해 주세요', decision_ref: { exception_id: 'e1' }, options: [{ option_id: 'o1', label: '주문 중단', enabled: true }] }, view: { approver: true }, today: 3 }); ${settle} return 1`);
     s = await b.ev(STATE);
-    check('U9 owner-collapsed action stays collapsed on re-render; a NEW action (결제수단 선택) re-opens only the purchase block', u9a === '' && s.filter(x => x.open).map(x => x.k).join() === 'purchase' && s[0].title === '결제수단을 선택해 주세요 · 확인할 일 있음', `afterCollapse=${u9a} ` + JSON.stringify(s));
-    // ── U10 매장 전환/로그아웃(_clearStoreContext) → 모두 접힘, 이전 매장 줄 없음
+    check('H5 one current action auto-expands (purchase only); owner-collapsed stays collapsed; a new action re-opens only it', h5a === 'purchase' && h5b === '' && openK(s) === 'purchase'
+      && s[0].title === '신세계 대전점 발주 · 결제수단을 선택해 주세요' && s[0].action, JSON.stringify({ h5a, h5b, s }));
+    // 상태 문장: 기술 enum 노출 금지
+    const phr = [];
+    for (const cur of ["{ type: 'RESEARCHING', message: 'x' }", "{ type: 'RECEIPT', message: 'x', orders: [] }", "{ type: 'OUTCOME_CHECK' }", "{ type: 'SOMETHING_NEW_FROM_SERVER' }"]) {
+      await b.ev(`_dockReset(); __fill({ requests: [], cur: ${cur}, view: {} }); ${settle} return 1`);
+      phr.push((await b.ev(STATE))[0].title);
+    }
+    check('H5b state phrases are Korean, no enum: 조사 중 / 받은 수량 / 결과 확인 / unknown → 확인할 일 1개', phr.join('|') === '신세계 대전점 발주 · 공급처 조사 중|신세계 대전점 발주 · 받은 수량 확인 필요|신세계 대전점 발주 · 주문 결과 확인 중|신세계 대전점 발주 · 확인할 일 1개'
+      && !phr.some(t => /[A-Z]{3,}_[A-Z]/.test(t)), phr.join('|'));
+    // 조사 중: 요청 줄에 남은 [공급처 조사 시작] 버튼보다 서버의 현재 상태가 먼저, 사람 할 일이 아니므로 자동으로 펼치지 않는다
+    await b.ev(`_dockReset(); __fill({ requests: [{ ...__daejeon.requests[0], status: 'READY_FOR_RESEARCH' }], cur: { type: 'RESEARCHING', message: '공급처를 조사하고 있어요', items: [] }, view: {} }); ${settle} return 1`);
+    s = await b.ev(STATE);
+    check('H5c research running (row still has [공급처 조사 시작]) → "공급처 조사 중" from the server state, not auto-opened, not highlighted', s[0].title === '신세계 대전점 발주 · 공급처 조사 중' && openK(s) === '' && !s[0].action, JSON.stringify(s));
+    // ── 접힘 동작 (V0.1 회귀): 클릭 / 아코디언 / 키보드 / 다른 곳에서 이동 / 매장 전환
+    await b.ev(`_dockReset(); __fill({ sid: 1, purchaseStore: false, today: 3, checks: 10, sheet: 2 }); ${settle} document.querySelector('[data-dock="today"] .dock-hdr').click(); return 1`);
+    const c1 = openK(await b.ev(STATE));
+    await b.ev(`document.querySelector('[data-dock="other"] .dock-hdr').click(); return 1`);
+    const c2 = openK(await b.ev(STATE));
+    await b.ev(`_dockOpen(null); return 1`); await b.key('[data-dock="other"] .dock-hdr', 'Enter'); const k1 = openK(await b.ev(STATE)); await b.key('[data-dock="other"] .dock-hdr', ' '); const k2 = openK(await b.ev(STATE));
+    const aria = await b.ev(`return [...document.querySelectorAll('#homeDock .dock-hdr')].every(h => h.tagName === 'BUTTON' && document.getElementById(h.getAttribute('aria-controls')) === h.parentElement.querySelector('.dock-panel'))`);
+    check('U4-U6 click expands, accordion keeps one open, Enter/Space toggle, aria-controls → panel', c1 === 'today' && c2 === 'other' && k1 === 'other' && k2 === '' && aria, JSON.stringify({ c1, c2, k1, k2, aria }));
+    await b.ev(`_dockOpen(null); _agentShowOrderSheet(2); return 1`);
+    const r1 = openK(await b.ev(STATE));
+    await b.ev(`_dockOpen(null); _agentFocus(document.querySelector('#agentHome .agent-card')); return 1`);
+    const r2 = openK(await b.ev(STATE));
+    check('U11 jumping to an item inside a collapsed row opens that row (발주표 → 기타 정보, 오늘 할 일 card → 오늘 할 일)', r1 === 'other' && r2 === 'today', `${r1} / ${r2}`);
     await b.ev(`try { _clearStoreContext(); } catch (e) {} ${settle} return 1`);
     s = await b.ev(STATE);
-    const u10src = await b.ev(`return String(_clearStoreContext).includes('_dockReset()') && String(_clearStoreContext).includes("'agentChecks'")`);
-    check('U10 store switch / logout → all collapsed, previous store\'s 재고 확인 rows cleared', s.every(x => !x.open) && !s.find(x => x.k === 'checks').shown && u10src, JSON.stringify(s));
-    // ── U11 다른 곳에서 블록 안 항목으로 이동하면 그 줄이 펼쳐진다 (오늘 할 일 [발주표 보기], 발주표 [수정])
-    await b.ev(`__fill({ today: 3, checks: 0, sheet: 2 }); ${settle} _dockOpen(null); _agentShowOrderSheet(2); return 1`);
-    s = await b.ev(STATE);
-    const u11a = s.filter(x => x.open).map(x => x.k).join();
-    await b.ev(`_dockOpen(null); _agentFocus(document.querySelector('#agentHome .agent-card')); return 1`);
-    s = await b.ev(STATE);
-    check('U11 jumping to an item inside a collapsed block opens that block (발주표 row / 오늘 할 일 card)', u11a === 'sheet' && s.filter(x => x.open).map(x => x.k).join() === 'today', `${u11a} / ${s.filter(x => x.open).map(x => x.k)}`);
-    // ── U12 채팅이 주 작업 공간: 접힌 상태에서 채팅 영역 높이 (before/after), 입력창은 하단 고정·dock 밖, 기존 버튼/입력 그대로
+    check('U10 store switch / logout → all collapsed, previous store rows cleared', s.every(x => !x.open) && !s.find(x => x.k === 'purchase').shown, JSON.stringify(s));
+    // ── H6 채팅 영역 (접힌 상태, 같은 내용) — 이전 버전 대비 유지/증가, 입력창 하단 고정, 가로 스크롤 없음
     const LAYOUT = `const ca = document.getElementById('chatArea').getBoundingClientRect(), iz = document.querySelector('.v4-input-zone').getBoundingClientRect();
-      const tab = document.getElementById('tab-input').getBoundingClientRect();
-      return { chat: Math.round(ca.height), chatTop: Math.round(ca.top), input: Math.round(iz.top), inputBottom: Math.round(iz.bottom), vh: innerHeight, tab: Math.round(tab.height), hscroll: document.documentElement.scrollWidth > innerWidth };`;
-    const FULL = `__fill({ purchase: __req('RESEARCH_DONE'), today: 3, checks: 10, sheet: 6 }); ${settle}`;
+      return { chat: Math.round(ca.height), top: Math.round(ca.top), visible: Math.round(Math.min(ca.bottom, iz.top) - ca.top), inputBottom: Math.round(iz.bottom), vh: innerHeight, hscroll: document.documentElement.scrollWidth > innerWidth };`;
     const lay = {};
-    for (const [w, h, m, label] of W) {
-      await b.open('http://zk.test/', w, h, m); await b.ev(FX); lay[label] = { after: await b.ev(`${FULL} _dockOpen(null); ${settle} ${LAYOUT}`) };
-      if (OLD_HTML) {
+    for (const [w, h, m, label] of [[390, 844, true, 'mobile'], [1280, 900, false, 'desktop']]) {
+      await b.open('http://zk.test/', w, h, m); await b.ev(FX);
+      lay[label] = { after: await b.ev(`__fill({ ...__daejeon, today: 3, checks: 10, sheet: 6 }); ${settle} _dockOpen(null); ${settle} ${LAYOUT}`) };
+      if (OLD) {
         await b.open('http://zk.test/old', w, h, m);
-        // 이전 버전에는 #agentChecks 가 없다 (재고 확인 카드는 오늘 할 일 안의 <details> 로 접혀 있었다) → 같은 내용을 그 자리에 넣는다
-        await b.ev(FX.replace("document.getElementById('agentChecks').innerHTML =", "(document.getElementById('agentChecks') || { set innerHTML(v) { if (v) document.getElementById('agentHome').insertAdjacentHTML('beforeend', '<details class=\"agent-more\"><summary>재고 확인이 필요한 품목 더 있음</summary>' + v + '</details>'); } }).innerHTML ="));
-        lay[label].before = await b.ev(`${FULL} ${LAYOUT}`);
+        await b.ev(FX.replace("document.getElementById('agentChecks').innerHTML =", "(document.getElementById('agentChecks') || {}).innerHTML ="));
+        lay[label].before = await b.ev(`__fill({ ...__daejeon, today: 3, checks: 10, sheet: 6 }); ${settle} ${LAYOUT}`);
       }
     }
     console.log('       layout ' + JSON.stringify(lay));
-    await b.open('http://zk.test/', 390, 844, true); await b.ev(FX); await b.ev(`${FULL} return 1`);
-    const intact = await b.ev(`const q = s => document.querySelector(s); return { input: !!q('#nlInput') && !q('#homeDock').contains(q('#nlInput')), mic: !!q('#micBtn') && !q('#homeDock').contains(q('#micBtn')),
-      chatOutsideDock: !q('#homeDock').contains(q('#chatArea')), prep: [...document.querySelectorAll('#agentHome .agent-btn')].length === 3, ids: ['purchaseHome','agentHome','agentChecks','homeOrderSection','writerPendingBar','orderList','orderNeedCard','resList'].every(i => !!document.getElementById(i)) }`);
-    if (process.env.ZK_DOCK_SHOT) {   // 눈으로 확인용 (선택): 접힌 상태 / 현재 행동 하나 펼친 상태
-      const shot = async n => fs.writeFileSync(path.join(process.env.ZK_DOCK_SHOT, n), Buffer.from((await b.send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
-      await b.ev(`_dockReset(); __fill({ purchase: __req('RESEARCH_DONE'), today: 3, checks: 10, sheet: 6 }); ${settle} return 1`); await shot('dock_collapsed.png');
-      await b.ev(`__fill({ purchase: __req('READY_FOR_RESEARCH'), today: 3, checks: 10, sheet: 6 }); ${settle} return 1`); await shot('dock_action.png');
+    if (process.env.ZK_DOCK_SHOT) {
+      await b.open('http://zk.test/'); await b.ev(FX);
+      await b.ev(`_dockReset(); __fill({ ...__daejeon, today: 3, checks: 10, sheet: 6 }); ${settle} _dockOpen(null); return 1`); await b.shot(path.join(process.env.ZK_DOCK_SHOT, 'home_collapsed.png'));
+      await b.ev(`_dockReset(); __fill({ ...__daejeon, today: 3, checks: 10, sheet: 6 }); ${settle} return 1`); await b.shot(path.join(process.env.ZK_DOCK_SHOT, 'home_action.png'));
     }
-    const m = lay['mobile 390×844'].after, d = lay['desktop 1280×900'].after;
-    check('U12 chat is the main workspace: collapsed rows leave ≥ 45% of the viewport to the chat (mobile + desktop), input fixed at the bottom outside the dock, no horizontal scroll, existing ids/buttons intact',
-      m.chat >= 0.45 * m.vh && d.chat >= 0.45 * d.vh && m.inputBottom <= m.vh && !m.hscroll && !d.hscroll && Object.values(intact).every(Boolean), JSON.stringify({ lay, intact }));
-  } catch (e) { fail++; console.log('FAIL harness ' + (e && e.stack || e)); }
+    await b.open('http://zk.test/');
+    const intact = await b.ev(`const q = s => document.querySelector(s); return [q('#nlInput'), q('#micBtn'), q('#chatArea')].every(e => e && !q('#homeDock').contains(e))
+      && ['purchaseHome','agentHome','agentChecks','homeOrderSection','writerPendingBar','orderList','orderNeedCard','resList'].every(i => !!document.getElementById(i))`);
+    const m = lay.mobile.after, d = lay.desktop.after;
+    check('H6 chat workspace: ≥ 45% of the viewport (mobile + desktop), not smaller than before, input fixed at the bottom outside the rows, no horizontal scroll, ids intact',
+      m.chat >= 0.45 * m.vh && d.chat >= 0.45 * d.vh && (!lay.mobile.before || m.visible >= lay.mobile.before.visible) && (!lay.desktop.before || d.visible >= lay.desktop.before.visible)
+      && m.inputBottom <= m.vh && !m.hscroll && !d.hscroll && intact, JSON.stringify({ lay, intact }));
+  } catch (e) { check('harness', false, e && e.stack || e); }
   finally { b.close(); }
-  console.log(`\nnetwork blocked (never reached): ${[...blocked].join(', ') || 'none'}`);
-  console.log('DB Write: 0 (network blocked)');
-  console.log(`RESULT: ${pass} PASS / ${fail} FAIL (of ${pass + fail})`);
-  setTimeout(() => process.exit(fail === 0 ? 0 : 1), 300);
+  done(b.blocked);
 })();

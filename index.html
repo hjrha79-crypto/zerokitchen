@@ -658,6 +658,14 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 .dock-panel{max-height:42dvh;overflow-y:auto;padding:0 10px 10px}
 .dock-panel .agent-home{box-shadow:none;margin-bottom:0;padding:4px 4px 0}
 .dock-panel .agent-sum{display:none}
+.dock-sec.dock-empty .dock-hdr{cursor:default;color:var(--dim);font-weight:600}
+.dock-sec.dock-empty .dock-chev{display:none}
+.dock-sub{font-size:13px;font-weight:700;color:var(--dim);padding:10px 4px 4px}
+[data-dock-slot="other-today"] .agent-sum{display:block;font-size:13px;color:var(--dim);padding:6px 0 2px}
+[data-dock-slot="other-today"] .agent-none{display:none}
+.chat-restored-sep{align-self:center;font-size:11px;color:var(--dim);padding:2px 10px;margin:2px 0 6px;border-radius:10px;background:rgba(255,255,255,.55)}
+.chat-save-fail{align-self:center;font-size:12px;color:var(--red);background:#fff;border:1px solid var(--red);border-radius:10px;padding:6px 10px;display:flex;gap:8px;align-items:center}
+.v4-bubble.restored{white-space:pre-line}
 .v4-chat-row{display:flex;gap:8px;align-items:flex-start}
 .v4-chat-row.user{justify-content:flex-end}
 .v4-avatar{width:32px;height:32px;border-radius:10px;background:var(--suggest-bar);color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -745,35 +753,32 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
   <!-- [상단 요약 줄] 채팅이 주 작업 공간. 위 정보는 한 줄 요약으로 접어 두고 필요할 때만 펼친다 (한 번에 하나).
        자동으로 펼쳐지는 것은 "지금 해야 할 발주 행동" 하나뿐. 안의 카드·버튼은 그대로 (표시 위치만 바뀜). -->
   <div class="home-dock" id="homeDock">
-    <!-- 매장 발주요청 (발주요청을 받는 매장에서만 보인다) -->
+    <!-- 홈 상단 = 현재 action 한 줄 (+ 기타 정보 한 줄). 진행 중인 발주가 있으면 그 발주가 첫 줄 -->
     <section class="dock-sec" data-dock="purchase" hidden>
-      <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-purchase" onclick="_dockToggle('purchase')"><span class="dock-title" data-dock-title>발주 진행</span><span class="dock-chev" aria-hidden="true">▸</span></button>
-      <div class="dock-panel" id="dockPanel-purchase" hidden><div id="purchaseHome"></div></div>
+      <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-purchase" onclick="_dockToggle('purchase')"><span class="dock-title" data-dock-title>발주</span><span class="dock-chev" aria-hidden="true">▸</span></button>
+      <div class="dock-panel" id="dockPanel-purchase" hidden><div data-dock-slot="purchase"><div id="purchaseHome"></div></div></div>
     </section>
-    <!-- 오늘 할 일 (Agent Home): 품목마다 결정 하나, 우선순위 순 -->
+    <!-- 오늘 할 일 (Agent Home): 진행 중인 발주가 없을 때만 첫 줄. 있으면 기타 정보 안으로 -->
     <section class="dock-sec" data-dock="today" hidden>
       <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-today" onclick="_dockToggle('today')"><span class="dock-title" data-dock-title>오늘 할 일</span><span class="dock-chev" aria-hidden="true">▸</span></button>
-      <div class="dock-panel" id="dockPanel-today" hidden><div id="agentHome"></div></div>
+      <div class="dock-panel" id="dockPanel-today" hidden><div data-dock-slot="today"><div id="agentHome"></div></div></div>
     </section>
-    <!-- 재고 확인이 필요한 나머지 품목 (오늘 할 일에 들지 않은 것) -->
-    <section class="dock-sec" data-dock="checks" hidden>
-      <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-checks" onclick="_dockToggle('checks')"><span class="dock-title" data-dock-title>재고 확인 필요</span><span class="dock-chev" aria-hidden="true">▸</span></button>
-      <div class="dock-panel" id="dockPanel-checks" hidden><div id="agentChecks"></div></div>
-    </section>
-    <!-- 오늘의 발주 표 카드 (발주표 = 담아 둔 주문 + 입고 대기 상세) -->
-    <section class="dock-sec" data-dock="sheet" hidden>
-      <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-sheet" onclick="_dockToggle('sheet')"><span class="dock-title" data-dock-title>발주표</span><span class="dock-chev" aria-hidden="true">▸</span></button>
-      <div class="dock-panel" id="dockPanel-sheet" hidden>
+    <!-- 기타 정보: 오늘 할 일(발주 진행 중일 때) · 재고 확인 · 발주표 · 재고·목표 -->
+    <section class="dock-sec" data-dock="other" hidden>
+      <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-other" onclick="_dockToggle('other')"><span class="dock-title" data-dock-title>기타 정보</span><span class="dock-chev" aria-hidden="true">▸</span></button>
+      <div class="dock-panel" id="dockPanel-other" hidden>
+        <div data-dock-slot="other-purchase"></div>
+        <div data-dock-slot="other-today"></div>
+        <div class="dock-sub" data-dock-sub="checks" hidden>재고 확인 필요</div>
+        <div id="agentChecks"></div>
+        <div class="dock-sub" data-dock-sub="sheet" hidden>발주표</div>
         <div id="homeOrderSection">
           <div id="writerPendingBar" style="display:none"></div>
           <div id="orderList"><div class="no-item">로딩 중...</div></div>
         </div>
+        <div class="dock-sub" data-dock-sub="detail" hidden>재고·목표</div>
+        <div id="orderNeedCard"></div>
       </div>
-    </section>
-    <!-- 재고·목표 상세 (현재 − 목표 계산표). 판단은 "오늘 할 일"이 한다 -->
-    <section class="dock-sec" data-dock="detail">
-      <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-detail" onclick="_dockToggle('detail')"><span class="dock-title" data-dock-title>재고·목표 자세히 보기</span><span class="dock-chev" aria-hidden="true">▸</span></button>
-      <div class="dock-panel" id="dockPanel-detail" hidden><div id="orderNeedCard"></div></div>
     </section>
   </div>
 
@@ -1207,6 +1212,7 @@ function _clearStoreContext() {
   if (typeof _dockReset === 'function') _dockReset();   // 새 매장: 요약 줄은 다시 기본(접힘) 상태
   set('orderNeedCard', '');
   set('suggestBar', '');
+  if (typeof _chatReset === 'function') _chatReset();   // 새 매장: 그 매장의 thread 를 다시 복원한다 (저장된 기록은 그대로)
   set('resList', '');
   set('orderList', '<div class="no-item">매장 정보를 불러오는 중…</div>');
   const notif = document.getElementById('v3NotifContainer');
@@ -1935,6 +1941,7 @@ async function handleNaturalInput() {
   console.log('[NL] handleNaturalInput 진입:', raw, '| _complexQtyState:', !!_complexQtyState, '| _pendingComplexItems:', _pendingComplexItems);
   _nlProcessing = true;
   _saveLastInput(raw);
+  if (typeof _chatAppend === 'function') _chatAppend('HUMAN', raw);   // 업무 thread: 사람 입력을 먼저 (응답은 그 다음 순서로 저장)
 
   const _onInputTab = document.getElementById('tab-input').classList.contains('active');
 
@@ -4634,10 +4641,11 @@ function _renderAgentHome() {
   el.innerHTML = html;
 }
 
-// ── 홈 상단 요약 줄 (표시 전용): 채팅이 주 작업 공간. 각 정보 블록은 한 줄 요약으로 접혀 있고, 한 번에 하나만 펼친다.
-//   자동으로 펼치는 것은 "지금 사람이 해야 할 발주 행동"(발주 블록 안의 버튼) 하나뿐 — 다른 줄은 사람이 열 때만.
-//   상태는 이 화면에서만 기억한다 (저장 없음; 새로고침·매장 변경 = 기본 접힘). 줄 제목은 이미 그려진 내용에서 센다.
-const _DOCK_KEYS = ['purchase', 'today', 'checks', 'sheet', 'detail'];
+// ── 홈 상단 = 현재 action 한 줄 (+ 기타 정보 한 줄) ──
+// 진행 중인 발주가 있으면 그 발주가 첫 줄 (제목은 서버의 canonical 상태에서 — 기술 enum 은 보이지 않는다).
+// 없으면 "오늘 할 일" 이 첫 줄. 나머지(재고 확인 · 발주표 · 재고·목표 · 발주가 아닐 때의 오늘 할 일)는 "기타 정보" 한 줄 안.
+// 사람이 할 발주 행동이 있을 때만 그 줄 하나를 자동으로 펼친다. UI 상태는 화면에만 (새로고침 → 접힘).
+const _DOCK_KEYS = ['purchase', 'today', 'other'];
 let _dock = { open: null, userKey: null, autoKey: null, obs: null, queued: false };
 function _dockSec(k) { return document.querySelector(`#homeDock .dock-sec[data-dock="${k}"]`); }
 function _dockSet(k, on) {
@@ -4650,6 +4658,8 @@ function _dockOpen(k) {   // 하나만 펼친다 (k = null → 모두 접기)
   _dock.open = k;
 }
 function _dockToggle(k) {   // 사람이 누른 것: 이 화면에서는 그 선택을 따른다 (같은 발주 행동이면 다시 자동으로 펼치지 않음)
+  const s = _dockSec(k);
+  if (s && s.classList.contains('dock-empty')) return;   // "오늘은 바로 처리할 일이 없습니다" 는 펼칠 내용이 없다
   _dock.userKey = _dock.autoKey;
   _dockOpen(_dock.open === k ? null : k);
 }
@@ -4658,34 +4668,90 @@ function _dockReveal(el) {   // 다른 곳에서 블록 안의 항목으로 이�
   if (s && _dock.open !== s.dataset.dock) _dockOpen(s.dataset.dock);
 }
 function _dockReset() { _dock.open = null; _dock.userKey = null; _dock.autoKey = null; _dockOpen(null); }
-function _dockTitle(k, text, show, action) {
+function _dockTitle(k, text, show, action, empty) {
   const s = _dockSec(k); if (!s) return;
-  s.hidden = !show; s.classList.toggle('dock-action', !!action);
+  s.hidden = !show; s.classList.toggle('dock-action', !!action); s.classList.toggle('dock-empty', !!empty);
+  const hdr = s.querySelector('.dock-hdr'); if (hdr) { if (empty) hdr.setAttribute('aria-disabled', 'true'); else hdr.removeAttribute('aria-disabled'); }
   const t = s.querySelector('[data-dock-title]'); if (t && t.textContent !== text) t.textContent = text;
-  if (!show && _dock.open === k) _dockOpen(null);
+  if ((!show || empty) && _dock.open === k) _dockOpen(null);
+}
+function _dockSlot(name, node) {   // 블록 내용을 줄 사이로 옮긴다 (같은 노드 — 관찰·버튼은 그대로)
+  const slot = document.querySelector(`#homeDock [data-dock-slot="${name}"]`);
+  if (slot && node && node.parentElement !== slot) slot.appendChild(node);
+}
+const _DOCK_STATE_PHRASE = { RESEARCHING: '공급처 조사 중', RESEARCH_MAPPING_REQUIRED: '품목 확인 필요', RESEARCH_FAILED: '공급처 조사 다시 필요', RECEIPT: '받은 수량 확인 필요',
+  BASKET_READY: '구매안 확인 필요', PAYMENT_EXCEPTION_DECISION: '결제 방법 선택 필요', EXTERNAL_AUTH_REQUIRED: '공급처 인증 필요', PRICE_REAPPROVAL_REQUIRED: '가격 다시 확인 필요',
+  PURCHASE_BLOCKED: '구매 멈춤 · 확인 필요', RESUMING: '구매 다시 진행 중', OUTCOME_CHECK: '주문 결과 확인 중', PARTIAL: '일부만 주문됨 · 확인 필요', CANCELLED: '주문 중단됨', IN_PROGRESS: '구매 진행 중' };
+const _DOCK_HUMAN_STATES = ['RESEARCH_MAPPING_REQUIRED', 'RESEARCH_FAILED', 'RECEIPT', 'BASKET_READY', 'PAYMENT_EXCEPTION_DECISION', 'EXTERNAL_AUTH_REQUIRED', 'PRICE_REAPPROVAL_REQUIRED', 'PURCHASE_BLOCKED', 'PARTIAL'];
+const _DOCK_ACTIVE_REQ = ['RECEIVED', 'PARSED', 'MAPPING_REQUIRED', 'MAPPED', 'READY_FOR_RESEARCH'];
+// 진행 중인 발주요청 (서버가 준 최신순 목록에서 끝나지 않은 첫 요청)
+function _activePurchaseRequest() {
+  try {
+    if (typeof _purchase !== 'object' || !_purchase || Number(_purchase.sid) !== Number(SID)) return null;
+    return (_purchase.requests || []).find(r => _DOCK_ACTIVE_REQ.includes(r.status)) || null;
+  } catch { return null; }   // 스크립트 초기화 전
+}
+function _dockCurAction() { try { return (typeof _pe === 'object' && _pe && _pe.current && _pe.current.action) || null; } catch { return null; } }
+// 서버의 현재 행동이 요청 줄의 버튼보다 먼저인 상태 (조사 중에 남아 있는 [공급처 조사 시작] 같은 줄 버튼이 이기지 않게)
+const _DOCK_CUR_FIRST = ['RESEARCHING', 'RESEARCH_MAPPING_REQUIRED', 'RESEARCH_FAILED', 'RECEIPT', 'BASKET_READY', 'PAYMENT_EXCEPTION_DECISION', 'EXTERNAL_AUTH_REQUIRED',
+  'PRICE_REAPPROVAL_REQUIRED', 'PURCHASE_BLOCKED', 'RESUMING', 'OUTCOME_CHECK', 'PARTIAL'];
+// 발주 줄 문장: 구매 실행 카드의 버튼 → 서버의 현재 행동 → 요청 줄 버튼 → 보낸 요청 확인 → 진행 중인 요청 상태 순
+function _dockPurchasePhrase(ph, acts) {
+  const cur = _dockCurAction();
+  const req = _activePurchaseRequest();
+  const has = sel => acts.some(b => b.matches(sel));
+  const txt = t => acts.some(b => !b.matches('[data-pe-btn]') && b.textContent.trim() === t);
+  const unresolved = req && req.status === 'MAPPING_REQUIRED' && Number(req.unresolved) > 0 ? ` ${Number(req.unresolved)}개` : '';
+  if (has('[data-pe-btn="C"]')) return '결제 승인 필요';
+  if (has('[data-pe-btn="X"]')) return (cur && (cur.title || '').trim()) || '결정 필요';
+  if (has('[data-pe-btn="B"]')) return '구매안 확인 필요';
+  if (has('[data-pe-btn="RCV_ALL"]')) return '받은 수량 확인 필요';
+  if (has('[data-pe-btn="RESEARCH_RETRY"]')) return '공급처 조사 다시 필요';
+  if (has('[data-pe-btn="REVIEW"]')) return '품목 확인 필요' + (cur && (cur.items || []).length ? ` ${cur.items.length}개` : '');
+  if (cur && _DOCK_CUR_FIRST.includes(cur.type)) return _DOCK_STATE_PHRASE[cur.type];
+  if (txt('품목 확인하기')) return '품목 확인 필요' + unresolved;
+  if (txt('공급처 조사 시작')) return '공급처 조사 시작 필요';
+  if (ph.querySelector('[data-pr-pending] button')) return '보낸 요청 결과 확인 필요';
+  if (cur && _DOCK_STATE_PHRASE[cur.type]) return _DOCK_STATE_PHRASE[cur.type];
+  if (cur) return '확인할 일 1개';
+  if (req) return _PR_STATUS_LABEL[req.status] || '진행 중';
+  return '';
 }
 function _dockRefresh() {
   _dock.queued = false;
   const ph = document.getElementById('purchaseHome'), ah = document.getElementById('agentHome'), ck = document.getElementById('agentChecks');
-  const ol = document.getElementById('orderList');
-  // 발주 진행: 요청 줄 수 + 지금 해야 할 행동(버튼)이 있는가
-  const rows = ph ? ph.querySelectorAll('[data-pr-row]').length : 0;
+  const ol = document.getElementById('orderList'), nc = document.getElementById('orderNeedCard');
+  // ① 발주: 진행 중(사람 행동 / 서버의 현재 행동 / 끝나지 않은 요청 / 결과 확인 중인 보낸 요청)이면 첫 줄
   const acts = ph ? [...ph.querySelectorAll('button')].filter(b => !b.disabled && !b.closest('[data-pr-pending]')) : [];
-  const head = ph && ph.querySelector('[data-pe-head]');
-  const store = (ph && ph.querySelector('[data-pr-home] div') || {}).textContent || '';
-  const pTitle = head ? head.textContent.trim() : rows ? `${store.replace(/\s*발주요청$/, '') || '발주'} 발주 진행 ${rows}건` : '발주요청';
-  _dockTitle('purchase', acts.length ? `${pTitle} · 확인할 일 있음` : pTitle, !!(ph && ph.innerHTML.trim()), acts.length > 0);
-  // 오늘 할 일 / 재고 확인 필요
+  const cur = _dockCurAction();
+  const phHas = !!(ph && ph.innerHTML.trim());
+  const pending = !!(ph && ph.querySelector('[data-pr-pending] button'));
+  const purchaseOn = phHas && (acts.length > 0 || !!cur || !!_activePurchaseRequest() || pending);
+  let store = null; try { store = purchaseOn ? _purchaseStoreOf(SID) : null; } catch { store = null; }
+  const phrase = purchaseOn ? _dockPurchasePhrase(ph, acts) : '';
+  // 사람 행동: 구매 실행 카드 버튼 / 사람이 할 서버 상태 / (서버가 진행 중이 아닐 때만) 요청 줄 버튼 / 보낸 요청 확인
+  const execActs = acts.filter(b => b.matches('[data-pe-btn]'));
+  const curBusy = !!(cur && _DOCK_CUR_FIRST.includes(cur.type));
+  const human = execActs.length > 0 || pending || !!(cur && _DOCK_HUMAN_STATES.includes(cur.type)) || (!curBusy && acts.length > execActs.length);
+  _dockSlot(purchaseOn ? 'purchase' : 'other-purchase', ph);
+  _dockTitle('purchase', `${(store && store.display_name) || '매장'} 발주${phrase ? ' · ' + phrase : ''}`, purchaseOn, human, false);
+  // ② 오늘 할 일: 발주가 첫 줄이면 기타 정보 안으로 (현재 action 과 "할 일 없음" 을 동시에 보이지 않는다)
   const today = ah && ah.innerHTML.trim() ? Number(ah.dataset.today || 0) : null;
-  _dockTitle('today', today ? `오늘 할 일 ${today}개` : '오늘은 바로 처리할 일이 없습니다', today !== null, false);
+  _dockSlot(purchaseOn ? 'other-today' : 'today', ah);
+  _dockTitle('today', today ? `오늘 할 일 ${today}개` : '오늘은 바로 처리할 일이 없습니다', !purchaseOn && today !== null, !!today, !today);
+  // ③ 기타 정보: 재고 확인 · 발주표 · 재고·목표 (+ 발주 중일 때 오늘 할 일, 발주 아닐 때 발주 카드)
   const checks = ck ? ck.querySelectorAll('.agent-card').length : 0;
-  _dockTitle('checks', `재고 확인 필요 ${checks}개`, checks > 0, false);
-  // 발주표: 비어 있으면 줄을 숨긴다 (빈 안내 문구만 있는 경우)
   const sheetEmpty = !ol || !ol.innerHTML.trim() || (!ol.querySelector('table, .v4-receive-item, [data-oid], tr') && !!ol.querySelector('.v4-empty-hint, .no-item'));
   const sheetRows = ol ? ol.querySelectorAll('#otBody tr[data-iid], .v4-receive-item').length : 0;
-  _dockTitle('sheet', sheetRows ? `발주표 ${sheetRows}건` : '발주표', !sheetEmpty, false);
-  // ONE CURRENT ACTION: 발주 블록에 사람 행동이 있을 때만, 그 줄 하나를 자동으로 펼친다 (사람이 이미 접은 같은 행동이면 그대로 둔다)
-  const autoKey = acts.length ? 'purchase:' + acts.map(b => b.textContent.trim()).join('|') : null;
+  const detail = !!(nc && nc.innerHTML.trim());
+  const sub = (k, text, show) => { const d = document.querySelector(`#homeDock [data-dock-sub="${k}"]`); if (d) { d.hidden = !show; if (d.textContent !== text) d.textContent = text; } };
+  sub('checks', `재고 확인 필요 ${checks}개`, checks > 0);
+  sub('sheet', sheetRows ? `발주표 ${sheetRows}건` : '발주표', !sheetEmpty);
+  sub('detail', '재고·목표', detail);
+  const otherOn = checks > 0 || !sheetEmpty || detail || (purchaseOn && !!today) || (!purchaseOn && phHas);
+  _dockTitle('other', '기타 정보', otherOn, false, false);
+  // ONE CURRENT ACTION: 사람이 할 발주 행동이 있을 때만 그 줄 하나를 자동으로 펼친다 (사람이 이미 접은 같은 행동이면 그대로)
+  const autoKey = purchaseOn && human ? 'purchase:' + phrase + '|' + acts.map(b => b.textContent.trim()).join('|') : null;
   _dock.autoKey = autoKey;
   if (autoKey && _dock.userKey !== autoKey && _dock.open !== 'purchase') _dockOpen('purchase');
 }
@@ -4693,10 +4759,206 @@ function _dockQueue() { if (_dock.queued) return; _dock.queued = true; Promise.r
 function _dockInit() {
   if (_dock.obs || !document.getElementById('homeDock') || typeof MutationObserver === 'undefined') { _dockRefresh(); return; }
   _dock.obs = new MutationObserver(_dockQueue);
-  ['purchaseHome', 'agentHome', 'agentChecks', 'orderList'].forEach(id => { const n = document.getElementById(id); if (n) _dock.obs.observe(n, { childList: true, subtree: true, characterData: true }); });
+  ['purchaseHome', 'agentHome', 'agentChecks', 'orderList', 'orderNeedCard'].forEach(id => { const n = document.getElementById(id); if (n) _dock.obs.observe(n, { childList: true, subtree: true, characterData: true }); });
   _dockRefresh();
 }
 if (typeof document !== 'undefined') { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _dockInit); else _dockInit(); }
+
+// ── 채팅 = 업무 thread (chat-thread-persistence-001) ──
+// 사람이 실제로 본 대화 표면만 저장한다: 사람 입력 원문 / ZeroKitchen 응답 텍스트 (버튼·시각·디버그·토큰·카드정보 없음).
+// 서버(zk_chat_append / zk_chat_thread)가 매장 권한·append-only·중복 방지를 지킨다. localStorage 는 쓰지 않는다.
+// 발주 상태는 여기 없다 — 복원된 대화는 기록일 뿐, 지금 할 일은 홈 상단 줄(서버의 canonical 상태)이 정한다.
+const _CHAT_MAX = 4000;
+let _chat = { ep: -1, restored: false, restoring: null, restoringEp: -1, thread: null, threadReq: null, chain: Promise.resolve(), timers: new Map(), saved: new WeakSet(), obs: null, warned: {}, failed: [] };
+function _chatRedact(s) {
+  return String(s ?? '')
+    .replace(/eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/g, '[가림]')
+    .replace(/(sb_(secret|publishable)_[A-Za-z0-9_-]+|zkw_[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{16,})/g, '[가림]')
+    .replace(/(^|[^0-9])[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{4}[- ]?[0-9]{3,4}(?![0-9])/g, '$1[카드번호 가림]')
+    .replace(/(^|[^0-9])01[016789][- .]?[0-9]{3,4}[- .]?[0-9]{4}(?![0-9])/g, '$1[전화번호 가림]');
+}
+async function _chatRpc(fn, args) {
+  const token = await _writerToken();
+  if (!token) return { code: 'SIGNED_OUT' };
+  try {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+    const b = await res.json().catch(() => null);
+    if (res.status === 401) return { code: 'SIGNED_OUT' };
+    return b && typeof b.code === 'string' ? b : { code: res.status >= 500 ? 'SERVER' : 'NOT_READY' };
+  } catch { return { code: 'NETWORK' }; }
+}
+async function _chatUuidOf(text) {   // 같은 입력 → 같은 id (복원용 시드: 탭 두 개여도 1회만 저장)
+  let h;
+  if (typeof crypto !== 'undefined' && crypto.subtle) h = [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)))].map(b => b.toString(16).padStart(2, '0')).join('');
+  else {   // https 가 아닌 곳(로컬 테스트 등): 같은 결과를 내는 간단한 128-bit 해시
+    let a = 1779033703, b = 3144134277, c = 1013904242, d = 2773480762;
+    for (let i = 0; i < text.length; i++) { const k = text.charCodeAt(i); a = b ^ Math.imul(a ^ k, 597399067); b = c ^ Math.imul(b ^ k, 2869860233); c = d ^ Math.imul(c ^ k, 951274213); d = a ^ Math.imul(d ^ k, 2716044179); }
+    h = [a, b, c, d].map(x => (x >>> 0).toString(16).padStart(8, '0')).join('');
+  }
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${(8 | (parseInt(h[16], 16) & 3)).toString(16)}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+function _chatWarnOnce(key, msg) { if (_chat.warned[key]) return; _chat.warned[key] = true; showToast(msg, 4000); }
+// 저장 실패는 숨기지 않는다: 대화창에 [다시 시도] 줄 (같은 id 로 다시 보내므로 중복 저장 없음)
+function _chatShowFail() {
+  const list = document.getElementById('resList'); if (!list) return;
+  let bar = list.querySelector('.chat-save-fail');
+  if (!bar) { bar = document.createElement('div'); bar.className = 'chat-save-fail'; list.appendChild(bar); }
+  bar.innerHTML = `대화를 저장하지 못했습니다. 다시 시도해주세요. <button class="oai-edit" onclick="_chatRetry()">다시 시도</button>`;
+}
+function _chatRetry() {
+  const jobs = _chat.failed.splice(0); document.querySelector('#resList .chat-save-fail')?.remove();
+  jobs.forEach(j => _chatSend(j));
+}
+function _chatSend(j) {
+  const run = async () => {
+    // 앞 메시지가 저장 실패로 기다리는 중이면 뒤 메시지도 그 뒤에 줄 선다 (다시 시도할 때 순서 그대로)
+    if (_chat.failed.length) { _chat.failed.push(j); _chatShowFail(); return { code: 'QUEUED' }; }
+    let r = { code: 'NETWORK' };
+    for (let i = 0; i < 3; i++) {
+      r = await _chatRpc('zk_chat_append', j.args);
+      if (r.code === 'APPENDED' || r.code === 'DUPLICATE') return r;
+      if (r.code !== 'NETWORK' && r.code !== 'SERVER') break;
+      await new Promise(res => setTimeout(res, 600 * (i + 1)));
+    }
+    if (r.code === 'SIGNED_OUT') _chatWarnOnce('signed_out', '로그인하지 않아 대화가 저장되지 않아요 — 설정에서 로그인해 주세요');
+    else if (r.code === 'FORBIDDEN') _chatWarnOnce('forbidden', '이 매장의 대화를 저장할 권한이 없어요');
+    else { _chat.failed.push(j); _chatShowFail(); }
+    return r;
+  };
+  _chat.chain = _chat.chain.then(run, run);   // 순서대로 1건씩: 사람 입력이 먼저, 그 응답이 다음
+  return _chat.chain;
+}
+// 1건 append (현재 매장·현재 thread). 복원이 끝난 뒤에 보낸다 (thread 를 알아야 한다)
+function _chatAppend(role, text, o = {}) {
+  const ep = _storeEpoch, sid = SID;
+  const body = _chatRedact(String(text || '').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim()).slice(0, _CHAT_MAX);
+  if (!body) return Promise.resolve(null);
+  const message_id = o.message_id || _newActionId();
+  const go = async () => {
+    if (_chat.restoring) await _chat.restoring.catch(() => {});
+    if (_storeChanged(ep)) return null;   // 그 사이 매장이 바뀌면 이전 매장 thread 에 섞지 않는다
+    const active = _activePurchaseRequest();
+    // 묶인 발주요청이 끝났으면(진행 중 목록에서 빠짐) 새 thread 로 시작
+    if (_chat.thread && _chat.threadReq && !(_purchase.requests || []).some(r => r.request_id === _chat.threadReq && _DOCK_ACTIVE_REQ.includes(r.status)) && !o.thread_id) { _chat.thread = null; _chat.threadReq = null; }
+    if (!_chat.thread) _chat.thread = o.thread_id || _newActionId();
+    const req = o.purchase_request_id !== undefined ? o.purchase_request_id : (active ? active.request_id : null);
+    if (req) _chat.threadReq = req;
+    return _chatSend({ args: { p_message_id: message_id, p_store_id: Number(sid), p_thread_id: o.thread_id || _chat.thread, p_role: role, p_body: body, p_purchase_request_id: req || null, p_ref: o.ref || null } });
+  };
+  return go();
+}
+// 응답 카드에 이 대화가 답한 발주요청을 표시해 둔다 (저장 때 그 요청에 묶인다)
+function _chatTag(requestId, code) {
+  const card = document.getElementById('resList')?.lastChild;
+  if (card && card.nodeType === 1 && requestId) { card.dataset.chatReq = requestId; if (code) card.dataset.chatCode = code; }
+}
+// 화면에 보이는 응답의 텍스트만 (버튼·시각·입력칸·되돌리기 없음)
+function _chatTextOf(node) {
+  const c = node.cloneNode(true);
+  c.querySelectorAll('button, .chat-time, input, select, textarea, script, style, .v4-reflected, .v4-avatar, .pending-bar-wrap').forEach(x => x.remove());
+  c.querySelectorAll('br').forEach(x => x.replaceWith('\n'));
+  c.querySelectorAll('div, p, li, tr, label').forEach(x => x.append('\n'));
+  return c.textContent.split('\n').map(l => l.replace(/\s+/g, ' ').trim()).filter(Boolean).join('\n');
+}
+function _chatIsAgentNode(n) {
+  if (!n || n.nodeType !== 1) return false;
+  if (n.matches('.parsing-indicator, #parseLoading, [data-chat-restored], .chat-save-fail, .v4-chat-row.user, .chat-bubble.user')) return false;
+  return true;
+}
+function _chatCapture(node) {
+  _chat.timers.delete(node);
+  if (_chat.saved.has(node) || !node.isConnected || !_chatIsAgentNode(node)) return;
+  const text = _chatTextOf(node);
+  if (!text) return;
+  _chat.saved.add(node);   // 한 카드 = 한 메시지 (나중에 바뀐 버튼 상태는 기록하지 않는다 — append-only)
+  _chatAppend('AGENT', text, { ...(node.dataset.chatReq ? { purchase_request_id: node.dataset.chatReq } : {}), ...(node.dataset.chatCode ? { ref: { kind: 'PURCHASE_RESULT', code: node.dataset.chatCode } } : {}) });
+}
+function _chatObserve() {
+  const list = document.getElementById('resList');
+  if (!list || _chat.obs || typeof MutationObserver === 'undefined') return;
+  const topOf = n => { while (n && n.parentElement && n.parentElement !== list) n = n.parentElement; return n && n.parentElement === list ? n : null; };
+  _chat.obs = new MutationObserver(muts => {
+    const tops = new Set();
+    for (const m of muts) {
+      m.addedNodes.forEach(a => { const t = a === list ? null : (a.parentElement === list ? a : topOf(a)); if (t) tops.add(t); });
+      const t = topOf(m.target.nodeType === 1 ? m.target : m.target.parentElement); if (t) tops.add(t);
+    }
+    // 응답이 다 그려질 때까지 잠깐 기다렸다가 저장 (카드에 버튼·문장이 이어 붙는 경우)
+    tops.forEach(t => { if (!_chatIsAgentNode(t) || _chat.saved.has(t)) return; clearTimeout(_chat.timers.get(t)); _chat.timers.set(t, setTimeout(() => _chatCapture(t), 1200)); });
+  });
+  _chat.obs.observe(list, { childList: true, subtree: true, characterData: true });
+}
+function _chatFlush() { [..._chat.timers.keys()].forEach(n => { clearTimeout(_chat.timers.get(n)); _chatCapture(n); }); }
+// 매장 전환 / 로그아웃: 화면의 대화와 thread 기억을 비운다 (저장된 기록은 그대로)
+function _chatReset() {
+  _chat.timers.forEach(t => clearTimeout(t)); _chat.timers.clear();
+  _chat.ep = -1; _chat.restored = false; _chat.restoring = null; _chat.restoringEp = -1; _chat.thread = null; _chat.threadReq = null; _chat.failed = []; _chat.warned = {};
+}
+function _chatRenderRestored(msgs) {
+  const list = document.getElementById('resList'); if (!list || !msgs.length) return;
+  list.querySelector('[data-chat-restored]')?.remove();
+  const wrap = document.createElement('div');
+  wrap.dataset.chatRestored = '1'; wrap.style.cssText = 'display:flex;flex-direction:column;gap:8px';
+  for (const m of msgs) {
+    const at = m.ref && m.ref.at ? m.ref.at : m.created_at;
+    const time = at ? `<span class="chat-time">${_prEsc(_fmtKst(at) || '')}</span>` : '';
+    const row = document.createElement('div');
+    row.className = m.role === 'HUMAN' ? 'v4-chat-row user' : 'v4-chat-row';
+    row.innerHTML = m.role === 'HUMAN' ? `<div class="v4-bubble user restored">${_prEsc(m.body)}${time}</div>`
+      : `<div class="v4-avatar">ZK</div><div class="v4-bubble system restored">${_prEsc(m.body)}${time}</div>`;
+    wrap.appendChild(row);
+  }
+  const sep = document.createElement('div');
+  sep.className = 'chat-restored-sep'; sep.textContent = '여기까지 지난 대화 · 지금 할 일은 위 줄에서 확인하세요';
+  wrap.appendChild(sep);
+  list.insertBefore(wrap, list.firstChild);
+  requestAnimationFrame(() => { const ca = document.getElementById('chatArea'); if (ca) ca.scrollTop = ca.scrollHeight; });
+}
+// 새로고침 복원: 매장 → 진행 중 발주요청(canonical) → 그 thread → 시간순 표시. 매장마다 1회.
+function _chatRestore(ep) {
+  _chatObserve();
+  if (_storeChanged(ep) || (_chat.restored && _chat.ep === ep)) return _chat.restoring || Promise.resolve();
+  if (_chat.restoring && _chat.restoringEp === ep) return _chat.restoring;
+  _chat.restoringEp = ep;
+  const sid = SID;
+  const p = (async () => {
+    const active = _activePurchaseRequest();
+    const R = active ? active.request_id : null;
+    const r = await _chatRpc('zk_chat_thread', { p_store_id: Number(sid), p_purchase_request_id: R });
+    if (_storeChanged(ep)) return;
+    if (r.code === 'SIGNED_OUT' || r.code === 'NETWORK' || r.code === 'SERVER' || r.code === 'NOT_READY') {   // 로그인 후 / 다음 화면 갱신 때 다시
+      if (r.code !== 'SIGNED_OUT') _chatWarnOnce('restore', '지난 대화를 불러오지 못했어요 — 잠시 후 다시 열어 주세요');
+      return;
+    }
+    _chat.ep = ep; _chat.restored = true;
+    if (r.code !== 'OK') return;   // FORBIDDEN 등: 이 매장은 저장·복원하지 않는다
+    let msgs = r.messages || [];
+    _chat.thread = r.thread_id || null; _chat.threadReq = R && r.thread_id ? R : null;
+    // 이 기능 전에 받은 발주요청: 대화 기록이 없으면 원문과 그 요청의 현재 이해(canonical)로 thread 를 1회 연다
+    if (R && !r.thread_id) {
+      const req = await _purchaseRequestOf(R);
+      if (_storeChanged(ep)) return;
+      if (req && req.raw_text) {
+        const thread = await _chatUuidOf('zk-chat-seed-thread:' + R);
+        const seed = [
+          { message_id: await _chatUuidOf('zk-chat-seed-human:' + R), role: 'HUMAN', body: req.raw_text, ref: { kind: 'RESTORED_FROM_REQUEST', at: req.received_at } },
+          { message_id: await _chatUuidOf('zk-chat-seed-agent:' + R), role: 'AGENT', body: _purchaseSummaryText(req) + '\n재고·주문은 바꾸지 않았습니다.', ref: { kind: 'RESTORED_FROM_REQUEST', at: req.received_at } },
+        ];
+        _chat.thread = thread; _chat.threadReq = R;
+        for (const s of seed) {
+          const body = _chatRedact(s.body).slice(0, _CHAT_MAX);
+          _chatSend({ args: { p_message_id: s.message_id, p_store_id: Number(sid), p_thread_id: thread, p_role: s.role, p_body: body, p_purchase_request_id: R, p_ref: s.ref } });
+          msgs = msgs.concat([{ ...s, body, created_at: req.received_at }]);
+        }
+      }
+    }
+    if (!_chat.thread) _chat.thread = _newActionId();
+    _chatRenderRestored(msgs);
+  })();
+  _chat.restoring = p;
+  return p;
+}
+if (typeof window !== 'undefined' && window.addEventListener) window.addEventListener('pagehide', () => { try { _chatFlush(); } catch {} });
 
 // 주기 알림 후보를 "오늘 할 일"의 참고 신호로만 읽는다 (읽기 전용, 현재 매장 기준, 늦은 응답은 버림).
 async function _loadAgentCycle() {
@@ -6673,6 +6935,7 @@ async function _writerSignIn() {
 async function _writerSignOut() {
   try { await _authClient().auth.signOut(); } catch { /* 로컬 세션은 아래에서 무효 처리 */ }
   _writerReady = false; _writerState = { status: 'signed_out', reason: '' };
+  if (typeof _chatReset === 'function') { _chatReset(); const rl = document.getElementById('resList'); if (rl) rl.innerHTML = ''; }   // 로그아웃: 저장된 대화는 화면에서 내린다 (다시 로그인하면 복원)
   await _renderWriterAuthCard();
   await _renderOrderKeepScroll();
 }
@@ -7265,6 +7528,7 @@ function _purchaseShowResult(raw, body) {
     case 'MAPPINGS_CONFIRMED': break;
     default: addResult(raw, `발주요청을 기록하지 못했어요 (${_prEsc(body.code)}) — 아무것도 바뀌지 않았습니다.`, 'warn');
   }
+  if (req && body.code !== 'MAPPINGS_CONFIRMED' && typeof _chatTag === 'function') _chatTag(req.request_id, body.code);   // 이 응답이 답한 발주요청
 }
 async function _purchaseSubmit(storeId, raw, acceptDuplicate = false) {
   const body = await _purchasePost('SUBMIT_REQUEST', { store_id: Number(storeId), raw_text: raw, idempotency_key: _newActionId(), ...(acceptDuplicate ? { accept_duplicate: true } : {}) });
@@ -7450,6 +7714,7 @@ async function _purchaseSubmitReview() {
   const s = r.summary || {};
   if (r.status === 'READY_FOR_RESEARCH') addResult('품목 확인', _purchaseReadyText(r), 'ok');
   else addResult('품목 확인', `${s.confirmed}개 매핑 완료 · ${s.unresolved}개는 아직 확인이 필요해요 (포장 단위를 모르면 공급처 조사 전에 확인합니다).`, 'warn');
+  if (typeof _chatTag === 'function') _chatTag(r.request_id, body.code);
   _purchaseAttach(_purchaseResultButtons(r));
   await _refreshPurchaseHome(_storeEpoch);
 }
@@ -7479,6 +7744,7 @@ async function _refreshPurchaseHome(ep) {
   if (typeof ep === 'number' && _storeChanged(ep)) return;
   el.innerHTML = _purchaseHomeHtml(store, _purchase.requests) + (store ? _purchaseExecHtml(_pe.view) : '');
   _renderPurchasePendingBar();
+  if (typeof _chatRestore === 'function') _chatRestore(typeof ep === 'number' ? ep : _storeEpoch);   // 매장·발주 상태를 안 뒤 대화 thread 복원 (매장마다 1회)
 }
 
 // ── 구매 실행: [결제 준비 승인](B) 과 [○○원 결제 승인](C) 는 서로 다른 화면·다른 버튼이다 (서버: purchase-execution)

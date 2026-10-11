@@ -173,7 +173,7 @@ const SIM = [item(174, '파인애플', 2, 6, '캔'), item(1, '우유', 1, 3, '�
   const home = HTML.slice(pos('tab-input'), HTML.indexOf('<!-- 재고탭 -->'));
   // (Chat Workspace Collapse V0.1) the folded <details> became a collapsed dock section — same order, folded by default
   check('H9 Home: 오늘 할 일 on top, order table, then this card folded in a collapsed section', pos('agentHome') > pos('tab-input') && pos('agentHome') < pos('homeOrderSection')
-    && pos('homeOrderSection') < pos('dockPanel-detail') && pos('dockPanel-detail') < pos('orderNeedCard') && /<div class="dock-panel" id="dockPanel-detail" hidden>/.test(home)
+    && pos('dockPanel-other') < pos('homeOrderSection') && pos('homeOrderSection') < pos('orderNeedCard') && /<div class="dock-panel" id="dockPanel-other" hidden>/.test(home)   // (Home Focus V0.1) 기타 정보 안
     && !home.includes('id="v3NotifContainer"') && !home.includes('id="suggestBar"'), ''); }
 
 console.log(`\nDB Write: 0 (no client, no network)`);
