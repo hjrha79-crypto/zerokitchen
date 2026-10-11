@@ -7704,7 +7704,8 @@ async function _purchaseResearchStart(requestId) {
     const code = r && r.code;
     showToast(code === 'RESEARCH_REQUESTED' || code === 'RESEARCH_IN_PROGRESS' ? '공급처 조사를 시작했어요 — 구매안이 준비되면 여기 표시됩니다'
       : code === 'RESEARCH_DONE' ? '구매안이 이미 준비돼 있어요' : code === 'STALE_REQUEST' ? '발주요청이 바뀌었어요 — 다시 확인해 주세요'
-      : code === 'NOT_READY_FOR_RESEARCH' ? '품목 확인이 먼저 필요해요' : `공급처 조사를 시작하지 못했어요 (${code || '응답 없음'})`, 3500);
+      : code === 'NOT_READY_FOR_RESEARCH' ? '품목 확인이 먼저 필요해요'
+      : code === 'ALREADY_PURCHASED' ? '이미 주문이 끝난 요청이에요 — 다시 조사하지 않습니다 (배송·입고를 확인해 주세요)' : `공급처 조사를 시작하지 못했어요 (${code || '응답 없음'})`, 3500);
     await _refreshPurchaseHome(_storeEpoch);
     return r;
   } finally { delete _prResearchBusy[requestId]; }
@@ -8091,6 +8092,11 @@ async function _purchaseSubmitReview() {
   _purchaseAttach(_purchaseResultButtons(r));
   await _refreshPurchaseHome(_storeEpoch);
 }
+// 서버의 현재 행동이 이 요청을 "주문 완료"로 보면 (수령 대기 / 모두 받음) 구매 단계는 끝났다
+function _prPurchaseDone(requestId) {
+  const a = typeof _pe === 'object' && _pe && _pe.current && _pe.current.action;
+  return !!a && (a.type === 'RECEIPT' || a.type === 'COMPLETED') && !!a.request_ref && a.request_ref.request_id === requestId;
+}
 // 홈 카드 (발주요청을 받는 매장에서만): 받은 요청과 다음 할 일 하나
 function _purchaseHomeHtml(store, requests) {
   if (!store) return '';
@@ -8098,9 +8104,11 @@ function _purchaseHomeHtml(store, requests) {
   const where = prof.status === 'ACTIVE' ? `배송지 확인됨 (v${prof.version})` : `배송지 ${_prEsc(prof.branch_location || '')} — 주소 확인 전`;
   const curReq = _prCurrentRequest(requests);   // 현재 발주요청 1건만 (다른·지난 요청은 채팅 기록에)
   const rows = (requests || []).filter(r => curReq && r.request_id === curReq.request_id).map(r => {
-    const act = r.status === 'MAPPING_REQUIRED' ? `<button class="v4-receive-btn" onclick="_purchaseOpenReview('${_prEsc(r.request_id)}')">품목 확인하기</button>`
+    // 실제 주문이 이 요청에 연결돼 구매가 끝났으면 (ZeroKitchen 결제든 대표 직접 주문이든): 다음은 배송·입고 — 조사·품목 확인 버튼 없음
+    const done = _prPurchaseDone(r.request_id);
+    const act = done ? '' : r.status === 'MAPPING_REQUIRED' ? `<button class="v4-receive-btn" onclick="_purchaseOpenReview('${_prEsc(r.request_id)}')">품목 확인하기</button>`
       : r.status === 'READY_FOR_RESEARCH' ? `<button class="v4-receive-btn" onclick="_purchaseResearchStart('${_prEsc(r.request_id)}')">공급처 조사 시작</button>` : '';
-    const label = r.status === 'MAPPING_REQUIRED' ? `품목 확인 필요 ${r.unresolved}개` : (_PR_STATUS_LABEL[r.status] || r.status);
+    const label = done ? '주문 완료 · 배송/입고 대기' : r.status === 'MAPPING_REQUIRED' ? `품목 확인 필요 ${r.unresolved}개` : (_PR_STATUS_LABEL[r.status] || r.status);
     return `<div data-pr-row style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:13px;padding:4px 0">
       <span>${_prEsc(_fmtKst(r.received_at) || '')} · ${Number(r.line_count)}개 · ${_prEsc(label)}${r.duplicate_of ? ' · 중복 접수' : ''}</span>${act}</div>`;
   }).join('');
@@ -8284,12 +8292,30 @@ function _peNeedText(x) {
   const memo = { QUOTE_UNREADABLE: '식봄 가격을 읽지 못함', COUPANG_PRODUCT_UNKNOWN: '쿠팡 상품번호가 없어 가격 확인 못 함', SIKBOM_PRODUCT_UNKNOWN: '식봄 상품번호가 없어 가격 확인 못 함', EXISTING_OPEN_ORDER: '이미 진행 중인 주문이 있음' }[x.reason];
   return { act: false, t: `${item} · ${memo || '조사 확인 필요'} (결정은 그대로)` };
 }
+// 구매가 끝난 요청의 요약 (ZeroKitchen 이 결제했든 대표가 직접 주문했든 같은 모양): "식봄 주문 1건 · 쿠팡 주문 2건 · 6개 품목 · 총 426,059원"
+const _PE_SUP_NAME = { SIKBOM: '식봄', COUPANG: '쿠팡', NAVER: '네이버' };
+function _pePurchaseSummary(p) {
+  if (!p || !Array.isArray(p.orders) || !p.orders.length) return '';
+  const by = {};
+  p.orders.forEach(o => { by[o.supplier] = (by[o.supplier] || 0) + 1; });
+  const parts = Object.keys(by).map(s => `${_PE_SUP_NAME[s] || s} 주문 ${by[s]}건`);
+  if (p.lines) parts.push(`${Number(p.lines)}개 품목`);
+  if (p.paid_total_krw != null) parts.push(`총 ${_peWon(p.paid_total_krw)}`);
+  return `<div data-pe-purchase-summary style="font-size:13px">${_prEsc(parts.join(' · '))}</div>`;
+}
+// 실제로 산 것 (받는 사람이 알아볼 단위): "휘핑크림 · 쿠팡 · 올덴버거 휘핑크림, 1L, 5개 · 5개" — [주문 내역 보기]를 눌렀을 때만
+function _peBoughtDetail(orders) {
+  const list = (orders || []).filter(o => o.purchased_qty != null && o.product_name);
+  if (!list.length) return '';
+  return `<details data-pe-bought style="font-size:12px;color:var(--muted)"><summary>주문 내역 보기</summary>${list.map(o =>
+    `<div data-pe-bought-line="${_prEsc(o.order_id)}">${_prEsc(o.name)} · ${_prEsc(_PE_SUP_NAME[o.supplier] || o.supplier || '')} · ${_prEsc(o.product_name)} · ${_peQty(o.purchased_qty)}${_prEsc(o.purchased_unit || '')}${o.match_kind === 'SUBSTITUTION_APPROVED' ? ' (대체 승인)' : ''}</div>`).join('')}</details>`;
+}
 function _peCurrentHtml(view, c) {
   const a = c.action, decide = !!a.decision_ref && view.approver;
   // 실제 수령 (Store-3): 배송 상태 ≠ 받음. 받은 수량만 기록하고, 모르는 재고는 모르는 채로 둔다 (받은 수량을 현재 재고로 표시하지 않음)
   if (a.type === 'RECEIPT') {
     const rows = (a.orders || []).map(o => `<div data-pe-rcv="${_prEsc(o.order_id)}" style="font-size:13px">${_prEsc(o.name)} ${_peQty(o.ordered_qty)}${_prEsc(o.unit)} 중 ${_peQty(o.received_qty)} 받음 · 남은 ${_peQty(o.remaining)}${_prEsc(o.unit)}</div>`).join('');
-    return `<div class="card" data-pe-current="receipt"><div style="font-weight:700" data-pe-head>${_prEsc(a.message)}</div>${rows}
+    return `<div class="card" data-pe-current="receipt"><div style="font-weight:700" data-pe-head>${_prEsc(a.message)}</div>${_pePurchaseSummary(c.purchase)}${rows}${_peBoughtDetail(a.orders)}
       ${a.stock_note ? `<div data-pe-stock-note style="font-size:12px;color:var(--muted)">${_prEsc(a.stock_note)}</div>` : ''}
       ${view.approver ? `<button class="oai-create" data-pe-btn="RCV_ALL" onclick="_peReceiveAll()">전부 받았어요</button><button class="oai-edit" data-pe-btn="RCV_PART" onclick="_peReceivePartial()">일부만 받았어요</button>` : ''}
       ${(view.attempts || []).map(_peAddressLine).join('')}</div>`;
@@ -8340,7 +8366,10 @@ async function _peReceivePartial() {
   if (!a || a.type !== 'RECEIPT' || _peBusy.RCV) return null;
   const list = [];
   for (const o of (a.orders || []).filter(x => Number(x.remaining) > 0)) {
-    const v = prompt(`${o.name} — 받은 수량 (남은 ${_peQty(o.remaining)}${o.unit}). 안 받았으면 비워 두세요.`);
+    // 산 단위도 함께 (예: 휘핑크림 남은 0.5박스 = 5개) — 기록은 주문 단위(o.unit)로
+    const eq = o.purchased_qty != null && Number(o.ordered_qty) > 0 && o.purchased_unit && o.purchased_unit !== o.unit
+      ? ` = ${_peQty(Number(o.purchased_qty) * Number(o.remaining) / Number(o.ordered_qty))}${o.purchased_unit}` : '';
+    const v = prompt(`${o.name} — 받은 수량 (남은 ${_peQty(o.remaining)}${o.unit}${eq}). 안 받았으면 비워 두세요.`);
     if (v == null || String(v).trim() === '') continue;
     const q = Number(String(v).trim());
     if (!(q > 0) || q > Number(o.remaining)) { showToast(`${o.name}: 0보다 크고 남은 수량 이하로 입력해 주세요`, 3000); continue; }
