@@ -131,8 +131,10 @@ const ofItem = (r, id) => [...r.primary, ...r.moreChecks, ...r.waiting].filter(a
     const items = Array.from({ length: 13 }, (_, k) => I(100 + k, `품목${String(k).padStart(2, '0')}`, k, 10));
     const e = makeEnv({ items }); const r = e.derive(); const html = e.render();
     const top = (html.split('<details')[0].match(/data-agent-type="CHECK_STOCK"/g) || []).length;
-    check('CASE-06 13 checks → primary 3, "재고 확인이 필요한 품목 10개 더 있음" folded, summary 오늘 할 일 3개', r.primary.length === 3 && r.moreChecks.length === 10 && top === 3
-      && html.includes('<details class="agent-more"><summary>재고 확인이 필요한 품목 10개 더 있음</summary>') && html.includes('오늘 할 일 3개'), `primary=${r.primary.length} more=${r.moreChecks.length} top=${top}`);
+    // (Chat Workspace Collapse V0.1) the 10 extra checks live in their own collapsed section #agentChecks ("재고 확인 필요 N개")
+    const checks = e.document.getElementById('agentChecks').innerHTML;
+    check('CASE-06 13 checks → primary 3, the other 10 in the 재고 확인 section, summary 오늘 할 일 3개', r.primary.length === 3 && r.moreChecks.length === 10 && top === 3
+      && checks.includes('data-agent-checks="10"') && (checks.match(/data-agent-type="CHECK_STOCK"/g) || []).length === 10 && !html.includes('agent-more') && html.includes('오늘 할 일 3개'), `primary=${r.primary.length} more=${r.moreChecks.length} top=${top}`);
     check('CASE-06b the 3 shown are the most urgent (empty first: 품목00 0개, 품목01 1개, 품목02 2개)', titles(r.primary).join('|') === '품목00 현재 수량을 확인하세요|품목01 현재 수량을 확인하세요|품목02 현재 수량을 확인하세요', titles(r.primary).join('|'));
   }
   // ── CASE-07 / CONTRA-04  Store1 → Store2: Store1 actions gone at once, only Store2 actions, late Store1 reminder ignored
@@ -301,7 +303,7 @@ const ofItem = (r, id) => [...r.primary, ...r.moreChecks, ...r.waiting].filter(a
     const home = HTML.slice(HTML.indexOf('<div id="tab-input"'), HTML.indexOf('<!-- 재고탭 -->'));
     const hdr = HTML.slice(HTML.indexOf('<div class="hdr">'), HTML.indexOf('<div class="api-key-popup"'));
     check('LAYOUT Home starts with 오늘 할 일; reminder & recommendation cards not on Home; need table folded', home.indexOf('id="agentHome"') < home.indexOf('id="homeOrderSection"')
-      && !home.includes('v3NotifContainer') && !home.includes('suggestBar') && /<details class="home-details" id="homeDetails">[\s\S]*id="orderNeedCard"/.test(home), '');
+      && !home.includes('v3NotifContainer') && !home.includes('suggestBar') && /<div class="dock-panel" id="dockPanel-detail" hidden>[\s\S]*id="orderNeedCard"/.test(home), '');
     check('LAYOUT header has no API-key control (moved to 설정)', !hdr.includes('apiKeyBtn') && !hdr.includes('apiKeyDot') && HTML.slice(HTML.indexOf('<div id="tab-settings"')).includes('id="apiKeyBtn"'), '');
   }
 

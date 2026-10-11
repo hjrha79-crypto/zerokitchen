@@ -647,7 +647,17 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 .v4-receive-btn:active{background:rgba(59,130,246,.2)}
 
 /* ── v4 채팅 영역 (카톡 스타일) ── */
-.v4-chat-area{display:flex;flex-direction:column;gap:8px;padding:10px 0;min-height:120px;flex:1;overflow-y:auto}
+.v4-chat-area{display:flex;flex-direction:column;gap:8px;padding:10px 0;min-height:45dvh;flex:1 1 0;overflow-y:auto}
+/* 상단 요약 줄 (접기/펼치기, 한 번에 하나) — 채팅이 화면의 주 공간 */
+.home-dock{display:flex;flex-direction:column;gap:6px;flex:0 0 auto}
+.dock-sec{background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.dock-hdr{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 14px;background:none;border:0;font:inherit;font-size:15px;font-weight:700;color:var(--text);cursor:pointer;text-align:left}
+.dock-hdr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.dock-sec.dock-action .dock-hdr{color:var(--accent)}
+.dock-chev{font-size:13px;color:var(--dim);flex:0 0 auto}
+.dock-panel{max-height:42dvh;overflow-y:auto;padding:0 10px 10px}
+.dock-panel .agent-home{box-shadow:none;margin-bottom:0;padding:4px 4px 0}
+.dock-panel .agent-sum{display:none}
 .v4-chat-row{display:flex;gap:8px;align-items:flex-start}
 .v4-chat-row.user{justify-content:flex-end}
 .v4-avatar{width:32px;height:32px;border-radius:10px;background:var(--suggest-bar);color:#fff;font-size:14px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0}
@@ -732,22 +742,40 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 
 <!-- 홈탭 (발주 체크리스트 + 입력) -->
 <div id="tab-input" class="tab active">
-  <!-- [최상단] 오늘 할 일 (Agent Home): 품목마다 결정 하나, 우선순위 순. 부족·주기 알림·추천·입고 대기를 여기서 하나로 말한다 -->
-  <!-- 매장 발주요청 (발주요청을 받는 매장에서만 보인다) -->
-  <div id="purchaseHome"></div>
-  <div id="agentHome"></div>
-
-  <!-- [중단] 오늘의 발주 표 카드 (발주표 = 담아 둔 주문 + 입고 대기 상세) -->
-  <div id="homeOrderSection">
-    <div id="writerPendingBar" style="display:none"></div>
-    <div id="orderList"><div class="no-item">로딩 중...</div></div>
+  <!-- [상단 요약 줄] 채팅이 주 작업 공간. 위 정보는 한 줄 요약으로 접어 두고 필요할 때만 펼친다 (한 번에 하나).
+       자동으로 펼쳐지는 것은 "지금 해야 할 발주 행동" 하나뿐. 안의 카드·버튼은 그대로 (표시 위치만 바뀜). -->
+  <div class="home-dock" id="homeDock">
+    <!-- 매장 발주요청 (발주요청을 받는 매장에서만 보인다) -->
+    <section class="dock-sec" data-dock="purchase" hidden>
+      <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-purchase" onclick="_dockToggle('purchase')"><span class="dock-title" data-dock-title>발주 진행</span><span class="dock-chev" aria-hidden="true">▸</span></button>
+      <div class="dock-panel" id="dockPanel-purchase" hidden><div id="purchaseHome"></div></div>
+    </section>
+    <!-- 오늘 할 일 (Agent Home): 품목마다 결정 하나, 우선순위 순 -->
+    <section class="dock-sec" data-dock="today" hidden>
+      <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-today" onclick="_dockToggle('today')"><span class="dock-title" data-dock-title>오늘 할 일</span><span class="dock-chev" aria-hidden="true">▸</span></button>
+      <div class="dock-panel" id="dockPanel-today" hidden><div id="agentHome"></div></div>
+    </section>
+    <!-- 재고 확인이 필요한 나머지 품목 (오늘 할 일에 들지 않은 것) -->
+    <section class="dock-sec" data-dock="checks" hidden>
+      <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-checks" onclick="_dockToggle('checks')"><span class="dock-title" data-dock-title>재고 확인 필요</span><span class="dock-chev" aria-hidden="true">▸</span></button>
+      <div class="dock-panel" id="dockPanel-checks" hidden><div id="agentChecks"></div></div>
+    </section>
+    <!-- 오늘의 발주 표 카드 (발주표 = 담아 둔 주문 + 입고 대기 상세) -->
+    <section class="dock-sec" data-dock="sheet" hidden>
+      <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-sheet" onclick="_dockToggle('sheet')"><span class="dock-title" data-dock-title>발주표</span><span class="dock-chev" aria-hidden="true">▸</span></button>
+      <div class="dock-panel" id="dockPanel-sheet" hidden>
+        <div id="homeOrderSection">
+          <div id="writerPendingBar" style="display:none"></div>
+          <div id="orderList"><div class="no-item">로딩 중...</div></div>
+        </div>
+      </div>
+    </section>
+    <!-- 재고·목표 상세 (현재 − 목표 계산표). 판단은 "오늘 할 일"이 한다 -->
+    <section class="dock-sec" data-dock="detail">
+      <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-detail" onclick="_dockToggle('detail')"><span class="dock-title" data-dock-title>재고·목표 자세히 보기</span><span class="dock-chev" aria-hidden="true">▸</span></button>
+      <div class="dock-panel" id="dockPanel-detail" hidden><div id="orderNeedCard"></div></div>
+    </section>
   </div>
-
-  <!-- [하단, 접힘] 재고·목표 상세 (현재 − 목표 계산표). 판단은 위 "오늘 할 일"이 한다 -->
-  <details class="home-details" id="homeDetails">
-    <summary>재고·목표 자세히 보기</summary>
-    <div id="orderNeedCard"></div>
-  </details>
 
   <!-- [채팅] 카톡 스타일 채팅 영역 -->
   <div class="v4-chat-area" id="chatArea">
@@ -1175,6 +1203,8 @@ function _clearStoreContext() {
   if (typeof _purchase === 'object' && _purchase) _purchase = { ..._purchase, requests: [], sid: null };
   set('purchaseHome', '');
   set('agentHome', '');
+  set('agentChecks', '');
+  if (typeof _dockReset === 'function') _dockReset();   // 새 매장: 요약 줄은 다시 기본(접힘) 상태
   set('orderNeedCard', '');
   set('suggestBar', '');
   set('resList', '');
@@ -2125,7 +2155,7 @@ async function handleNaturalInput() {
           btnRow.className = 'order-action-inline';
           btnRow.innerHTML = `
             <button class="oai-create" onclick="_createOrderFromSuggestion()">발주 생성</button>
-            <button class="oai-edit" onclick="switchTab('input', document.querySelectorAll('.nav')[0]); document.getElementById('homeOrderSection')?.scrollIntoView()">수정</button>
+            <button class="oai-edit" onclick="switchTab('input', document.querySelectorAll('.nav')[0]); _dockReveal(document.getElementById('homeOrderSection')); document.getElementById('homeOrderSection')?.scrollIntoView()">수정</button>
             <button class="oai-cancel" onclick="this.parentElement.remove()">취소</button>`;
           firstCard.appendChild(btnRow);
           // 발주 제안 데이터 임시 저장
@@ -4571,8 +4601,10 @@ function _agentCardHtml(a, compact) {
 function _renderAgentHome() {
   const el = document.getElementById('agentHome');
   if (!el) return;
-  if (!(_items || []).length && !(_orderRequests || []).length) { el.innerHTML = ''; return; }
+  const checksEl = document.getElementById('agentChecks');
+  if (!(_items || []).length && !(_orderRequests || []).length) { el.innerHTML = ''; if (checksEl) checksEl.innerHTML = ''; return; }
   const { primary, moreChecks, waiting, drafts } = deriveAgentActions(_agentContext());
+  if (el.dataset) el.dataset.today = String(primary.length);   // 상단 요약 줄 제목용 (표시만)
   let html = `<div class="agent-home">`;
   html += primary.length
     ? `<div class="agent-sum">오늘 할 일 ${primary.length}개</div>`
@@ -4581,9 +4613,9 @@ function _renderAgentHome() {
   const workerLine = typeof _asideEnabled !== 'undefined' && _asideEnabled ? _asideWorkerLine(_asideWorker) : '';
   if (workerLine) html += `<div class="agent-aside-worker${_asideWorker.display_status === 'OK' ? '' : ' warn'}" data-aside-worker="${_agentEsc(_asideWorker.display_status)}">${_agentEsc(workerLine)}</div>`;
   html += primary.map(a => _agentCardHtml(a, false)).join('');
-  if (moreChecks.length) {
-    html += `<details class="agent-more"><summary>재고 확인이 필요한 품목 ${moreChecks.length}개 더 있음</summary>${moreChecks.map(a => _agentCardHtml(a, true)).join('')}</details>`;
-  }
+  // 재고 확인이 필요한 나머지 품목: 자기 요약 줄("재고 확인 필요 N개")에 따로 보인다 (카드·버튼은 그대로)
+  if (checksEl) checksEl.innerHTML = moreChecks.length ? `<div class="agent-home" data-agent-checks="${moreChecks.length}">${moreChecks.map(a => _agentCardHtml(a, true)).join('')}</div>` : '';
+  else if (moreChecks.length) html += `<details class="agent-more"><summary>재고 확인이 필요한 품목 ${moreChecks.length}개 더 있음</summary>${moreChecks.map(a => _agentCardHtml(a, true)).join('')}</details>`;
   if (waiting.length) {
     html += `<div class="agent-sub-hdr">주문 · 입고 대기</div>${waiting.map(a => _agentCardHtml(a, true)).join('')}`;
   }
@@ -4601,6 +4633,70 @@ function _renderAgentHome() {
   html += `</div>`;
   el.innerHTML = html;
 }
+
+// ── 홈 상단 요약 줄 (표시 전용): 채팅이 주 작업 공간. 각 정보 블록은 한 줄 요약으로 접혀 있고, 한 번에 하나만 펼친다.
+//   자동으로 펼치는 것은 "지금 사람이 해야 할 발주 행동"(발주 블록 안의 버튼) 하나뿐 — 다른 줄은 사람이 열 때만.
+//   상태는 이 화면에서만 기억한다 (저장 없음; 새로고침·매장 변경 = 기본 접힘). 줄 제목은 이미 그려진 내용에서 센다.
+const _DOCK_KEYS = ['purchase', 'today', 'checks', 'sheet', 'detail'];
+let _dock = { open: null, userKey: null, autoKey: null, obs: null, queued: false };
+function _dockSec(k) { return document.querySelector(`#homeDock .dock-sec[data-dock="${k}"]`); }
+function _dockSet(k, on) {
+  const s = _dockSec(k); if (!s) return;
+  const hdr = s.querySelector('.dock-hdr'), panel = s.querySelector('.dock-panel'), chev = s.querySelector('.dock-chev');
+  hdr.setAttribute('aria-expanded', on ? 'true' : 'false'); panel.hidden = !on; if (chev) chev.textContent = on ? '▾' : '▸';
+}
+function _dockOpen(k) {   // 하나만 펼친다 (k = null → 모두 접기)
+  _DOCK_KEYS.forEach(x => _dockSet(x, x === k));
+  _dock.open = k;
+}
+function _dockToggle(k) {   // 사람이 누른 것: 이 화면에서는 그 선택을 따른다 (같은 발주 행동이면 다시 자동으로 펼치지 않음)
+  _dock.userKey = _dock.autoKey;
+  _dockOpen(_dock.open === k ? null : k);
+}
+function _dockReveal(el) {   // 다른 곳에서 블록 안의 항목으로 이동할 때: 그 줄을 펼친다
+  const s = el && el.closest && el.closest('#homeDock .dock-sec');
+  if (s && _dock.open !== s.dataset.dock) _dockOpen(s.dataset.dock);
+}
+function _dockReset() { _dock.open = null; _dock.userKey = null; _dock.autoKey = null; _dockOpen(null); }
+function _dockTitle(k, text, show, action) {
+  const s = _dockSec(k); if (!s) return;
+  s.hidden = !show; s.classList.toggle('dock-action', !!action);
+  const t = s.querySelector('[data-dock-title]'); if (t && t.textContent !== text) t.textContent = text;
+  if (!show && _dock.open === k) _dockOpen(null);
+}
+function _dockRefresh() {
+  _dock.queued = false;
+  const ph = document.getElementById('purchaseHome'), ah = document.getElementById('agentHome'), ck = document.getElementById('agentChecks');
+  const ol = document.getElementById('orderList');
+  // 발주 진행: 요청 줄 수 + 지금 해야 할 행동(버튼)이 있는가
+  const rows = ph ? ph.querySelectorAll('[data-pr-row]').length : 0;
+  const acts = ph ? [...ph.querySelectorAll('button')].filter(b => !b.disabled && !b.closest('[data-pr-pending]')) : [];
+  const head = ph && ph.querySelector('[data-pe-head]');
+  const store = (ph && ph.querySelector('[data-pr-home] div') || {}).textContent || '';
+  const pTitle = head ? head.textContent.trim() : rows ? `${store.replace(/\s*발주요청$/, '') || '발주'} 발주 진행 ${rows}건` : '발주요청';
+  _dockTitle('purchase', acts.length ? `${pTitle} · 확인할 일 있음` : pTitle, !!(ph && ph.innerHTML.trim()), acts.length > 0);
+  // 오늘 할 일 / 재고 확인 필요
+  const today = ah && ah.innerHTML.trim() ? Number(ah.dataset.today || 0) : null;
+  _dockTitle('today', today ? `오늘 할 일 ${today}개` : '오늘은 바로 처리할 일이 없습니다', today !== null, false);
+  const checks = ck ? ck.querySelectorAll('.agent-card').length : 0;
+  _dockTitle('checks', `재고 확인 필요 ${checks}개`, checks > 0, false);
+  // 발주표: 비어 있으면 줄을 숨긴다 (빈 안내 문구만 있는 경우)
+  const sheetEmpty = !ol || !ol.innerHTML.trim() || (!ol.querySelector('table, .v4-receive-item, [data-oid], tr') && !!ol.querySelector('.v4-empty-hint, .no-item'));
+  const sheetRows = ol ? ol.querySelectorAll('#otBody tr[data-iid], .v4-receive-item').length : 0;
+  _dockTitle('sheet', sheetRows ? `발주표 ${sheetRows}건` : '발주표', !sheetEmpty, false);
+  // ONE CURRENT ACTION: 발주 블록에 사람 행동이 있을 때만, 그 줄 하나를 자동으로 펼친다 (사람이 이미 접은 같은 행동이면 그대로 둔다)
+  const autoKey = acts.length ? 'purchase:' + acts.map(b => b.textContent.trim()).join('|') : null;
+  _dock.autoKey = autoKey;
+  if (autoKey && _dock.userKey !== autoKey && _dock.open !== 'purchase') _dockOpen('purchase');
+}
+function _dockQueue() { if (_dock.queued) return; _dock.queued = true; Promise.resolve().then(_dockRefresh); }
+function _dockInit() {
+  if (_dock.obs || !document.getElementById('homeDock') || typeof MutationObserver === 'undefined') { _dockRefresh(); return; }
+  _dock.obs = new MutationObserver(_dockQueue);
+  ['purchaseHome', 'agentHome', 'agentChecks', 'orderList'].forEach(id => { const n = document.getElementById(id); if (n) _dock.obs.observe(n, { childList: true, subtree: true, characterData: true }); });
+  _dockRefresh();
+}
+if (typeof document !== 'undefined') { if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', _dockInit); else _dockInit(); }
 
 // 주기 알림 후보를 "오늘 할 일"의 참고 신호로만 읽는다 (읽기 전용, 현재 매장 기준, 늦은 응답은 버림).
 async function _loadAgentCycle() {
@@ -4782,6 +4878,7 @@ function _agentGoLogin() {
 
 function _agentFocus(el) {
   if (!el) return;
+  if (typeof _dockReveal === 'function') _dockReveal(el);   // 접힌 요약 줄 안에 있으면 그 줄을 먼저 펼친다
   el.scrollIntoView?.({ behavior: 'smooth', block: 'center' });
   el.classList?.add('agent-focus');
   setTimeout(() => el.classList?.remove('agent-focus'), 2500);
@@ -7365,7 +7462,7 @@ function _purchaseHomeHtml(store, requests) {
     const act = r.status === 'MAPPING_REQUIRED' ? `<button class="v4-receive-btn" onclick="_purchaseOpenReview('${_prEsc(r.request_id)}')">품목 확인하기</button>`
       : r.status === 'READY_FOR_RESEARCH' ? `<button class="v4-receive-btn" onclick="_purchaseResearchStart('${_prEsc(r.request_id)}')">공급처 조사 시작</button>` : '';
     const label = r.status === 'MAPPING_REQUIRED' ? `품목 확인 필요 ${r.unresolved}개` : (_PR_STATUS_LABEL[r.status] || r.status);
-    return `<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:13px;padding:4px 0">
+    return `<div data-pr-row style="display:flex;justify-content:space-between;align-items:center;gap:6px;font-size:13px;padding:4px 0">
       <span>${_prEsc(_fmtKst(r.received_at) || '')} · ${Number(r.line_count)}개 · ${_prEsc(label)}${r.duplicate_of ? ' · 중복 접수' : ''}</span>${act}</div>`;
   }).join('');
   return `<div class="card" data-pr-home><div style="font-weight:700">${_prEsc(store.display_name)} 발주요청</div>
