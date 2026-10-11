@@ -25,6 +25,7 @@ const DECISION = { type: 'PAYMENT_EXCEPTION_DECISION', title: '결제를 완료�
     { option_id: 'opt_bbbbbbbbbbbbbbbb', label: '무통장입금', enabled: false, info: '현재 자동 진행 정책에서는 사용할 수 없습니다.' },
     { option_id: 'opt_cccccccccccccccc', label: '주문 중단', enabled: true, info: null }] };
 
+const CUR_REQ = { request_id: '99999999-9999-4999-8999-999999999999', status: 'MAPPED', unresolved: 0, line_count: 3, received_at: '2026-10-08T01:00:00Z', request_version: 1 };   // 현재 발주요청 (카드가 묶인 요청)
 function makeEnv(html, current, o = {}) {
   const S = { posts: [], toasts: [], current, gets: 0, decide: o.decide || 'DECISION_RECORDED', confirm: o.confirm ?? true };
   const els = {};
@@ -32,9 +33,10 @@ function makeEnv(html, current, o = {}) {
   const document = { getElementById: id => (els[id] = els[id] || mkEl(id)), createElement: () => mkEl('_'), querySelectorAll: () => [], querySelector: () => null };
   const fetch = async (url, init = {}) => {
     const method = init.method || 'GET';
-    if (url.includes('/purchase-request/')) return { ok: true, status: 200, json: async () => ({ api_version: 'pr-v1', ready: true, stores: [DAEJEON], requests: [] }) };
+    if (url.includes('/rest/v1/rpc/zk_pe_scope_refs')) { const v = S.view || (typeof VIEW !== 'undefined' ? VIEW : {}); return { ok: true, status: 200, json: async () => ({ code: 'OK', store_id: 3, action_request_id: CUR_REQ.request_id, baskets: Object.fromEntries((v.baskets || []).map(b => [b.basket_id, CUR_REQ.request_id])), attempts: Object.fromEntries((v.attempts || []).map(a => [a.attempt_id, CUR_REQ.request_id])) }) }; }   // scope binding: 이 fixture 의 카드는 모두 현재 요청 것
+    if (url.includes('/purchase-request/')) return { ok: true, status: 200, json: async () => ({ api_version: 'pr-v1', ready: true, stores: [DAEJEON], requests: [CUR_REQ] }) };
     if (url.includes('/purchase-execution/readiness')) return { ok: true, status: 200, json: async () => READY };
-    if (method === 'GET') { S.gets++; return { ok: true, status: 200, json: async () => S.view || VIEW }; }
+    if (method === 'GET') { S.gets++; return { ok: true, status: 200, json: async () => { const w = S.view || VIEW; return w && { ...w, baskets: (w.baskets || []).map(b => ({ request_id: CUR_REQ.request_id, ...b })) }; } }; }
     const env = JSON.parse(init.body);
     S.posts.push(env);
     await new Promise(r => setTimeout(r, 5));

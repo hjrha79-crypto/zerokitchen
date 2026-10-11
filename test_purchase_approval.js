@@ -33,6 +33,7 @@ const ORIG = { label: '경기광주점', address_text: '경기 광주시 …', r
 const att = (o) => ({ attempt_id: '11111111-1111-4111-8111-111111111111', state: 'EXECUTING', supplier: 'SIKBOM', supplier_label: '식봄', submitted: false, address_switched: true, original_address: ORIG,
   address: { state: 'PRE_SUBMIT_READY' }, snapshot: SNAP, payment_approval: null, payment_allowed: true, payment_block: null, ...o });
 
+const CUR_REQ = { request_id: '99999999-9999-4999-8999-999999999999', status: 'MAPPED', unresolved: 0, line_count: 3, received_at: '2026-10-08T01:00:00Z', request_version: 1 };   // 현재 발주요청 (카드가 묶인 요청)
 function makeEnv(html, view, ready = READY) {
   const S = { posts: [], toasts: [], view, gets: [], ready };
   const els = {};
@@ -40,9 +41,10 @@ function makeEnv(html, view, ready = READY) {
   const document = { getElementById: id => (els[id] = els[id] || mkEl(id)), createElement: () => mkEl('_'), querySelectorAll: () => [], querySelector: () => null };
   const fetch = async (url, init = {}) => {
     const method = init.method || 'GET';
-    if (url.includes('/purchase-request/')) return { ok: true, status: 200, json: async () => ({ api_version: 'pr-v1', ready: true, stores: [DAEJEON], requests: [] }) };
+    if (url.includes('/rest/v1/rpc/zk_pe_scope_refs')) { const v = S.view || (typeof VIEW !== 'undefined' ? VIEW : {}); return { ok: true, status: 200, json: async () => ({ code: 'OK', store_id: 3, action_request_id: CUR_REQ.request_id, baskets: Object.fromEntries((v.baskets || []).map(b => [b.basket_id, CUR_REQ.request_id])), attempts: Object.fromEntries((v.attempts || []).map(a => [a.attempt_id, CUR_REQ.request_id])) }) }; }   // scope binding: 이 fixture 의 카드는 모두 현재 요청 것
+    if (url.includes('/purchase-request/')) return { ok: true, status: 200, json: async () => ({ api_version: 'pr-v1', ready: true, stores: [DAEJEON], requests: [CUR_REQ] }) };
     if (url.includes('/purchase-execution/readiness')) { S.gets.push('readiness'); return S.ready ? { ok: true, status: 200, json: async () => S.ready } : { ok: false, status: 404, json: async () => ({ code: 'UNKNOWN_ROUTE' }) }; }
-    if (method === 'GET') { S.gets.push('view'); return { ok: true, status: 200, json: async () => S.view }; }
+    if (method === 'GET') { S.gets.push('view'); return { ok: true, status: 200, json: async () => { const w = S.view; return w && { ...w, baskets: (w.baskets || []).map(b => ({ request_id: CUR_REQ.request_id, ...b })) }; } }; }
     const env = JSON.parse(init.body);
     if (env.action === 'GET_CURRENT_PURCHASE_ACTION') return { ok: true, status: 200, json: async () => ({ code: 'CURRENT_ACTION', action: null, api_version: 'pe-v2' }) };   // exception loop: no current action here
     S.posts.push(env);

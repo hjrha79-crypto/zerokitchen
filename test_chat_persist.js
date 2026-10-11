@@ -77,7 +77,7 @@ const store3 = () => mock.msgs.filter(m => m.store_id === 3);
     await b.ev(`_storeEpoch++; SID = 1; _clearStoreContext(); return 1`);
     await b.ev(SETUP({ sid: 1, requests: [] }));
     sc = await b.ev(SCREEN);
-    const threadCall = mock.calls.filter(c => c.fn === 'zk_chat_thread').pop();
+    const threadCall = mock.calls.filter(c => c.fn === 'zk_chat_thread_page').pop();
     await b.ev(SAY('배송 늦는 거 있어?')); await sleep(1900);
     const s1 = mock.msgs.filter(m => m.store_id === 1);
     check('P5 store switch → Store1 thread asked for Store1; no Daejeon messages on screen; Store1 input saved to its own thread', threadCall.args.p_store_id === 1 && !sc.text.includes('치즈 3박스')
@@ -104,7 +104,7 @@ const store3 = () => mock.msgs.filter(m => m.store_id === 3);
       fail.fail && failText.startsWith('대화를 저장하지 못했습니다. 다시 시도해주세요.') && !healed.fail && after.length === 2 && after[0].role === 'HUMAN' && after[1].role === 'AGENT'
       && !mock.msgs.some(m => m.body.includes('저장하지 못했습니다')), JSON.stringify({ fail: fail.fail, failText, healed: healed.fail, after }));
     // 서버 함수만 부른다 (테이블 직접 접근 없음)
-    check('SEC the page only calls zk_chat_append / zk_chat_thread (no direct table access), always with the signed-in token', mock.calls.every(c => /^zk_chat_(append|thread)$/.test(c.fn)), [...new Set(mock.calls.map(c => c.fn))].join());
+    check('SEC the page only calls zk_chat_append / zk_chat_thread_page (no direct table access), always with the signed-in token', mock.calls.every(c => /^zk_chat_(append|thread_page)$/.test(c.fn)), [...new Set(mock.calls.map(c => c.fn))].join());
   } catch (e) { check('harness', false, e && e.stack || e); }
   finally { b.close(); }
   done(b.blocked);

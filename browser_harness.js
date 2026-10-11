@@ -1,5 +1,5 @@
 // browser_harness.js — headless Edge/Chrome (CDP) 로 index.html 을 여는 테스트 도구 (test_chat_dock.js / test_chat_persist.js 공용)
-// 네트워크: supabase-js CDN 만 허용. 채팅 RPC(zk_chat_append / zk_chat_thread)는 메모리 mock 이 답한다. 나머지(Supabase 등)는 전부 차단 → DB Write 0.
+// 네트워크: supabase-js CDN 만 허용. 채팅 RPC(zk_chat_append / zk_chat_thread_page / zk_chat_thread)와 zk_pe_scope_refs 는 메모리 mock 이 답한다. 나머지(Supabase 등)는 전부 차단 → DB Write 0.
 const fs = require('fs'), os = require('os'), path = require('path');
 const { spawn, execFileSync } = require('child_process');
 
@@ -22,7 +22,7 @@ function chatMock() {
   const m = { msgs: [], calls: [], fail: false, seq: 0 };
   m.handle = (fn, a) => {
     m.calls.push({ fn, args: a });
-    if (m.fail) return [503, { message: 'unavailable' }];
+    if (m.fail || (m.failFn && m.failFn.includes(fn))) return [503, { message: 'unavailable' }];
     if (fn === 'zk_chat_append') {
       const o = m.msgs.find(x => x.message_id === a.p_message_id);
       if (o) return [200, { code: o.body === a.p_body && o.thread_id === a.p_thread_id ? 'DUPLICATE' : 'CONFLICT' }];
@@ -31,6 +31,22 @@ function chatMock() {
       m.msgs.push(row);
       return [200, { code: 'APPENDED', seq: row.seq }];
     }
+    if (fn === 'zk_chat_thread_page') {   // 서버와 같은 규칙: 커서(seq) 이전의 최근 p_turns 턴 (턴 경계 = HUMAN), 최대 40건, has_more
+      const mine = m.msgs.filter(x => x.store_id === a.p_store_id);
+      let thread = a.p_thread_id || null;
+      if (!thread) { const hit = a.p_purchase_request_id ? mine.filter(x => x.purchase_request_id === a.p_purchase_request_id).pop() : mine[mine.length - 1]; thread = hit ? hit.thread_id : null; }
+      if (!thread) return [200, { code: 'OK', thread_id: null, messages: [], has_more: false, cursor: null, request_has_messages: false }];
+      const before = a.p_before_seq == null ? Infinity : a.p_before_seq, turns = Math.min(Math.max(a.p_turns || 2, 1), 10);
+      const th = mine.filter(x => x.thread_id === thread && x.seq < before);
+      const humans = th.filter(x => x.role === 'HUMAN').map(x => x.seq).reverse();
+      const from = humans.length >= turns ? humans[turns - 1] : 0;
+      const page = th.filter(x => x.seq >= from).slice(-40);
+      const cursor = page.length ? page[0].seq : null;
+      const msgs = page.map(({ seq, message_id, role, body, purchase_request_id, ref, created_at }) => ({ seq, message_id, role, body, purchase_request_id, ref, created_at }));
+      return [200, { code: 'OK', thread_id: thread, messages: msgs, cursor, has_more: cursor != null && mine.some(x => x.thread_id === thread && x.seq < cursor),
+        request_has_messages: !!a.p_purchase_request_id && mine.some(x => x.thread_id === thread && x.purchase_request_id === a.p_purchase_request_id) }];
+    }
+    if (fn === 'zk_pe_scope_refs') return m.refs ? [200, m.refs] : [404, { message: 'unknown' }];
     if (fn === 'zk_chat_thread') {
       const mine = m.msgs.filter(x => x.store_id === a.p_store_id);
       const hit = a.p_purchase_request_id ? mine.filter(x => x.purchase_request_id === a.p_purchase_request_id).pop() : mine[mine.length - 1];
@@ -59,12 +75,12 @@ async function launch({ newHtml, old, mock } = {}) {
   handlers.push(m => {
     if (m.method !== 'Fetch.requestPaused') return;
     const u = m.params.request.url, rid = m.params.requestId;
-    const rpc = u.match(/\/rest\/v1\/rpc\/(zk_chat_[a-z_]+)/);
+    const rpc = u.match(/\/rest\/v1\/rpc\/(zk_(?:chat|pe)_[a-z_]+)/);
     if (u.startsWith('http://zk.test/')) {
       const body = (u.includes('/old') ? old : newHtml).toString('base64');
       send('Fetch.fulfillRequest', { requestId: rid, responseCode: 200, responseHeaders: [{ name: 'content-type', value: 'text/html; charset=utf-8' }], body }).catch(() => {});
     } else if (/^https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2/.test(u)) send('Fetch.continueRequest', { requestId: rid }).catch(() => {});
-    else if (rpc && mock && m.params.request.method === 'POST') { const [st, b] = mock.handle(rpc[1], JSON.parse(m.params.request.postData || '{}')); json(rid, st, b); }
+    else if (rpc && mock && m.params.request.method === 'POST') { const [st, b] = mock.handle(rpc[1], JSON.parse(m.params.request.postData || '{}')); const d = mock.delay && mock.delay[rpc[1]]; d ? setTimeout(() => json(rid, st, b), d) : json(rid, st, b); }
     else if (rpc && mock) send('Fetch.fulfillRequest', { requestId: rid, responseCode: 204, responseHeaders: [{ name: 'access-control-allow-origin', value: '*' }, { name: 'access-control-allow-headers', value: '*' }, { name: 'access-control-allow-methods', value: 'POST' }] }).catch(() => {});
     else { blocked.add(new URL(u).host); send('Fetch.failRequest', { requestId: rid, errorReason: 'BlockedByClient' }).catch(() => {}); }
   });
