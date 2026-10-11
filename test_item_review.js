@@ -118,7 +118,7 @@ const NET = `return window.__net.concat(window.__posts.map(p => ['POST', p.actio
     check('R10 [구매처 직접 선택] → only now: 식봄 / 쿠팡 / 네이버 / 전체 찾아보기', z.buttons.join('|') === '예전에 산 제품 찾기 추천|구매처 직접 선택|식봄|쿠팡|네이버|전체 찾아보기', z.buttons.join('|'));
     await b.ev(CLICK('[data-pr-line="5"] [data-pr-src="NAVER"]'));
     s2 = await b.ev(SCREEN); z = s2.needs.find(x => x.n === 5);
-    check('R12 네이버 → "네이버에서 새 상품 찾기는 아직 직접 확인이 필요합니다." + next human step; no automation', z.note.startsWith('네이버에서 새 상품 찾기는 아직 직접 확인이 필요합니다.') && /상품은 직접 확인해서 정합니다/.test(z.note), z.note);
+    check('R12 네이버 → "구매처 ✓ 네이버 / 상품 · 아직 확인 필요" + "네이버에서 새 상품 찾기는 아직 직접 확인이 필요합니다."; no automation', z.note.startsWith('네이버에서 새 상품 찾기는 아직 직접 확인이 필요합니다.') && z.text.startsWith('구매처 ✓ 네이버 / 상품 · 아직 확인 필요'), z.text);
     check('R14 제로콜라 pack unknown → the pack question appears only after the source is chosen', s2.packInputs.includes('pr-conv-5') && s2.ctaDisabled, JSON.stringify(s2.packInputs));
     await b.ev(CLICK('[data-pr-line="5"] [data-pr-src="COUPANG"]'));
     z = (await b.ev(SCREEN)).needs.find(x => x.n === 5);
@@ -127,17 +127,17 @@ const NET = `return window.__net.concat(window.__posts.map(p => ['POST', p.actio
     check('R11/R12/R16 0 network calls, 0 server actions from opening / choosing / searching buttons (no research, no mapping write, no request change)', net0.length === 0, JSON.stringify(net0));
     await b.ev(`const s = document.querySelector('#purchaseReview select[name="pr-conv-5"]'); s.value = 'SAME_UNIT'; s.dispatchEvent(new Event('change')); return 1`);
     s2 = await b.ev(SCREEN); z = s2.needs.find(x => x.n === 5);
-    check('R15 all decided → "확인할 것 · 0개", CTA enabled; 제로콜라 folds "쿠팡에서 직접 확인 · 새 상품 (상품은 직접 확인)"', s2.secs[1] === '확인할 것 · 0개' && !s2.ctaDisabled && z.folded
-      && z.summary === '쿠팡에서 직접 확인 · 새 상품 (상품은 직접 확인)' && !/품목 확인 완료/.test(s2.text), JSON.stringify({ secs: s2.secs, z }));
+    check('R15 all decided → CTA enabled; "확인할 것 · 1개" = only 제로콜라 (where to look decided: 쿠팡, product still unknown — stays visible, not folded)', s2.secs[1] === '확인할 것 · 1개' && !s2.ctaDisabled && !z.folded
+      && z.text.startsWith('구매처 ✓ 쿠팡 / 상품 · 아직 확인 필요') &&!/품목 확인 완료/.test(s2.text), JSON.stringify({ secs: s2.secs, z }));
     await b.ev(CLICK('[data-pr-submit]')); await b.ev(`await new Promise(r => setTimeout(r, 200)); return 1`);
     const posts = await b.ev(`return window.__posts`);
     const want = [{ line_no: 1, choice: 'KEEP' }, { line_no: 2, choice: 'KEEP' }, { line_no: 3, choice: 'ROUTE', mapping_id: 5 }, { line_no: 4, choice: 'KEEP' },
-      { line_no: 5, choice: 'NEW_PRODUCT', conversion: 'SAME_UNIT' }, { line_no: 6, choice: 'KEEP' }];
-    check('R7/R8 one CONFIRM_MAPPINGS: 휘핑크림 = ROUTE mapping 5 (request-scoped — no CANDIDATE / NEW_PRODUCT revision of the 휘핑크림 mapping), 치즈 = KEEP (no mapping write), 제로콜라 = NEW_PRODUCT; the source is not sent',
-      posts.length === 1 && posts[0].action === 'CONFIRM_MAPPINGS' && JSON.stringify(posts[0].lines) === JSON.stringify(want) && !JSON.stringify(posts[0]).includes('COUPANG'), JSON.stringify(posts));
+      { line_no: 5, choice: 'NEW_PRODUCT', sourcing_scope: 'COUPANG', conversion: 'SAME_UNIT' }, { line_no: 6, choice: 'KEEP' }];
+    check('R7/R8 one CONFIRM_MAPPINGS: 휘핑크림 = ROUTE mapping 5 (request-scoped — no CANDIDATE / NEW_PRODUCT revision of the 휘핑크림 mapping), 치즈 = KEEP (no mapping write), 제로콜라 = NEW_PRODUCT + sourcing_scope 쿠팡 (request-scoped where to look)',
+      posts.length === 1 && posts[0].action === 'CONFIRM_MAPPINGS' && JSON.stringify(posts[0].lines) === JSON.stringify(want), JSON.stringify(posts));
     const msg = await b.ev(`const rows = [...document.querySelectorAll('#resList .v4-bubble.system')]; return rows.length ? rows[rows.length - 1].textContent : ''`);
     check('the conversation says what was chosen, honestly: 휘핑크림 쿠팡 · 이번 발주만 (기본 구매 경로는 그대로) + 제로콜라 쿠팡 직접 확인', msg.includes('휘핑크림 1박스: 쿠팡 · 올덴버거 휘핑크림 (5개입 × 2 통상 구매) · 1박스 = 10개 · 이번 발주만 (기본 구매 경로는 그대로)')
-      && msg.includes('제로콜라 2박스: 쿠팡 — 쿠팡에서 새 상품 찾기는 아직 직접 확인이 필요합니다.'), msg.slice(0, 400));
+      && msg.includes('제로콜라 2박스: 쿠팡에서 찾기로 했습니다. 정확한 상품은 직접 확인이 필요합니다.'), msg.slice(0, 400));
     check('MOBILE 390px: no horizontal scroll; the review modal scrolls', !sc.hscroll && !s2.hscroll && await b.ev(`const el = document.getElementById('purchaseReview'); return !el || getComputedStyle(el).overflowY === 'auto' || el.style.display === 'none'`), '');
     // ── 규칙 확인: 치즈 기록에 구매처가 있으면 자동 확인 한 줄 / 휘핑크림 경로가 하나뿐이면 경로 카드 없음
     const full = JSON.parse(JSON.stringify(FIX));
