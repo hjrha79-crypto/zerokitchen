@@ -706,6 +706,10 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 .chat-history-top:empty{display:none}
 .chat-restored-sep{align-self:center;font-size:11px;color:var(--dim);padding:2px 10px;margin:2px 0 6px;border-radius:10px;background:rgba(255,255,255,.55)}
 .chat-save-fail{align-self:center;font-size:12px;color:var(--red);background:#fff;border:1px solid var(--red);border-radius:10px;padding:6px 10px;display:flex;gap:8px;align-items:center}
+/* 영역별 불러오기 상태 (전체 화면을 막지 않는 한 줄) */
+.home-load,.chat-load{font-size:12px;color:var(--dim);padding:4px 10px;display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap}
+.home-load[hidden],.chat-load[hidden]{display:none}
+.home-load[data-state="failed"],.chat-load[data-state="failed"]{color:var(--red)}
 .v4-bubble.restored{white-space:pre-line}
 .v4-chat-row{display:flex;gap:8px;align-items:flex-start}
 .v4-chat-row.user{justify-content:flex-end}
@@ -766,7 +770,7 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 
 <div class="hdr">
   <span class="logo" id="logoBtn" style="cursor:pointer">ZeroKitchen</span>
-  <div class="store-tabs" id="storeTabs"><span class="store-nm" id="storeNm">로딩 중...</span></div>
+  <div class="store-tabs" id="storeTabs"><span class="store-nm" id="storeNm">매장 불러오는 중...</span></div>
   <div class="navs">
     <span class="home-clock" id="homeClock"></span>
     <button class="nav active" onclick="switchTab('input',this)">홈</button>
@@ -794,6 +798,8 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
   <!-- [상단 요약 줄] 채팅이 주 작업 공간. 위 정보는 한 줄 요약으로 접어 두고 필요할 때만 펼친다 (한 번에 하나).
        자동으로 펼쳐지는 것은 "지금 해야 할 발주 행동" 하나뿐. 안의 카드·버튼은 그대로 (표시 위치만 바뀜). -->
   <div class="home-dock" id="homeDock">
+    <!-- 현재 할 일 확인 중 / 확인하지 못함 + [다시 시도] (이 줄만 — 채팅·입력은 그대로 쓸 수 있다) -->
+    <div class="home-load" id="homeLoad" hidden></div>
     <!-- 홈 상단 = 현재 action 한 줄 (+ 기타 정보 한 줄). 진행 중인 발주가 있으면 그 발주가 첫 줄 -->
     <section class="dock-sec" data-dock="purchase" hidden>
       <button type="button" class="dock-hdr" aria-expanded="false" aria-controls="dockPanel-purchase" onclick="_dockToggle('purchase')"><span class="dock-title" data-dock-title>발주</span><span class="dock-chev" aria-hidden="true">▸</span></button>
@@ -815,7 +821,7 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
         <div class="dock-sub" data-dock-sub="sheet" hidden>발주표</div>
         <div id="homeOrderSection">
           <div id="writerPendingBar" style="display:none"></div>
-          <div id="orderList"><div class="no-item">로딩 중...</div></div>
+          <div id="orderList"><div class="no-item">불러오는 중...</div></div>
         </div>
         <div class="dock-sub" data-dock-sub="detail" hidden>재고·목표</div>
         <div id="orderNeedCard"></div>
@@ -825,6 +831,7 @@ tr.v4-ordered td.v4-name{text-decoration:line-through;color:var(--dim)}
 
   <!-- [채팅] 카톡 스타일 채팅 영역 -->
   <div class="v4-chat-area" id="chatArea">
+    <div class="chat-load" id="chatLoad" hidden></div>
     <div id="resList"></div>
   </div>
 
@@ -1054,7 +1061,15 @@ const SUPABASE_KEY='sb_publishable_bkRZfA2drD_M6dMQjRiriQ_EP3lCqO8';
 <script>
 'use strict';
 const { createClient } = supabase;
-const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+// 읽기(GET·HEAD, 읽기 전용 RPC)에만 응답 시간 상한 (_fetchT, 아래 구매 블록). 쓰기는 그대로 보낸다.
+function _dbFetch(url, opts = {}) {
+  const m = String((opts && opts.method) || 'GET').toUpperCase();
+  const read = m === 'GET' || m === 'HEAD' || (m === 'POST' && /\/rest\/v1\/rpc\/(get_[a-z_]+|zk_chat_thread_page|zk_chat_thread|zk_pe_scope_refs)(\?|$)/.test(String(url)));
+  if (!read) return fetch(url, opts);
+  // supabase-js 는 실패한 GET 을 최대 3번 다시 보낸다(AbortError 는 제외) — 시간 초과를 AbortError 로 넘겨 상한이 4배로 늘지 않게 한다
+  return _fetchT(url, opts, _zkTimeoutMs('secondary')).catch(e => { if (e && e.zkTimeout) e.name = 'AbortError'; throw e; });
+}
+const db = createClient(SUPABASE_URL, SUPABASE_KEY, { global: { fetch: _dbFetch } });
 
 /* ════════════════════════════════════════════════════════
    전역 상태
@@ -1170,47 +1185,97 @@ let _storeAliases = [];  // 매장별 alias 캐시
 /* ════════════════════════════════════════════════════════
    초기화
 ════════════════════════════════════════════════════════ */
+// 홈 불러오기 (home-performance-resilience-001): 화면 골격·입력창은 DB 를 기다리지 않는다.
+//   매장 → (동시에) PRIMARY 현재 할 일 + 최근 대화 / SECONDARY 품목·발주표·기타 정보. 영역마다 따로 실패하고 따로 [다시 시도].
+//   예전: 매장 → 품목 → 발주 → 별칭 → 발주표 → … → 현재 할 일 순서로 한 줄로 기다렸다 (측정 ≈ 11초, 첫 요청이 멈추면 전체가 멈춤).
+let _initSeq = 0;
 async function init() {
+  const seq = ++_initSeq;
+  _renderStoresState('loading');
+  let stores;
   try {
-    const { data: stores } = await db.from('stores').select('*').order('store_name');
-    _stores = stores || [];
-    if (!_stores.length) {
-      showToast('매장 정보가 없습니다');
-      return;
-    }
-    // localStorage에서 마지막 선택 매장 복원
-    const savedSid = parseInt(localStorage.getItem('zk_store_id'));
-    const savedStore = savedSid && _stores.find(s => s.store_id === savedSid);
-    SID = savedStore ? savedStore.store_id : _stores[0].store_id;
-
-    _renderStoreTabs();
-    await refreshItems();
-    // pending/ordered 품목 ID 초기 로드 (중복 발주 방지)
-    const { data: _initOrders } = await db.from('order_requests')
-      .select('item_id').eq('store_id', SID).in('status', ['pending', 'ordered']);
-    _orderedItemIds = new Set((_initOrders || []).map(r => r.item_id));
-    // store_aliases 로드
-    const { data: aliases } = await db.from('store_aliases').select('*').eq('store_id', SID);
-    _storeAliases = aliases || [];
-    _lastRawInput = localStorage.getItem('zk_last_input_' + SID) || '';
-    _updateLastInputChip();
-    // hash 기반 탭 복원
-    const hashTab = _hashTabMap[(location.hash || '').replace('#','')];
+    const { data, error } = await _withTimeout(db.from('stores').select('*').order('store_name'), _zkTimeoutMs());
+    if (error) throw error;
+    stores = data || [];
+  } catch (e) {
+    if (seq !== _initSeq) return;   // 그 사이 [다시 시도]로 새로 시작했다
+    _renderStoresState('failed', _zkIsTimeout(e) || /abort|timeout/i.test(String(e && e.message)) ? 'TIMEOUT' : 'NETWORK');
+    return;
+  }
+  if (seq !== _initSeq) return;
+  _stores = stores;
+  if (!_stores.length) {
+    _renderStoresState('empty');
+    showToast('매장 정보가 없습니다');
+    return;
+  }
+  // localStorage에서 마지막 선택 매장 복원
+  const savedSid = parseInt(localStorage.getItem('zk_store_id'));
+  const savedStore = savedSid && _stores.find(s => s.store_id === savedSid);
+  SID = savedStore ? savedStore.store_id : _stores[0].store_id;
+  _renderStoreTabs();
+  _lastRawInput = localStorage.getItem('zk_last_input_' + SID) || '';
+  _updateLastInputChip();
+  const ep = _storeEpoch;
+  // hash 기반 탭 복원
+  const hashTab = _hashTabMap[(location.hash || '').replace('#','')];
+  const home = !hashTab || hashTab === 'input';
+  // PRIMARY: 현재 할 일 + 최근 대화 — 품목·발주표를 기다리지 않는다
+  if (home) { history.replaceState(null, '', '#home'); _homePrimary(ep); }
+  // SECONDARY: 품목·별칭 (+ 다른 탭이면 발주 품목) → 발주표 · 오늘 할 일 · 기타 정보
+  try {
+    const [, a, o] = await Promise.allSettled([
+      refreshItems(),
+      db.from('store_aliases').select('*').eq('store_id', SID),
+      // 홈은 발주표(renderOrder)가 같은 발주 목록을 바로 읽는다 — 다른 탭에서만 따로 읽는다 (중복 요청 없음)
+      home ? null : db.from('order_requests').select('item_id').eq('store_id', SID).in('status', ['pending', 'ordered']),
+    ]);
+    if (_storeChanged(ep)) return;
+    if (a.status === 'fulfilled' && a.value && a.value.data) _storeAliases = a.value.data;
+    if (o.status === 'fulfilled' && o.value && o.value.data) _orderedItemIds = new Set(o.value.data.map(r => r.item_id));   // 중복 발주 방지
     if (hashTab && hashTab !== 'input') {
       const idx = ['input','inventory','settings'].indexOf(hashTab);
       const btn = document.querySelectorAll('.nav')[idx];
       if (btn) switchTab(hashTab, btn);
     } else {
-      history.replaceState(null, '', '#home');
-      // 홈 = 발주 체크리스트��므로 초기 로드
       // 홈을 여는 것은 발주 작업 시작이 아니므로 발주 세션(order_sessions)을 만들지 않는다.
-      renderOrder();
+      renderOrder({ purchase: false, itemsFresh: true });   // 현재 할 일은 위 PRIMARY 가 이미 읽고 있다 · 품목도 방금 읽었다
       renderV3Notifications().catch(e=>console.error('[v3] Notif error:',e));
     }
     v3InitLowToggle();
   } catch(e) {
     showToast('초기화 실패: ' + e.message);
   }
+}
+// 매장 줄: 불러오는 중 / 못 불러옴 + [다시 시도]. 매장을 모르는 동안 입력은 받지 않는다 (handleNaturalInput 안내).
+function _renderStoresState(state, fail) {
+  const el = document.getElementById('storeTabs');
+  if (!el) return;
+  if (state === 'loading') el.innerHTML = '<span class="store-nm">매장 불러오는 중...</span>';
+  else if (state === 'empty') el.innerHTML = '<span class="store-nm">매장 정보가 없습니다</span>';
+  else el.innerHTML = `<span class="store-nm" data-stores-failed="1" style="color:var(--red)">${fail === 'TIMEOUT' ? '서버 응답이 늦습니다. ' : ''}매장 정보를 불러오지 못했습니다.</span><button class="store-tab" onclick="init()">다시 시도</button>`;
+}
+// PRIMARY 한 번: "현재 할 일 확인 중..." 한 줄 → 결과 또는 [다시 시도]. 전체 상한 20초 (늦게 온 결과는 _refreshPurchaseHome 이 세대로 가린다).
+function _homePrimary(ep) {
+  _homeLoadSet('current', 'loading');
+  return _withTimeout(_refreshPurchaseHome(ep), 2 * _zkTimeoutMs()).catch(e => {
+    if (_storeChanged(ep)) return;
+    if (_homeLoad.current && _homeLoad.current.state === 'loading') _homeLoadSet('current', 'failed', _zkFailOf(e));
+  });
+}
+// ── 영역별 불러오기 상태: 화면 전체를 "로딩 중"으로 막지 않는다. 영역마다 확인 중 / 못 불러옴 + [다시 시도] ──
+let _homeLoad = { current: null, other: null };   // 영역 → null | { state: 'loading' | 'failed', fail: 'TIMEOUT' | 'NETWORK' | 'SERVER' }
+function _homeLoadSet(k, state, fail) {
+  _homeLoad[k] = state ? { state, fail: fail || null } : null;
+  const el = document.getElementById('homeLoad');
+  if (k === 'current' && el) {
+    const c = _homeLoad.current;
+    el.dataset.state = c ? c.state : '';
+    el.innerHTML = !c ? '' : c.state === 'loading' ? '<span>현재 할 일 확인 중...</span>'
+      : `<span>${c.fail === 'TIMEOUT' ? '서버 응답이 늦습니다. ' : ''}현재 상태를 확인하지 못했습니다.</span><button class="oai-edit" onclick="_homePrimary(_storeEpoch)">다시 시도</button>`;
+    el.hidden = !c;
+  }
+  if (typeof _dockQueue === 'function') _dockQueue();
 }
 
 function _renderStoreTabs() {
@@ -1247,7 +1312,9 @@ function _clearStoreContext() {
   const set = (id, html) => { const el = document.getElementById(id); if (el) el.innerHTML = html; };
   _agentCycle = new Map();
   if (typeof _purchase === 'object' && _purchase) _purchase = { ..._purchase, requests: [], sid: null };
+  if (typeof _pe === 'object' && _pe) { clearTimeout(_pe.poll); _pe = { view: null, notReady: null, current: null }; }   // 이전 매장의 현재 행동·다시 확인 타이머를 새 매장에 남기지 않는다
   set('purchaseHome', '');
+  if (typeof _homeLoadSet === 'function') { _homeLoadSet('current', null); _homeLoadSet('other', null); }   // 이전 매장의 "확인하지 못함" 줄을 새 매장에 남기지 않는다
   set('agentHome', '');
   set('agentChecks', '');
   if (typeof _dockReset === 'function') _dockReset();   // 새 매장: 요약 줄은 다시 기본(접힘) 상태
@@ -1979,6 +2046,8 @@ async function handleNaturalInput() {
   const btn   = document.getElementById('nlSendBtn');
   const btnTxt = document.getElementById('nlBtnTxt');
   if (!raw) { console.log('[NL] 빈 입력 무시'); return; }
+  // 매장을 아직 모르면(불러오는 중·실패) 어느 매장의 일인지 정할 수 없다 — 입력은 그대로 두고 기다리게 한다
+  if (SID == null) { showToast('매장 정보를 아직 불러오지 못했어요 — 위의 [다시 시도] 후 보내 주세요', 3500); return; }
   console.log('[NL] handleNaturalInput 진입:', raw, '| _complexQtyState:', !!_complexQtyState, '| _pendingComplexItems:', _pendingComplexItems);
   _nlProcessing = true;
   _saveLastInput(raw);
@@ -4791,7 +4860,9 @@ function _dockRefresh() {
   sub('sheet', sheetRows ? `발주표 ${sheetRows}건` : '발주표', !sheetEmpty);
   sub('detail', '재고·목표', detail);
   const otherOn = checks > 0 || !sheetEmpty || detail || (purchaseOn && !!today) || (!purchaseOn && phHas);
-  _dockTitle('other', '기타 정보', otherOn, false, false);
+  // 아직 보일 내용이 없을 때만: 접힌 "기타 정보 · 불러오는 중" / "· 불러오지 못함" (펼치면 [다시 시도])
+  const otherLoad = !otherOn && typeof _homeLoad === 'object' && _homeLoad ? _homeLoad.other : null;
+  _dockTitle('other', otherLoad ? `기타 정보 · ${otherLoad.state === 'loading' ? '불러오는 중' : '불러오지 못함'}` : '기타 정보', otherOn || !!otherLoad, false, false);
   // ONE CURRENT ACTION: 사람이 할 발주 행동이 있을 때만 그 줄 하나를 자동으로 펼친다 (사람이 이미 접은 같은 행동이면 그대로)
   const autoKey = purchaseOn && human ? 'purchase:' + phrase + '|' + acts.map(b => b.textContent.trim()).join('|') : null;
   _dock.autoKey = autoKey;
@@ -4825,11 +4896,13 @@ async function _chatRpc(fn, args) {
   const token = await _writerToken();
   if (!token) return { code: 'SIGNED_OUT' };
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(args) });
+    // 읽기(대화 페이지)만 응답 시간 상한 — 저장(zk_chat_append)은 같은 id 재전송 흐름이 따로 있어 그대로 둔다
+    const req = { method: 'POST', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify(args) };
+    const res = await (fn === 'zk_chat_append' ? fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, req) : _fetchT(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, req));
     const b = await res.json().catch(() => null);
     if (res.status === 401) return { code: 'SIGNED_OUT' };
     return b && typeof b.code === 'string' ? b : { code: res.status >= 500 ? 'SERVER' : 'NOT_READY' };
-  } catch { return { code: 'NETWORK' }; }
+  } catch (e) { return { code: _zkIsTimeout(e) ? 'TIMEOUT' : 'NETWORK' }; }
 }
 async function _chatUuidOf(text) {   // 같은 입력 → 같은 id (복원용 시드: 탭 두 개여도 1회만 저장)
   let h;
@@ -4920,7 +4993,13 @@ function _chatCapture(node) {
 function _chatObserve() {
   const list = document.getElementById('resList');
   if (!list || _chat.obs || typeof MutationObserver === 'undefined') return;
-  document.getElementById('chatArea')?.addEventListener('scroll', _chatOnScroll, { passive: true });
+  const ca = document.getElementById('chatArea');
+  ca?.addEventListener('scroll', _chatOnScroll, { passive: true });
+  // 최신 대화를 보고 있으면(맨 아래) 위 요약 줄이 늦게 펼쳐져 대화창이 줄어도 맨 아래를 유지한다 (대화와 현재 할 일은 따로 도착한다)
+  if (ca && typeof ResizeObserver !== 'undefined') {
+    let lastCh = ca.clientHeight;   // 줄어들기 전 대화창 높이로 "맨 아래였는가"를 판단 (scroll 이벤트 순서에 흔들리지 않게)
+    new ResizeObserver(() => { if (ca.scrollHeight - ca.scrollTop - lastCh < 8) ca.scrollTop = ca.scrollHeight; lastCh = ca.clientHeight; }).observe(ca);
+  }
   const topOf = n => { while (n && n.parentElement && n.parentElement !== list) n = n.parentElement; return n && n.parentElement === list ? n : null; };
   _chat.obs = new MutationObserver(muts => {
     const tops = new Set();
@@ -4939,6 +5018,26 @@ function _chatReset() {
   _chat.timers.forEach(t => clearTimeout(t)); _chat.timers.clear();
   _chat.ep = -1; _chat.restored = false; _chat.restoring = null; _chat.restoringEp = -1; _chat.thread = null; _chat.threadReq = null; _chat.failed = []; _chat.warned = {};
   _chat.page = null; _chat.shown = new Set();
+  _chatLoadState(null);
+}
+// 최근 대화 한 줄: 불러오는 중 / 못 불러옴 + [다시 시도] (대화창 위, 저장 대상 아님 — #resList 밖)
+function _chatLoadState(state, fail) {
+  const el = document.getElementById('chatLoad'); if (!el) return;
+  el.dataset.state = state || '';
+  el.innerHTML = !state ? '' : state === 'loading' ? '<span>최근 대화 불러오는 중...</span>'
+    : `<span>${fail === 'TIMEOUT' ? '서버 응답이 늦습니다. ' : ''}최근 대화를 불러오지 못했습니다.</span><button class="oai-edit" onclick="_chatRestoreRetry()">다시 시도</button>`;
+  el.hidden = !state;
+}
+// [다시 시도]: 발주요청 목록을 아직 못 읽었으면 그것부터 (어느 요청의 대화인지 알아야 한다), 그 다음 최근 대화
+async function _chatRestoreRetry() {
+  const ep = _storeEpoch;
+  _chatLoadState('loading');
+  if (!(typeof _purchase === 'object' && _purchase && _purchase.loaded && Number(_purchase.sid) === Number(SID) && !_purchase.fail)) {
+    try { await _refreshPurchase(); } catch { /* 아래에서 실패로 보인다 */ }
+    if (_storeChanged(ep)) return;
+    if (_purchase && _purchase.fail) { _chatLoadState('failed', _purchase.fail); return; }
+  }
+  return _chatRestore(ep);
 }
 function _chatRowOf(m) {
   const at = m.ref && m.ref.at ? m.ref.at : m.created_at;
@@ -5041,16 +5140,19 @@ function _chatRestore(ep) {
   if (_chat.restoring && _chat.restoringEp === ep) return _chat.restoring;
   _chat.restoringEp = ep;
   const sid = SID;
+  _chatLoadState('loading');
   const p = (async () => {
     const active = _activePurchaseRequest();
     const R = active ? active.request_id : null;
     // 전체 thread 가 아니라 최근 몇 턴만 (지난 대화는 위로 올릴 때 _chatLoadOlder)
     const r = await _chatRpc('zk_chat_thread_page', { p_store_id: Number(sid), p_purchase_request_id: R, p_turns: _CHAT_FIRST_TURNS });
     if (_storeChanged(ep)) return;
-    if (r.code === 'SIGNED_OUT' || r.code === 'NETWORK' || r.code === 'SERVER' || r.code === 'NOT_READY') {   // 로그인 후 / 다음 화면 갱신 때 다시
-      if (r.code !== 'SIGNED_OUT') _chatWarnOnce('restore', '지난 대화를 불러오지 못했어요 — 잠시 후 다시 열어 주세요');
+    if (r.code === 'SIGNED_OUT' || r.code === 'NETWORK' || r.code === 'TIMEOUT' || r.code === 'SERVER' || r.code === 'NOT_READY') {   // 로그인 후 / [다시 시도] / 다음 화면 갱신 때 다시
+      if (_chat.restoring === p) _chat.restoring = null;   // 이 실패한 복원을 붙잡고 있지 않는다 (다음 호출이 새로 읽는다)
+      _chatLoadState(r.code === 'SIGNED_OUT' ? null : 'failed', r.code);   // 채팅·입력은 그대로 쓸 수 있다 — 이 한 줄만
       return;
     }
+    _chatLoadState(null);
     _chat.ep = ep; _chat.restored = true;
     if (r.code !== 'OK') return;   // FORBIDDEN 등: 이 매장은 저장·복원하지 않는다
     let msgs = r.messages || [];
@@ -5276,11 +5378,12 @@ async function _renderOrderKeepScroll() {
   requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, sy)));
 }
 
-async function renderOrder() {
+async function renderOrder(opts) {
   // 이 그리기는 시작한 매장 기준이다. 중간에 매장이 바뀌면(세대 변경) 어떤 상태·화면도 쓰지 않고 멈춘다.
   const ep = _storeEpoch;
   const list = document.getElementById('orderList');
   list.innerHTML = '<div class="no-item"><span class="spin" style="border-color:var(--border);border-top-color:var(--accent)"></span></div>';
+  if (typeof _homeLoadSet === 'function') _homeLoadSet('other', 'loading');
 
   try {
     // 1) pending + ordered 발주 요청 로드
@@ -5292,12 +5395,21 @@ async function renderOrder() {
     _orderRequests = (pendingRows || []).filter(r => Number(r.qty) > 0);
     // 전역 _orderedItemIds 갱신 (pending + ordered 품목)
     _orderedItemIds = new Set(_orderRequests.map(r => r.item_id));
+    if (!(opts && opts.purchase === false) && typeof _refreshPurchaseHome === 'function') _refreshPurchaseHome(ep).catch(() => {});   // 발주요청 카드 — 기다리지 않는다 (첫 홈은 init 의 PRIMARY 가 이미 읽는다)
+    // 1.2) 24시간 이내 cancelled 품목 / 1.5) 이월된 발주(어제 이전 deferred) / 2) 품목 — 서로 독립이라 공급 상태·신뢰 재고를 읽는 동안 함께 읽는다
+    const _24hAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const today = new Date().toISOString().slice(0, 10);
+    const side = Promise.all([
+      db.from('order_requests').select('item_id').eq('store_id', SID).eq('status', 'cancelled').gte('updated_at', _24hAgo),
+      db.from('daily_orders').select('*').eq('store_id', SID).eq('status', 'deferred').lt('order_date', today),
+      opts && opts.itemsFresh ? null : refreshItems(),   // 재고 부족 품목 (자동 제안용) — 첫 홈은 init 이 방금 읽었다
+    ]);
+    side.catch(() => {});
     await _loadOrderSupply();
     if (_storeChanged(ep)) return;
     await _refreshWriterReadiness();
     if (_storeChanged(ep)) return;
     _renderWriterBar();
-    if (typeof _refreshPurchaseHome === 'function') _refreshPurchaseHome(ep).catch(() => {});   // 발주요청 카드 — 기다리지 않는다
     await _loadInventoryTrust();
     if (_storeChanged(ep)) return;
     _renderOrderNeed();
@@ -5305,29 +5417,16 @@ async function renderOrder() {
     const _pendingItems = _orderRequests.filter(r => r.status === 'pending');
     const _orderedItems = _orderRequests.filter(r => r.status === 'ordered');
 
-    // 1.2) 24시간 이내 cancelled 품목 로드 → 발주 대기에서 제외
-    const _24hAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-    const { data: cancelledRows } = await db.from('order_requests')
-      .select('item_id').eq('store_id', SID).eq('status', 'cancelled')
-      .gte('updated_at', _24hAgo);
+    const [{ data: cancelledRows }, { data: deferredRows }] = await side;
     if (_storeChanged(ep)) return;
     const _cancelledItemIds = new Set((cancelledRows || []).map(r => r.item_id));
-
-    // 1.5) 이월된 발주 로드 (어제 이전 deferred)
-    const today = new Date().toISOString().slice(0, 10);
-    const { data: deferredRows } = await db.from('daily_orders')
-      .select('*').eq('store_id', SID).eq('status', 'deferred')
-      .lt('order_date', today);
-    if (_storeChanged(ep)) return;
     const _deferredItems = (deferredRows || []).map(r => ({
       ...r,
       isDeferred: true,
       defer_count: r.defer_count || 0
     }));
 
-    // 2) 재고 부족 품목 (자동 제안용) — 추천 기준: current_qty <= 0 만
-    await refreshItems();
-    if (_storeChanged(ep)) return;
+    // 2) 재고 부족 품목 (자동 제안용, 위에서 함께 읽음) — 추천 기준: current_qty <= 0 만
     console.log('[suggest] 전체 품목 수:', _items.length);
     const _zeroItems = _items.filter(i => Number(i.current_qty) <= 0);
     console.log('[suggest] 재고 0 이하:', _zeroItems.map(i => `${i.item_name}(${i.current_qty})`));
@@ -5342,9 +5441,11 @@ async function renderOrder() {
     );
     console.log('[suggest] 필터 후 needItems:', needItems.map(i => i.item_name));
     const suggestItems = [];
-    for (const it of needItems) {
-      const consumption = await _calcConsumption(it.item_id);
-      if (_storeChanged(ep)) return;
+    // 품목별 소비량은 서로 독립 — 한 번에 함께 읽는다 (예전: 품목 수만큼 차례로 기다림)
+    const consumptions = await Promise.all(needItems.map(it => _calcConsumption(it.item_id)));
+    if (_storeChanged(ep)) return;
+    for (const [ci, it] of needItems.entries()) {
+      const consumption = consumptions[ci];
       const order = _calcOrderQty(Number(it.current_qty), Number(it.target_qty), consumption, it.order_unit_qty);
       // 목표/소비량이 없는 경우(재고 0 단독) 수량 1로 강제 추가
       if (order.qty <= 0) {
@@ -5535,9 +5636,13 @@ async function renderOrder() {
 
     // 소진 예측 추천 칩: 추천 칩 영역이 있는 화면에서만 (홈은 "오늘 할 일"이 대신한다 — 신뢰 재고 판정과 따로 말하지 않게)
     if (document.getElementById('suggestBar')) _loadDepletionAsync(_seenIds, _cancelledItemIds);
+    if (typeof _homeLoadSet === 'function') _homeLoadSet('other', null);
   } catch(e) {
     if (_storeChanged(ep)) return;
-    list.innerHTML = `<div class="no-item">오류: ${e.message}</div>`;
+    // 이 영역만 실패: 현재 할 일·채팅·입력은 그대로. 자동으로 계속 다시 보내지 않고 [다시 시도]로만.
+    const slow = /timeout|abort|초 넘게/i.test(String(e && (e.name + ' ' + e.message)));
+    list.innerHTML = `<div class="no-item" data-other-failed="1">${slow ? '서버 응답이 늦습니다. ' : ''}기타 정보를 불러오지 못했습니다. <button class="oai-edit" onclick="renderOrder({ purchase: false })">다시 시도</button></div>`;
+    if (typeof _homeLoadSet === 'function') _homeLoadSet('other', 'failed', slow ? 'TIMEOUT' : 'NETWORK');
   }
 }
 
@@ -6906,7 +7011,7 @@ async function _refreshWriterReadiness() {
   if (!token) { _writerState = { status: 'signed_out', reason: '' }; return false; }
   if (!_supplyAvailable) { _writerState = { status: 'not_ready', reason: 'CORE_ABSENT' }; return false; }
   let res, body = null;
-  try { res = await fetch(_WRITER_URL, { method: 'GET', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY } }); }
+  try { res = await (typeof _fetchT === 'function' ? _fetchT : fetch)(_WRITER_URL, { method: 'GET', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY } }); }   // 읽기 — 응답 시간 상한 (멈춘 서버가 기타 정보를 붙잡지 않게)
   catch { _writerState = { status: 'not_ready', reason: 'BACKEND_UNREACHABLE' }; return false; }
   if (res.status === 401) { _writerState = { status: 'reauth', reason: 'REAUTH_REQUIRED' }; return false; }
   if (!res.ok) { _writerState = { status: 'not_ready', reason: 'BACKEND_ABSENT' }; return false; }
@@ -7474,6 +7579,28 @@ async function runJson() {
 ════════════════════════════════════════════════════════ */
 // 서버 zk_pr_parse(pr-parse-v1)와 같은 규칙 (parity 테스트): "<품목> [<규격 51-70>] <수량><단위>" — 규격 범위는 수량이 아니다.
 const _PR_UNITS = '박스|상자|케이스|봉지|봉|캔|팩|통|병|개|포|판|망|단|롤|장|묶음|인분|킬로그램|kg|KG|Kg|키로|킬로|그램|g|리터|L|ml|EA|ea';
+// ── 응답 시간 상한 (home-performance-resilience-001) ──
+// 서버(DB·Edge)가 느리거나 멈춰도 화면이 끝없이 "로딩 중"에 묶이지 않게: 읽기 요청은 상한 시간이 지나면 연결을 끊고(abort) 실패로 돌린다.
+// 쓰기에는 상한을 두지 않는다 — 결과를 모르는 쓰기를 실패로 단정하지 않는다 (기존 action_id 재확인 흐름 그대로).
+// 함수 선언이라 스크립트 어디서나 쓴다 (구매 블록만 잘라 쓰는 테스트에도 있도록 여기에 둔다).
+function _zkTimeoutMs(kind) { return kind === 'secondary' ? 15000 : 10000; }   // 측정: REST 0.1~0.6초, Edge 0.3~2.9초
+function _zkTimeoutError(ms) { const e = new Error(`서버 응답이 ${Math.round(ms / 1000)}초 넘게 없습니다`); e.name = 'TimeoutError'; e.zkTimeout = true; return e; }
+function _zkIsTimeout(e) { return !!e && (e.zkTimeout === true || e.name === 'TimeoutError'); }
+function _zkFailOf(e) { return _zkIsTimeout(e) ? 'TIMEOUT' : 'NETWORK'; }
+function _fetchT(url, opts = {}, ms = _zkTimeoutMs()) {
+  if (typeof AbortController !== 'function' || typeof setTimeout !== 'function') return fetch(url, opts);
+  const ac = new AbortController();
+  let late = false;
+  const t = setTimeout(() => { late = true; ac.abort(); }, ms);   // 본문을 읽는 중에 멈춰도 끊는다 (다 읽은 뒤에 끊는 것은 아무 일도 없다)
+  if (t && typeof t.unref === 'function') t.unref();
+  const outer = opts && opts.signal;
+  if (outer) { if (outer.aborted) ac.abort(); else outer.addEventListener('abort', () => ac.abort(), { once: true }); }
+  return fetch(url, { ...opts, signal: ac.signal }).catch(e => { clearTimeout(t); throw late ? _zkTimeoutError(ms) : e; });
+}
+function _withTimeout(p, ms = _zkTimeoutMs()) {
+  let t;
+  return Promise.race([p, new Promise((_, rej) => { t = setTimeout(() => rej(_zkTimeoutError(ms)), ms); if (t && typeof t.unref === 'function') t.unref(); })]).finally(() => clearTimeout(t));
+}
 const _PR_TAIL_RE = /\s*((발주|주문)\s*(좀\s*)?(부탁(합니다|드립니다|드려요|해요|해)?|해\s*주세요|해\s*줘|요청(합니다|드립니다)?|넣어\s*주세요|넣어\s*줘)?|부탁(합니다|드립니다|드려요|해요))$/;
 const _PR_PHRASE_RE = /(발주|주문|부탁|요청|보내\s*주|넣어\s*주|시켜)/;
 const _PR_UNCERTAIN_RE = /였나|였지|였던가|인가|일까|아마|어제|지난|그때/;
@@ -7539,20 +7666,22 @@ function _purchaseStoreOf(sid) { return (_purchase.stores || []).find(s => Numbe
 async function _refreshPurchase(sid = SID) {
   const token = await _writerToken();
   if (!token) { _purchase = { loaded: true, ready: false, stores: [], requests: [], sid, reason: 'SIGNED_OUT' }; return _purchase; }
-  let body = null;
+  let body = null, fail = null;
   try {
-    const res = await fetch(`${_PURCHASE_URL}?store_id=${encodeURIComponent(sid)}`, { method: 'GET', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY } });
+    const res = await _fetchT(`${_PURCHASE_URL}?store_id=${encodeURIComponent(sid)}`, { method: 'GET', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY } });
     if (res.ok) body = await res.json().catch(() => null);
-  } catch { body = null; }
+    else if (res.status >= 500) fail = 'SERVER';   // DB 장애 때의 504 등: "준비 안 됨"이 아니라 "지금 확인 못 함"
+    if (res.ok && !body) fail = 'NETWORK';
+  } catch (e) { body = null; fail = _zkFailOf(e); }
   const ok = !!(body && body.api_version === _PURCHASE_API && body.ready === true);
-  _purchase = { loaded: true, ready: ok, stores: ok && Array.isArray(body.stores) ? body.stores : [], requests: ok && Array.isArray(body.requests) ? body.requests : [], sid, reason: ok ? 'READY' : 'UNAVAILABLE' };
+  _purchase = { loaded: true, ready: ok, stores: ok && Array.isArray(body.stores) ? body.stores : [], requests: ok && Array.isArray(body.requests) ? body.requests : [], sid, reason: ok ? 'READY' : 'UNAVAILABLE', fail };
   return _purchase;
 }
 async function _purchaseRequestOf(requestId) {
   const token = await _writerToken();
   if (!token) return null;
   try {
-    const res = await fetch(`${_PURCHASE_URL}?request_id=${encodeURIComponent(requestId)}`, { method: 'GET', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY } });
+    const res = await _fetchT(`${_PURCHASE_URL}?request_id=${encodeURIComponent(requestId)}`, { method: 'GET', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY } });
     const b = res.ok ? await res.json().catch(() => null) : null;
     return b && b.request ? b.request : null;
   } catch { return null; }
@@ -8136,17 +8265,36 @@ function _purchaseHomeHtml(store, requests) {
     <div style="font-size:12px;color:var(--muted)">매니저 문자를 채팅창에 붙여넣으면 발주요청으로 받아요 (재고·주문은 바뀌지 않음) · ${where}</div>
     ${rows || '<div style="font-size:13px;color:var(--muted)">받은 발주요청이 없어요</div>'}<div data-pr-pending></div></div>`;
 }
+// 홈 갱신 세대: 더 나중에 시작한 갱신이 있으면 늦게 끝난 이전 갱신은 화면을 덮지 않는다 (매장 전환은 _storeEpoch 가 따로 막는다)
+let _peHomeSeq = 0;
 async function _refreshPurchaseHome(ep) {
+  const seq = ++_peHomeSeq;
+  // 서버를 못 읽으면(시간 초과·네트워크·5xx) 비우지 않고 마지막으로 확인한 화면을 그대로 둔다 + "확인하지 못함" 한 줄
+  const prev = { purchase: _purchase, view: _pe.view, current: _pe.current, notReady: _pe.notReady, scopeReq: _pe.scopeReq };
+  const readyP = (await _writerToken()) ? _peReadiness() : null;   // 공개 GET — 발주요청 확인과 동시에 시작 (보기 화면은 여전히 readiness 확인 뒤에만 읽는다). 로그인 전이면 읽지 않는다
   try { await _refreshPurchase(); } catch { /* 표시만 생략 */ }
   if (typeof ep === 'number' && _storeChanged(ep)) return;
   const el = document.getElementById('purchaseHome');
   if (!el) return;
+  // 대화 thread 복원은 발주요청만 알면 된다 — 구매 실행 화면을 기다리지 않고 지금 시작 (매장마다 1회)
+  if (!_purchase.fail && typeof _chatRestore === 'function') _chatRestore(typeof ep === 'number' ? ep : _storeEpoch);
   const store = _purchaseStoreOf(SID);
-  if (store) { try { await _refreshPurchaseExec(SID); } catch { _pe.view = null; } }
+  if (store) { try { await _refreshPurchaseExec(SID, readyP); } catch { _pe.view = null; } }
   if (typeof ep === 'number' && _storeChanged(ep)) return;
+  if (seq !== _peHomeSeq) return;
+  const fail = _purchase.fail || (store && _pe.fail) || null;
+  if (fail) {
+    if (prev.purchase && Number(prev.purchase.sid) === Number(SID) && prev.purchase.loaded && !prev.purchase.fail) _purchase = prev.purchase;
+    if (prev.view || prev.current) { _pe.view = prev.view; _pe.current = prev.current; _pe.notReady = prev.notReady; _pe.scopeReq = prev.scopeReq; }
+    if (typeof _homeLoadSet === 'function') _homeLoadSet('current', 'failed', fail);
+    if (typeof _chatLoadState === 'function' && _purchase.fail && !(typeof _chat === 'object' && _chat && _chat.restored)) _chatLoadState('failed', _purchase.fail);   // 어느 요청의 대화인지 몰라 복원 못 함
+    _peSchedulePoll();   // 실패해도 조사 중 / 배송 대기 확인은 다음 주기에 계속
+    return { fail };
+  }
   el.innerHTML = _purchaseHomeHtml(store, _purchase.requests) + (store ? _purchaseExecHtml(_pe.view) : '');
   _renderPurchasePendingBar();
-  if (typeof _chatRestore === 'function') _chatRestore(typeof ep === 'number' ? ep : _storeEpoch);   // 매장·발주 상태를 안 뒤 대화 thread 복원 (매장마다 1회)
+  if (typeof _homeLoadSet === 'function' && typeof _homeLoad === 'object' && _homeLoad.current) _homeLoadSet('current', null);
+  if (typeof _chatRestore === 'function') _chatRestore(typeof ep === 'number' ? ep : _storeEpoch);   // 매장·발주 상태를 안 뒤 대화 thread 복원 (매장마다 1회 — 위에서 시작했으면 같은 것)
 }
 
 // ── 구매 실행: [결제 준비 승인](B) 과 [○○원 결제 승인](C) 는 서로 다른 화면·다른 버튼이다 (서버: purchase-execution)
@@ -8171,31 +8319,72 @@ function _peReadinessReason(r) {
 }
 const _peBusy = {};   // 누르는 중인 버튼(더블클릭·새로고침 재전송 방지 — 서버도 1회용)
 const _peWon = n => `${Number(n || 0).toLocaleString('ko-KR')}원`;
-async function _refreshPurchaseExec(sid = SID) {
+// readiness = 이 Edge 인스턴스의 정확한 정체 (공개 GET). 못 읽음(시간 초과·네트워크·5xx)은 "버전 불일치"가 아니라 "지금 확인 못 함" (fail)
+async function _peReadiness() {
+  try {
+    const rr = await _fetchT(_PE_READY_URL, { method: 'GET', headers: { apikey: SUPABASE_KEY } });
+    return { body: await rr.json().catch(() => null), fail: rr.status >= 500 ? 'SERVER' : null };
+  } catch (e) { return { body: null, fail: _zkFailOf(e) }; }
+}
+async function _refreshPurchaseExec(sid = SID, readyP = null) {
+  _pe.fail = null;
+  const ep = _storeEpoch;   // 기다리는 사이 매장이 바뀌면 이전 매장 응답으로 _pe(현재 행동·타이머)를 쓰지 않는다
   const token = await _writerToken();
   if (!token) { _pe.view = null; return null; }
-  let rd = null;
-  try { const rr = await fetch(_PE_READY_URL, { method: 'GET', headers: { apikey: SUPABASE_KEY } }); rd = await rr.json().catch(() => null); } catch { rd = null; }
+  const ready = await (readyP || _peReadiness());
+  if (_storeChanged(ep)) return null;
+  if (ready.fail) { _pe.fail = ready.fail; return null; }
+  const rd = ready.body;
   _pe.notReady = _peReadinessReason(rd);
   if (_pe.notReady) { _pe.view = null; return null; }   // 버전 불일치 → 구매 화면 비활성 (조용한 대체 없음)
-  const res = await fetch(`${_PE_URL}?store_id=${encodeURIComponent(sid)}&view=purchases`, { method: 'GET', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY } });
+  let res;
+  try { res = await _fetchT(`${_PE_URL}?store_id=${encodeURIComponent(sid)}&view=purchases`, { method: 'GET', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY } }); }
+  catch (e) { if (!_storeChanged(ep)) _pe.fail = _zkFailOf(e); return null; }
+  if (_storeChanged(ep)) return null;
+  if (res.status >= 500) { _pe.fail = 'SERVER'; return null; }
   const b = res.ok ? await res.json().catch(() => null) : null;
+  if (_storeChanged(ep)) return null;
   if (b && (b.api_version !== _PE_API || b.edge_build_hash !== _PE_BUILD)) { _pe.notReady = 'VIEW_BUILD'; _pe.view = null; return null; }
   _pe.view = b && b.code === 'OK' ? b : null;
   // 구매 예외 루프: 지금 대표에게 보여줄 "한 가지 현재 행동" (서버가 고름 — 결정 카드 / 진행 중 / 결과 확인 중)
+  //   현재 발주 범위 근거(zk_pe_scope_refs)는 현재 행동과 독립 — 함께 읽는다
   _pe.current = null;
-  if (_pe.view && _pe.view.approver) { const c = await _pePost('GET_CURRENT_PURCHASE_ACTION', { store_id: Number(sid) }); _pe.current = c && c.code === 'CURRENT_ACTION' && c.action ? c : null; }
+  const [cur, refs] = await Promise.all([
+    _pe.view && _pe.view.approver ? _peCurrentAction(sid, token) : { body: null, fail: null },
+    _pe.view ? _peScopeRefs(sid) : null,
+  ]);
+  if (_storeChanged(ep)) return null;
+  if (cur.fail) { _pe.fail = cur.fail; return null; }
+  const c = cur.body;
+  _pe.current = c && c.code === 'CURRENT_ACTION' && c.action ? c : null;
   // 현재 발주 영역 = 현재 발주요청에 정확히 묶인 것만 (지난 인증 FIELD·취소된 요청의 카드/행동은 내린다 — 삭제가 아니라 표시만)
   if (_pe.view) {
-    const refs = await _peScopeRefs(sid);
     const sc = _peScope(_pe.view, _pe.current, refs);
     _pe.view = sc.view; _pe.current = sc.current; _pe.scopeReq = sc.rid;
   }
-  // 조사 중이면 결과가 나올 때까지 화면이 스스로 다시 확인한다 (한 번에 하나의 타이머)
-  if (_pe.current && _pe.current.action.type === 'RESEARCHING' && !_pe.poll && typeof setTimeout === 'function') _pe.poll = setTimeout(() => { _pe.poll = null; _refreshPurchaseHome(_storeEpoch); }, 10000);
-  // 배송/입고 대기: 열어 둔 화면이 5분마다 현재 할 일 + 배송 감시 알림을 다시 확인 (새 실시간 시스템 없이 기존 홈 갱신 재사용; 화면이 숨겨져 있으면 쉰다)
-  else if (_pe.current && _PE_WATCH_POLL.includes(_pe.current.action.type) && !_pe.poll && typeof setTimeout === 'function') _peWatchPoll();
+  _peSchedulePoll();
   return _pe.view;
+}
+// 현재 행동 읽기 (GET_CURRENT_PURCHASE_ACTION — 상태를 바꾸지 않는 읽기라 응답 시간 상한을 둔다. 다른 구매 행동은 _pePost 그대로)
+async function _peCurrentAction(sid, token) {
+  try {
+    const res = await _fetchT(_PE_URL, { method: 'POST', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'GET_CURRENT_PURCHASE_ACTION', action_id: _newActionId(), store_id: Number(sid) }) });
+    if (res.status >= 500) return { body: null, fail: 'SERVER' };
+    const b = await res.json().catch(() => null);
+    return { body: b && typeof b.code === 'string' ? b : null, fail: null };
+  } catch (e) { return { body: null, fail: _zkFailOf(e) }; }
+}
+// 화면이 스스로 다시 확인하는 타이머 (한 번에 하나). 실패한 갱신 뒤에도 마지막으로 확인한 상태로 다시 건다.
+//   조사 중: 10초마다 결과 확인. 배송/입고 대기: 5분마다 현재 할 일 + 배송 감시 알림 (새 실시간 시스템 없이 기존 홈 갱신 재사용).
+//   숨겨진 탭은 네트워크 없이 다음 주기로.
+function _peSchedulePoll() {
+  if (!_pe.current || _pe.poll || typeof setTimeout !== 'function') return;
+  if (_pe.current.action.type === 'RESEARCHING') _pe.poll = setTimeout(() => {
+    _pe.poll = null;
+    if (typeof document === 'object' && document.visibilityState === 'hidden') { _peSchedulePoll(); return; }
+    _refreshPurchaseHome(_storeEpoch);
+  }, 10000);
+  else if (_PE_WATCH_POLL.includes(_pe.current.action.type)) _peWatchPoll();
 }
 // binding 기준 (느슨한 시간·매장 묶음 없음): 현재 발주요청 = 끝나지 않은 가장 최근 요청.
 //   attempt → 승인 → basket → request_id (zk_pe_scope_refs, 정확한 FK 사슬) / basket → request_id / 서버 현재 행동 → request_ref · basket · 선택 규칙.
@@ -8207,8 +8396,13 @@ function _peWatchPoll() {
   _pe.poll = setTimeout(async () => {
     _pe.poll = null;
     if (typeof document === 'object' && document.visibilityState === 'hidden') { _peWatchPoll(); return; }   // 숨겨진 탭: 네트워크 없이 다음 주기로
-    await _refreshPurchaseHome(_storeEpoch);
-    if (typeof _chatPollNew === 'function') await _chatPollNew().catch(() => 0);
+    if (_pe.polling) { _peWatchPoll(); return; }   // 앞 확인이 아직 끝나지 않았다: 겹쳐 보내지 않고 다음 주기로
+    _pe.polling = true;
+    try {
+      await _refreshPurchaseHome(_storeEpoch);
+      if (typeof _chatPollNew === 'function') await _chatPollNew().catch(() => 0);
+    } finally { _pe.polling = false; }
+    _peSchedulePoll();   // 이번 확인이 실패해 다음 예약이 빠졌으면 다시 건다 (이미 걸려 있으면 그대로)
   }, _PE_WATCH_POLL_MS);
 }
 const _PE_LIVE_ATTEMPT = ['PREPARED', 'EXECUTING', 'SUBMITTING', 'OUTCOME_UNKNOWN'];
@@ -8219,7 +8413,7 @@ async function _peScopeRefs(sid) {
   const token = await _writerToken();
   if (!token) return null;
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/zk_pe_scope_refs`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ p_store_id: Number(sid) }) });
+    const res = await _fetchT(`${SUPABASE_URL}/rest/v1/rpc/zk_pe_scope_refs`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, apikey: SUPABASE_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ p_store_id: Number(sid) }) });
     const b = res.ok ? await res.json().catch(() => null) : null;
     return b && typeof b.code === 'string' ? b : null;
   } catch { return null; }
@@ -11530,7 +11724,8 @@ async function v3Feedback(itemId, wasCorrect) {
   showToast(wasCorrect ? '\uD83D\uDC4D \uAC10\uC0AC\uD569\uB2C8\uB2E4' : '\uD83D\uDC4E \uB2E4\uC74C\uC5D0 \uB354 \uC815\uD655\uD558\uAC8C');
 }
 
-setTimeout(()=>init(), 500);
+// 화면 골격이 그려지면 바로 시작한다 (예전: 이유 없는 0.5초 대기)
+if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', () => init()); else setTimeout(() => init(), 0);
 </script>
 <div id="srOverlay" class="sr-ov"><div class="sr-hd"><span class="logo">ZeroKitchen</span><span class="store-nm">거래처</span><button class="x" onclick="_srClose()">닫기</button></div>
 <div class="sr-body"><div class="sr-wrap" id="srApp"></div></div></div>

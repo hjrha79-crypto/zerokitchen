@@ -224,7 +224,7 @@ const posts = e => e.fetchCalls.filter(c => c.method === 'POST');
     const opts = e.createClient.calls[0]?.opts?.auth || {};
     check('login session lives in a separate client (own storageKey, persisted, auto-refresh) — the data client db is untouched',
       opts.storageKey === 'zk-writer-auth' && opts.persistSession === true && opts.autoRefreshToken === true &&
-      /\nconst db = createClient\(SUPABASE_URL, SUPABASE_KEY\);\r?\n/.test(HTML), JSON.stringify(opts));
+      /\nconst db = createClient\(SUPABASE_URL, SUPABASE_KEY(, \{ global: \{ fetch: _dbFetch \} \})?\);\r?\n/.test(HTML), JSON.stringify(opts));   // db: no auth options (only the read-timeout fetch)
     await e.f._refreshWriterReadiness();
     await e.f._writerSignOut();
     check('logout → session cleared, not ready', !e.ready() && e.state().status === 'signed_out' && (await e.f._writerToken()) === null);

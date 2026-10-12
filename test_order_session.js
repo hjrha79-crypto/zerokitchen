@@ -109,6 +109,9 @@ function makeEnv(opts = {}) {
   const _refreshWriterReadiness = async () => false, _renderWriterAuthCard = async () => {};
   const _renderStoreTabs = () => {}, _updateLastInputChip = () => {}, v3InitLowToggle = () => {}, cancelReview = () => {}, updateJustTalk = () => {};
   const _hashTabMap = { home: 'input', inventory: 'inventory', settings: 'settings' };
+  // home-performance-resilience-001: init = stores (bounded) → PRIMARY (current action, spy) + SECONDARY (renderOrder)
+  let _initSeq = 0; const _storeEpoch = 0, _storeChanged = () => false;
+  const _withTimeout = p => p, _zkTimeoutMs = () => 10000, _zkIsTimeout = () => false, _renderStoresState = () => {}, _homePrimary = () => { calls.primary = (calls.primary || 0) + 1; };
   const _tabHashMap = { input: 'home', inventory: 'inventory', settings: 'settings' };
   let _sessionStarting = null;
   // eslint-disable-next-line no-eval

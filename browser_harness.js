@@ -59,7 +59,9 @@ function chatMock() {
   return m;
 }
 
-async function launch({ newHtml, old, mock } = {}) {
+// route (선택): (url, method, postData) → null(아래 기본 규칙) | { status, body, delay } | { hang: true } (응답 없음) | { fail: true } (연결 실패)
+//   — 느린 서버·멈춘 요청·504 를 재현하는 테스트용 (test_home_resilience.js). 넘기지 않으면 예전과 같다.
+async function launch({ newHtml, old, mock, route } = {}) {
   const exe = BROWSERS.find(p => fs.existsSync(p)); if (!exe) throw new Error('no Edge/Chrome');
   const port = 9300 + Math.floor(Math.random() * 600);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zk-br-'));
@@ -76,7 +78,13 @@ async function launch({ newHtml, old, mock } = {}) {
     if (m.method !== 'Fetch.requestPaused') return;
     const u = m.params.request.url, rid = m.params.requestId;
     const rpc = u.match(/\/rest\/v1\/rpc\/(zk_(?:chat|pe)_[a-z_]+)/);
-    if (u.startsWith('http://zk.test/')) {
+    const rt = route && !u.startsWith('http://zk.test/') && !/cdn\.jsdelivr\.net/.test(u) ? route(u, m.params.request.method, m.params.request.postData || '') : null;
+    if (rt) {
+      if (m.params.request.method === 'OPTIONS') send('Fetch.fulfillRequest', { requestId: rid, responseCode: 204, responseHeaders: [{ name: 'access-control-allow-origin', value: '*' }, { name: 'access-control-allow-headers', value: '*' }, { name: 'access-control-allow-methods', value: '*' }] }).catch(() => {});
+      else if (rt.hang) { /* 응답하지 않는다 (앱의 상한 시간이 끊어야 한다) */ }
+      else if (rt.fail) send('Fetch.failRequest', { requestId: rid, errorReason: 'ConnectionRefused' }).catch(() => {});
+      else { const go = () => json(rid, rt.status || 200, rt.body === undefined ? null : rt.body); rt.delay ? setTimeout(go, rt.delay) : go(); }
+    } else if (u.startsWith('http://zk.test/')) {
       const body = (u.includes('/old') ? old : newHtml).toString('base64');
       send('Fetch.fulfillRequest', { requestId: rid, responseCode: 200, responseHeaders: [{ name: 'content-type', value: 'text/html; charset=utf-8' }], body }).catch(() => {});
     } else if (/^https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2/.test(u)) send('Fetch.continueRequest', { requestId: rid }).catch(() => {});
