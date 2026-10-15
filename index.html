@@ -7713,43 +7713,102 @@ function _lpResolveItem(name) {
 // 이미 주문된 미입고 (committed supply): 서버 projection(get_open_supply)의 진행 주문 + 주문 기록(order_requests ordered).
 // 둘 다 못 읽으면 null — "겹치는 주문 없음"으로 판단하지 않는다.
 async function _lpCommitted(storeId) {
-  const [os, or] = await Promise.all([
+  const [os, or, dl] = await Promise.all([
     _withTimeout(db.rpc('get_open_supply', { p_store_id: storeId, p_item_id: null })).then(r => r.error ? null : r.data || [], () => null),
-    _withTimeout(db.from('order_requests').select('id, item_id, qty, unit, status, created_at').eq('store_id', storeId).in('status', ['pending', 'ordered'])).then(r => r.error ? null : r.data || [], () => null)
+    _withTimeout(db.from('order_requests').select('id, item_id, qty, unit, status, created_at').eq('store_id', storeId).in('status', ['pending', 'ordered'])).then(r => r.error ? null : r.data || [], () => null),
+    // 입고 예정일: 기존 배송 관찰(get_order_delivery)만 읽는다 — 못 읽어도 중복 판단은 그대로 (예정일 표시만 빠진다)
+    _withTimeout(db.rpc('get_order_delivery', { p_store_id: storeId, p_item_id: null })).then(r => r.error ? [] : r.data || [], () => [])
   ]);
   if (os === null && or === null) return null;
+  const eta = new Map();
+  for (const d of dl || []) eta.set(Number(d.order_id), _lpEtaOf(d));
   const by = new Map();
   const get = id => { if (!by.has(id)) by.set(id, { orders: [], drafts: [] }); return by.get(id); };
   for (const p of os || []) for (const o of p.evidence_refs?.orders || []) {
     if (_LP_DONE_STATES.includes(o.order_state)) continue;
     if (o.remaining_qty !== null && o.remaining_qty !== undefined && Number(o.remaining_qty) <= 0) continue;
-    get(p.item_id).orders.push({ order_id: o.order_id, qty: o.remaining_qty ?? o.ordered_qty ?? null, unit: p.unit, ordered_at: o.ordered_at || null, verified: o.verification && o.verification !== 'UNVERIFIED' });
+    get(p.item_id).orders.push({ order_id: o.order_id, item_id: p.item_id, qty: o.remaining_qty ?? o.ordered_qty ?? null, unit: p.unit, ordered_at: o.ordered_at || null, verified: o.verification && o.verification !== 'UNVERIFIED', ...(eta.get(Number(o.order_id)) || {}) });
   }
   for (const r of or || []) {
     const e = get(r.item_id);
     if (r.status === 'pending') e.drafts.push({ order_id: r.id, qty: r.qty, unit: r.unit });
-    else if (!e.orders.some(o => Number(o.order_id) === Number(r.id))) e.orders.push({ order_id: r.id, qty: r.qty, unit: r.unit, ordered_at: r.created_at || null, verified: false });
+    else if (!e.orders.some(o => Number(o.order_id) === Number(r.id))) e.orders.push({ order_id: r.id, item_id: r.item_id, qty: r.qty, unit: r.unit, ordered_at: r.created_at || null, verified: false, ...(eta.get(Number(r.id)) || {}) });
   }
   return by;
 }
+// 배송 관찰 1행 → { eta: 'YYYY-MM-DD' (판매처가 보여 준 예정일, 한국 날짜) | null, delivered }. 실제 배송 완료가 관찰되면 예정일로 덮지 않는다.
+function _lpEtaOf(d) {
+  if (!d) return {};
+  if (d.delivery_status === 'DELIVERED') return { eta: null, delivered: true };
+  if (d.expected_arrival_kind === 'DATE' && /^\d{4}-\d{2}-\d{2}$/.test(String(d.expected_arrival_date || ''))) return { eta: d.expected_arrival_date, delivered: false };
+  const at = d.expected_arrival_at ? Date.parse(d.expected_arrival_at) : NaN;
+  if (!isNaN(at)) return { eta: new Date(at + 9 * 3600e3).toISOString().slice(0, 10), delivered: false };
+  return { eta: null, delivered: false };
+}
+function _lpEtaText(ymd) {
+  if (!ymd) return '';
+  const [y, m, d] = ymd.split('-').map(Number);
+  return `${m}/${d}(${'일월화수목금토'[new Date(y, m - 1, d).getDay()]})`;
+}
 const _lpGates = {};
 const _lpQtyText = (q, u) => (q === null || q === undefined) ? `수량 모름` : `${_fmtQty(q)}${u || ''}`;
-const _lpOrderText = o => `${_lpQtyText(o.qty, o.unit)} (주문 기록 #${o.order_id}${o.ordered_at ? ` · ${new Date(o.ordered_at).getMonth() + 1}/${new Date(o.ordered_at).getDate()} 주문` : ''})`;
-// 요청 단위와 품목(재고) 단위가 같은가 — 다르면 발주표에 바꿔 적지 않는다 ("치즈 8봉지"를 8개로 담지 않음)
-function _lpUnitOk(reqUnit, itemUnit) {
-  const n = u => ({ 봉: '봉지', 상자: '박스', EA: '개', ea: '개', KG: 'kg', Kg: 'kg' }[String(u ?? '').trim()] || String(u ?? '').trim());
-  return !itemUnit || !reqUnit || n(reqUnit) === n(itemUnit);
+const _lpOrderText = o => `${_lpQtyText(o.qty, o.unit)} (주문 기록 #${o.order_id}${o.ordered_at ? ` · ${new Date(o.ordered_at).getMonth() + 1}/${new Date(o.ordered_at).getDate()} 주문` : ''}${o.eta ? ` · ${_lpEtaText(o.eta)} 입고 예정` : o.delivered ? ' · 배송 완료로 관찰됨 (입고 기록 전)' : ''})`;
+// 단위: 재고 단위와 구매 단위를 나눈다. 요청 단위 = 품목 단위 → 그대로 / 요청 단위 = 품목의 구매 단위(items.order_unit_name, 기존 필드) → order_unit_qty로 재고 단위 환산.
+// 둘 다 아니면 바꿔 적지 않는다 (ok=false → 사람 확인). "봉"↔"봉지", "상자"↔"박스"처럼 같은 말만 같게 본다 — 박스를 봉·개로 바꾸지 않는다.
+const _lpUnitNorm = u => ({ 봉: '봉지', 상자: '박스', EA: '개', ea: '개', KG: 'kg', Kg: 'kg' }[String(u ?? '').trim()] || String(u ?? '').trim());
+function _lpUnitResolve(reqUnit, qty, item) {
+  const q = Number(qty);
+  if (!item || !item.unit || !reqUnit || _lpUnitNorm(reqUnit) === _lpUnitNorm(item.unit)) return { ok: true, inv_qty: q, basis: 'SAME_UNIT' };
+  const oun = String(item.order_unit_name ?? '').trim(), ouq = Number(item.order_unit_qty);
+  if (oun && _lpUnitNorm(reqUnit) === _lpUnitNorm(oun) && Number.isFinite(ouq) && ouq > 0) return { ok: true, inv_qty: q * ouq, basis: 'ITEM_PURCHASE_UNIT', purchase_unit: oun, per: ouq };
+  return { ok: false, inv_qty: null, basis: 'UNIT_UNKNOWN' };
 }
-// 요청 → 판정 (쓰기 0): dup = 같은 매장·같은 품목에 진행 주문 있음 / news = 새 품목 / drafts = 발주표에만 있음 / unknown = 품목 확인 필요
+// 같은 물건인가 (중복 판단 전용 — 품목을 합치지 않는다): 매장 별칭(사람이 고친 기록)이 두 품목 이름을 잇고 이름도 한 글자 이내로 같으면 같은 물건.
+// 둘 중 하나만 있으면 확실하지 않다 → 그 품목의 진행 주문을 "확인 필요"로 보여 주고 사람이 A/B로 고른다.
+function _lpNameDist(a, b) {
+  const x = [...a], y = [...b];
+  let prev = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= y.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[y.length];
+}
+function _lpRelatedItems(item) {
+  const key = s => String(s ?? '').replace(/\s/g, '').toLowerCase();
+  const me = key(item.item_name), out = [];
+  for (const it of _items || []) {
+    if (it.item_id === item.item_id) continue;
+    const other = key(it.item_name);
+    const alias = (_storeAliases || []).some(a => (key(a.raw_expression) === me && key(a.corrected_name) === other) || (key(a.raw_expression) === other && key(a.corrected_name) === me));
+    // 크기만 다른 같은 계열(죽용기 소/중/대, 피자 박스 s/m)은 다른 물건 — 비슷한 이름으로 묻지 않는다
+    const size = /(대|중|소|s|m|l|xl)$/;
+    const sizeOnly = size.test(me) && size.test(other) && me.replace(size, '') === other.replace(size, '') && me !== other;
+    const near = !sizeOnly && me.length >= 3 && other.length >= 3 && _lpNameDist(me, other) <= 1;
+    if (alias && near) out.push({ item: it, basis: 'SAME' });
+    else if (alias || near) out.push({ item: it, basis: 'AMBIGUOUS' });
+  }
+  return out;
+}
+// 요청 → 판정 (쓰기 0): dup = 같은 매장·같은 물건에 진행 주문 있음 / news = 새 품목 / drafts = 발주표에만 있음 / unknown = 품목 확인 필요
 function _lpClassify(intent, committed) {
   const out = { dups: [], news: [], unknown: [], unparsed: intent.unparsed || [] };
+  const ordersOf = id => (committed.get(id) || { orders: [] }).orders;
   for (const ln of intent.lines) {
     const r = _lpResolveItem(ln.raw_item_text);
     const row = { name: ln.raw_item_text, qty: ln.requested_qty, unit: ln.requested_unit, hint: ln.supplier_hint, additional: !!ln.additional };
     if (!r.item) { out.unknown.push({ ...row, candidates: r.candidates }); continue; }
     const c = committed.get(r.item.item_id) || { orders: [], drafts: [] };
-    const x = { ...row, item: r.item, via: r.via, orders: c.orders, drafts: c.drafts, unit_ok: _lpUnitOk(ln.requested_unit, r.item.unit) };
-    if (c.orders.length) out.dups.push(x); else out.news.push(x);
+    const u = _lpUnitResolve(ln.requested_unit, ln.requested_qty, r.item);
+    const rel = _lpRelatedItems(r.item);
+    const same = rel.filter(x => x.basis === 'SAME' && ordersOf(x.item.item_id).length);
+    const maybe = rel.filter(x => x.basis === 'AMBIGUOUS' && ordersOf(x.item.item_id).length);
+    const orders = [...c.orders, ...same.flatMap(x => ordersOf(x.item.item_id).map(o => ({ ...o, via_item: x.item.item_name })))];
+    const x = { ...row, item: r.item, via: r.via, orders, drafts: c.drafts, unit_ok: u.ok, inv_qty: u.inv_qty, unit_basis: u.basis, purchase_unit: u.purchase_unit || null, per: u.per ?? null,
+      same_as: same.map(s => s.item.item_name), identity: 'SAME' };
+    if (!orders.length && maybe.length) { x.orders = maybe.flatMap(m => ordersOf(m.item.item_id).map(o => ({ ...o, via_item: m.item.item_name }))); x.identity = 'AMBIGUOUS'; }
+    if (x.orders.length) out.dups.push(x); else out.news.push(x);
   }
   return out;
 }
@@ -7766,8 +7825,15 @@ function _lpGateText(c, arrival) {
   const t = [];
   const amb = c.dups.filter(d => !d.additional), more = c.dups.filter(d => d.additional);
   if (amb.length) {
-    t.push(`${amb.map(d => `${d.item.item_name} ${_lpQtyText(d.qty, d.unit)}`).join('와 ')}${amb.length > 1 ? '는' : '은(는)'} 이미 주문되어 입고 대기 중입니다:`);
-    for (const d of amb) t.push(`· ${d.item.item_name}: ${d.orders.map(_lpOrderText).join(', ')}`);
+    // 모든 진행 주문의 예정일이 같고 알 때만 한 줄에 날짜를 말한다 — 모르면 "입고 대기 중"
+    const etas = [...new Set(amb.flatMap(d => d.orders.map(o => o.eta || '')))];
+    const when = etas.length === 1 && etas[0] ? `${_lpEtaText(etas[0])} 입고 예정입니다` : '입고 대기 중입니다';
+    t.push(`${amb.map(d => `${d.item.item_name} ${_lpQtyText(d.qty, d.unit)}`).join('와 ')}${amb.length > 1 ? '는' : '은(는)'} 이미 주문되어 ${when}:`);
+    for (const d of amb) {
+      const same = d.same_as?.length ? ` (= ${d.same_as.join('·')}, 매장 별칭)` : '';
+      const ask = d.identity === 'AMBIGUOUS' ? ` — 이름이 비슷한 ${[...new Set(d.orders.map(o => o.via_item))].join('·')}의 주문이에요. 같은 물건인지 확실하지 않아요` : '';
+      t.push(`· ${d.item.item_name}${same}: ${d.orders.map(o => (o.via_item && d.identity !== 'AMBIGUOUS' ? `${o.via_item} ` : '') + _lpOrderText(o)).join(', ')}${ask}`);
+    }
     t.push('', '이번 요청은 기존 주문을 포함한 최종 필요량인가요, 아니면 기존 주문과 별도로 추가 주문인가요?',
       'A. 기존 주문 포함 — 추가 주문하지 않음', `B. 추가 주문 — 요청 수량만큼 더 (${amb.map(d => `${d.item.item_name} ${_lpQtyText(d.qty, d.unit)}`).join(' + ')})`);
   }
@@ -7782,7 +7848,7 @@ function _lpNewText(c) {
   const t = [];
   if (c.news.length) {
     t.push(`새 요청 ${c.news.length}개 (진행 중인 주문 없음):`);
-    for (const n of c.news) t.push(`· ${n.item.item_name} ${_lpQtyText(n.qty, n.unit)}${n.hint ? ` (${n.hint})` : ''}${n.drafts.length ? ` — 발주표에 이미 ${n.drafts.map(d => _lpQtyText(d.qty, d.unit)).join(', ')} 있음` : ''}${n.unit_ok === false ? ` — 단위 확인 필요 (이 매장 품목은 ${n.item.unit} 단위, 담지 않음)` : ''}`);
+    for (const n of c.news) t.push(`· ${n.item.item_name} ${_lpQtyText(n.qty, n.unit)}${n.hint ? ` (${n.hint})` : ''}${n.drafts.length ? ` — 발주표에 이미 ${n.drafts.map(d => _lpQtyText(d.qty, d.unit)).join(', ')} 있음` : ''}${n.unit_ok === false ? ` — 단위 확인 필요 (이 매장 품목은 ${n.item.unit} 단위, 담지 않음)` : n.unit_basis === 'ITEM_PURCHASE_UNIT' ? ` = ${_fmtQty(n.inv_qty)}${n.item.unit} (구매 단위 ${n.purchase_unit} 1 = ${_fmtQty(n.per ?? 1)}${n.item.unit})` : ''}`);
   }
   if (c.unknown.length) {
     t.push(`품목 확인 필요 ${c.unknown.length}개 (기록하지 않음):`);
@@ -7802,7 +7868,7 @@ function _lpShowGate(raw, c, arrival, withUser = true) {
   const btn = [];
   if (amb) btn.push(`<button class="oai-edit" onclick="_lpDecide('${id}','A',this)">A. 기존 주문 포함</button>`, `<button class="oai-create" onclick="_lpDecide('${id}','B',this)">B. 추가 주문</button>`);
   if (more) btn.push(`<button class="oai-create" onclick="_lpDecide('${id}','MORE',this)">추가분 발주표에 담기</button>`);
-  const addable = c.news.filter(n => n.unit_ok !== false).length;
+  const addable = c.news.filter(n => n.unit_ok !== false && !n.drafts?.length).length;   // 발주표에 이미 있는 품목은 세지 않는다
   if (addable) btn.push(`<button class="oai-create" onclick="_lpAddNews('${id}',this)">새 요청 ${addable}개 발주표에 담기</button>`);
   _purchaseAttach(btn.join(''));
   return id;
@@ -7830,7 +7896,8 @@ async function _lpDecide(id, choice, el) {
     for (const d of amb) {
       const known = d.orders.every(o => o.qty !== null && o.qty !== undefined && (!o.unit || !d.item.unit || o.unit === d.item.unit));
       const have = known ? d.orders.reduce((s, o) => s + Number(o.qty), 0) : null;
-      if (have !== null && Number(d.qty) > have) short.push(`${d.item.item_name} ${_fmtQty(Number(d.qty) - have)}${d.item.unit || d.unit || ''} 부족 (요청 ${_lpQtyText(d.qty, d.unit)} − 주문 ${_fmtQty(have)})`);
+      const need = d.unit_ok === false ? null : Number(d.inv_qty ?? d.qty);
+      if (have !== null && need !== null && need > have) short.push(`${d.item.item_name} ${_fmtQty(need - have)}${d.item.unit || d.unit || ''} 부족 (요청 ${_lpQtyText(d.qty, d.unit)} − 주문 ${_fmtQty(have)})`);
     }
     out.push(`A. 기존 주문 포함 — ${amb.map(d => d.item.item_name).join('·')} 추가 주문하지 않습니다. 기존 주문은 그대로입니다.`);
     if (short.length) out.push('다만 요청이 기존 주문보다 많아요 — 필요하면 따로 말씀해 주세요:\n' + short.join('\n'));
@@ -7840,7 +7907,7 @@ async function _lpDecide(id, choice, el) {
     const res = [];
     for (const d of list) {
       if (d.unit_ok === false) { res.push(`${d.item.item_name} ${_lpQtyText(d.qty, d.unit)}: 단위 확인 필요 — 담지 않음`); continue; }
-      const r = await _lpInsertDraft(d.item, Number(d.qty), d.unit);
+      const r = await _lpInsertDraft(d.item, Number(d.inv_qty ?? d.qty), d.unit);
       res.push(`${d.item.item_name} ${_lpQtyText(d.qty, d.unit)}: ${r === 'ADDED' ? '추가 발주로 발주표에 담음' : r === 'IN_DRAFT' ? '발주표에 이미 있어 담지 않음' : '담지 못함'}`);
     }
     out.push(`${choice === 'B' ? 'B. 추가 주문' : '추가 주문'} — 기존 주문은 그대로 두고 별도로 담았어요 (판매처 주문은 아직 안 함):\n` + res.join('\n'));
@@ -7856,7 +7923,7 @@ async function _lpAddNews(id, el) {
   const res = [];
   for (const n of g.c.news) {
     if (n.unit_ok === false) { res.push(`${n.item.item_name} ${_lpQtyText(n.qty, n.unit)}: 단위 확인 필요 — 담지 않음`); continue; }
-    const r = await _lpInsertDraft(n.item, Number(n.qty), n.unit);
+    const r = await _lpInsertDraft(n.item, Number(n.inv_qty ?? n.qty), n.unit);
     res.push(`${n.item.item_name} ${_lpQtyText(n.qty, n.unit)}: ${r === 'ADDED' ? '발주표에 담음' : r === 'IN_DRAFT' ? '발주표에 이미 있어 담지 않음' : '담지 못함'}`);
   }
   _lpSystemCard('새 요청 — 발주표에 담았어요 (판매처 주문은 아직 안 함):\n' + res.join('\n'));

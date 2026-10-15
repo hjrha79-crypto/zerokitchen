@@ -76,7 +76,9 @@ function makeEnv(opt = {}) {
   }
   const db = {
     from: t => builder(t),
-    rpc: (fn, args) => { rpcs.push({ fn, args }); if (fn === 'get_open_supply') return Promise.resolve(opt.supplyFail ? { data: null, error: { message: 'x' } } : { data: OPEN_SUPPLY(), error: null }); return Promise.resolve({ data: null, error: { message: 'unknown rpc ' + fn } }); },
+    rpc: (fn, args) => { rpcs.push({ fn, args });
+      if (fn === 'get_order_delivery') return Promise.resolve(opt.delivery === 'fail' ? { data: null, error: { message: 'x' } } : { data: opt.delivery || [], error: null });
+      if (fn === 'get_open_supply') return Promise.resolve(opt.supplyFail ? { data: null, error: { message: 'x' } } : { data: OPEN_SUPPLY(), error: null }); return Promise.resolve({ data: null, error: { message: 'unknown rpc ' + fn } }); },
   };
   const cards = [];
   const mkNode = (tag) => { const n = { tag, className: '', innerHTML: '', children: [], dataset: {}, appendChild(c) { n.children.push(c); n.lastChild = c; return c; }, remove() {}, querySelectorAll: () => [] }; return n; };
@@ -87,7 +89,7 @@ function makeEnv(opt = {}) {
   };
   const confirms = [];
   const ctx = {
-    console, db, document, SID: 1, _items: ITEMS.map(x => ({ ...x })), _storeAliases: [], _stores: [{ store_id: 1, store_name: '로사안젤라 경기광주점' }, { store_id: 3, store_name: '신세계 대전' }],
+    console, db, document, SID: 1, _items: [...ITEMS, ...(opt.extraItems || [])].map(x => ({ ...x, ...((opt.itemPatch || {})[x.item_id] || {}) })), _storeAliases: opt.aliases || [], _stores: [{ store_id: 1, store_name: '로사안젤라 경기광주점' }, { store_id: 3, store_name: '신세계 대전' }],
     _purchase: { loaded: true, ready: true, stores: opt.stores || [{ store_id: 3, display_name: '신세계 대전', purchasing_enabled: true, authority: ['PURCHASE_REQUESTER'] }], requests: [] },
     _refreshPurchase: async () => {}, _purchaseSubmit: async (sid, raw) => { ctx._submitted.push({ sid, raw }); }, _submitted: [],
     _purchaseShowRecent: async () => {}, _purchaseCancelPreview: async () => {}, _prEsc: s => String(s ?? ''),
@@ -196,7 +198,61 @@ const gateId = env => Object.keys(env.fns._lpGates).pop();
   { const e = makeEnv(); await e.fns._purchaseRoute('토요일 도착으로 치킨스탁 1개');
     const c = e.fns._lpGates[gateId(e)].c;
     const missed = c.dups.length === 0 && c.news[0]?.item.item_id === 162;
-    results.push(`INFO T15 "치킨스탁 1개" resolves to item ${c.news[0]?.item.item_id ?? c.dups[0]?.item.item_id} — ${missed ? 'duplicate of 152 NOT detected → P1_ALIAS_IDENTITY_COLLISION' : 'detected'}`); }
+    ok('T15 "치킨스탁 1개" without alias evidence → no longer missed: asked as AMBIGUOUS (P1)', !missed && c.dups[0]?.identity === 'AMBIGUOUS'); }
+
+  // ── P1: identity / unit / ETA ──
+  const ALIAS20 = { id: 20, store_id: 1, raw_expression: '치킨스탁', corrected_name: '치킨스톡', count: 1 };
+  const gateOf = async (env, text) => { await env.fns._purchaseRoute(text); return { c: env.fns._lpGates[gateId(env)]?.c, msg: env.cards.at(-1)?.msg || '' }; };
+  const lastButtons = env => { const card = env.resList.children.at(-1); return (card?.children || []).map(n => n.innerHTML).join(' '); };
+  { const e = makeEnv({ aliases: [ALIAS20] }); const { c, msg } = await gateOf(e, '토요일 도착으로 치킨스톡 1개');
+    ok('I1 "치킨스톡 1개" → existing #152 duplicate', c.dups.length === 1 && c.dups[0].orders.some(o => o.order_id === 152) && /#152/.test(msg)); }
+  { const e = makeEnv({ aliases: [ALIAS20] }); const { c, msg } = await gateOf(e, '토요일 도착으로 치킨스탁 1개');
+    ok('I2 "치킨스탁 1개" (item 162) → same #152 via store alias + near name', c.dups.length === 1 && c.dups[0].item.item_id === 162 && c.dups[0].identity === 'SAME' && c.dups[0].orders.some(o => o.order_id === 152) && /= 치킨스톡, 매장 별칭/.test(msg)); }
+  { const e = makeEnv({ aliases: [ALIAS20, { raw_expression: '딸기', corrected_name: '치즈', count: 1 }], extraItems: [{ item_id: 990, item_name: '딸기', unit: '개' }],
+      orders: [...ORDERS(), { id: 160, store_id: 1, item_id: 10, item_name: '치즈', qty: 4, unit: '개', status: 'ordered', created_at: '2026-10-15T05:37:04Z' }] });
+    const a = await gateOf(e, '토요일 도착으로 딸기 2개');
+    const e2 = makeEnv({ aliases: [ALIAS20], extraItems: [{ item_id: 991, item_name: '치킨스틱', unit: '개' }] });
+    const b = await gateOf(e2, '토요일 도착으로 치킨스틱 1개');
+    ok('I3 similar/aliased but unproven items → false merge 0 (딸기≠치즈 alias only, 치킨스틱≈치킨스톡 name only → AMBIGUOUS, asked, not merged)',
+      a.c.dups[0]?.identity === 'AMBIGUOUS' && b.c.dups[0]?.identity === 'AMBIGUOUS' && /확실하지 않아요/.test(b.msg) && e.writes.length === 0 && e2.writes.length === 0,
+      `딸기→${a.c.dups[0]?.identity}, 치킨스틱→${b.c.dups[0]?.identity}`); }
+  { const e = makeEnv(); const { c, msg } = await gateOf(e, '토요일 도착으로 치킨스탁 1개');
+    ok('I4 no alias evidence (치킨스탁 vs 치킨스톡 name only) → Human ambiguity, not auto merge', c.dups[0]?.identity === 'AMBIGUOUS' && /A\. 기존 주문 포함/.test(msg) && /확실하지 않아요/.test(msg)); }
+
+  const CHEESE_MEM = { itemPatch: { 10: { order_unit_name: '봉', order_unit_qty: 1 } } };
+  for (const [id, text] of [['U1', '토요일 도착으로 치즈 8봉'], ['U2', '토요일 도착으로 치즈 8봉지']]) {
+    const e = makeEnv(CHEESE_MEM); const { c, msg } = await gateOf(e, text); const n = c.news.find(x => x.item.item_id === 10);
+    ok(`${id} "${text.slice(9)}" + item purchase unit 봉(=1개) → purchase qty 8봉 = 8개, addable`, n?.unit_ok === true && n.inv_qty === 8 && n.unit_basis === 'ITEM_PURCHASE_UNIT' && /= 8개 \(구매 단위 봉 1 = 1개\)/.test(msg) && /새 요청 1개 발주표에 담기/.test(lastButtons(e)));
+    if (id === 'U1') { await e.fns._lpAddNews(gateId(e), null); const ins = orderMut(e).filter(w => w.op === 'insert');
+      ok('U1b "담기" writes 8 in the inventory unit (8개), never "8봉" against a 개 item', ins.length === 1 && ins[0].payload.qty === 8 && ins[0].payload.unit === '개'); } }
+  { const e = makeEnv(CHEESE_MEM); const { c } = await gateOf(e, '토요일 도착으로 치즈 8개'); const n = c.news.find(x => x.item.item_id === 10);
+    ok('U3 "치즈 8개" → same unit, unchanged semantics', n?.unit_ok === true && n.inv_qty === 8 && n.unit_basis === 'SAME_UNIT'); }
+  { const e = makeEnv(CHEESE_MEM); const { c, msg } = await gateOf(e, '토요일 도착으로 치즈 8박스'); const n = c.news.find(x => x.item.item_id === 10);
+    ok('U4 "치즈 8박스" → no unsafe 8 EA conversion (박스 ≠ 봉), Human unit check, no add button', n?.unit_ok === false && n.inv_qty === null && /단위 확인 필요/.test(msg) && !/발주표에 담기/.test(lastButtons(e))); }
+  { const e = makeEnv(); const { c, msg } = await gateOf(e, '토요일 도착으로 치즈 8봉'); const n = c.news.find(x => x.item.item_id === 10);
+    ok('U5 purchase-unit memory missing (current Production item 10) → Human unit confirmation', n?.unit_ok === false && /단위 확인 필요/.test(msg)); }
+
+  const ETA = [{ order_id: 151, item_id: 18, expected_arrival_kind: 'DATE', expected_arrival_date: '2026-10-17', delivery_status: null },
+    { order_id: 152, item_id: 124, expected_arrival_kind: 'DATE', expected_arrival_date: '2026-10-17', delivery_status: null }];
+  { const e = makeEnv({ delivery: ETA, aliases: [ALIAS20] }); const { c, msg } = await gateOf(e, FIELD);
+    const o151 = c.dups.find(d => d.item.item_id === 18)?.orders[0], o152 = c.dups.find(d => d.item.item_id === 124)?.orders[0];
+    ok('E1 #151 ETA 2026-10-17 read from delivery observation', o151?.eta === '2026-10-17');
+    ok('E2 #152 ETA 2026-10-17', o152?.eta === '2026-10-17');
+    ok('E3 gate says "이미 주문되어 10/17(토) 입고 예정입니다"', /이미 주문되어 10\/17\(토\) 입고 예정입니다/.test(msg) && e.writes.length === 0); }
+  { const e = makeEnv({ delivery: 'fail' }); const { c, msg } = await gateOf(e, FIELD);
+    ok('E4 ETA unreadable → fallback "입고 대기 중", duplicate guard still works', c.dups.length === 2 && /이미 주문되어 입고 대기 중입니다/.test(msg)); }
+  { const e = makeEnv({ delivery: [{ ...ETA[0], delivery_status: 'DELIVERED' }, ETA[1]] }); const { c, msg } = await gateOf(e, FIELD);
+    const o151 = c.dups.find(d => d.item.item_id === 18)?.orders[0];
+    ok('E5 delivered observation is not overwritten by an expected date (151: 배송 완료 관찰, no ETA; head falls back)', o151?.eta === null && o151.delivered === true && /배송 완료로 관찰됨/.test(msg) && /입고 대기 중입니다/.test(msg)); }
+  { const e = makeEnv({ ...CHEESE_MEM, delivery: ETA, aliases: [ALIAS20] }); const { c } = await gateOf(e, FIELD);
+    ok('R4 151/152 unchanged across P1 paths', e.writes.length === 0 && e.tables.order_requests.find(x => x.id === 151).qty === 3 && e.tables.order_requests.find(x => x.id === 152).qty === 1 && c.news.find(x => x.item.item_id === 10)?.unit_ok === true); }
+  { const e = makeEnv({ orders: [...ORDERS(), { id: 153, store_id: 1, item_id: 20, item_name: '하드롤', qty: 3, unit: '박스', status: 'pending', created_at: '2026-10-15T16:16:15Z' }] });
+    await gateOf(e, FIELD);
+    ok('R5 items already in 발주표 are not counted in the add button (Human FIELD 01:15: 153–156 already added)', /새 요청 3개 발주표에 담기/.test(lastButtons(e))); }
+  { const e = makeEnv({ extraItems: [{ item_id: 71, item_name: '죽용기 소', unit: '개' }, { item_id: 72, item_name: '죽용기 중', unit: '개' }],
+      orders: [...ORDERS(), { id: 170, store_id: 1, item_id: 72, item_name: '죽용기 중', qty: 2, unit: '개', status: 'ordered', created_at: '2026-10-15T05:37:04Z' }] });
+    const { c } = await gateOf(e, '토요일 도착으로 죽용기 소 2개');
+    ok('I3b size variants (죽용기 소 vs 죽용기 중 #170) → different items, no identity question', c.dups.length === 0 && c.news[0]?.item.item_id === 71); }
 
   console.log(results.join('\n'));
   console.log(`\n${pass} passed, ${fail} failed`);
