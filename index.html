@@ -7049,9 +7049,9 @@ let _writerCaps = [];                                       // 서버 writer가 
 let _writerState = { status: 'signed_out', reason: '' };    // signed_out | reauth | not_ready | ready
 // 각 기록이 보낼 수 있는 필드 (Edge 함수의 허용 목록과 같다). 값이 없는 필드는 보내지 않는다 — 모르는 것을 채우지 않는다.
 const _WRITER_FIELDS = {
-  CONFIRM_ORDER: ['order_id', 'supply_source', 'ordered_at', 'external_order_ref'],
+  CONFIRM_ORDER: ['order_id', 'supply_source', 'ordered_at', 'external_order_ref', 'note'],
   PARTIAL_RECEIPT: ['order_id', 'received_qty'], FULL_RECEIPT: ['order_id'], CANCEL_ORDER: ['order_id', 'reason'], CONFIRM_COVERAGE: ['item_id', 'confirm'],
-  CREATE_AND_CONFIRM_ORDER: ['item_id', 'ordered_qty', 'unit', 'supply_source', 'confirm', 'ordered_at', 'external_order_ref'],
+  CREATE_AND_CONFIRM_ORDER: ['item_id', 'ordered_qty', 'unit', 'supply_source', 'confirm', 'ordered_at', 'external_order_ref', 'note'],
   UPDATE_ORDER_DELIVERY: ['order_id', 'observed_at', 'delivery_status', 'is_delayed', 'expected_arrival_at', 'external_order_url'],
 };
 function _writerFields(action, v) {
@@ -7132,7 +7132,7 @@ async function _writerAct(action, fields) {
   if (!_writerReady) { showToast('기록 권한이 준비되지 않았습니다 — 아무것도 바뀌지 않았습니다', 3500); return; }
   if (_loadPendingAction()) { showToast('확인 중인 기록이 있습니다 — 먼저 [다시 확인]을 눌러 주세요', 3500); _renderWriterBar(); return; }
   _savePendingAction({ action, action_id: _newActionId(), ...fields, state: 'SENDING', at: Date.now() });
-  await _deliverPendingAction();
+  return await _deliverPendingAction();   // 서버가 정한 결과(body) — 응답을 못 받았으면 undefined
 }
 // 응답을 못 받으면 성공으로도 실패로도 추정하지 않는다: 같은 action_id로 다시 보내 서버 기록을 재생한다.
 async function _deliverPendingAction() {
@@ -7155,6 +7155,7 @@ async function _deliverPendingAction() {
   showToast(_writerResultMessage(body), 3500);
   _renderWriterBar();
   await _renderOrderKeepScroll();   // 결과는 서버 projection을 다시 읽어 보여 준다
+  return body;
 }
 function _renderWriterBar() {
   const el = document.getElementById('writerPendingBar');
@@ -8147,8 +8148,130 @@ async function _purchaseSubmitTo(storeId, raw) {
   if (Number(storeId) !== Number(SID) && typeof _switchStore === 'function') await _switchStore(Number(storeId));
   await _purchaseSubmit(storeId, raw);
 }
+// ━━ 직접 주문 보고 (HUMAN_DIRECT_ORDER_REPORT): "하드롤은 팍스푸드에 카톡으로 주문했어" ━━━━━━━━━━━━━━━━━━━━━━
+// 이미 밖에서 주문한 사실의 기록이다 — 새 주문 요청이 아니다. 기존 신뢰 기록 경로(입고 기록 로그인 → 서버 writer)만 쓴다:
+//   발주표 계획이 정확히 하나면 그 행을 그대로 실제 주문으로 확인 (CONFIRM_ORDER — 같은 행이라 중복·연결 없음)
+//   계획이 없으면 수량·주문처를 말했을 때만 새 실제 주문 (CREATE_AND_CONFIRM_ORDER)
+// 사람이 [기록하기]를 누르기 전에는 아무것도 쓰지 않는다. 주문번호·가격·도착일은 모르면 비워 둔다 (만들지 않는다).
+const _HDO_DONE_RE = /(주문|발주|오더)\s*(을|를)?\s*(했|해\s*놨|해\s*뒀|해\s*놓았|넣었|완료)|시켰|(주문|발주)\s*함/;
+const _HDO_NOT_RE = /(안|못)\s*(했|시켰|넣었)|했(나|니|는지|을까)|[?？]|(해|시켜|넣어)\s*(줘|주세요|줄래)|할\s*(게|까|래)|해야|부탁/;
+const _HDO_CHANNELS = [[/카카오\s*톡|카톡|카카오/, '카카오톡'], [/전화/, '전화'], [/문자/, '문자']];
+const _HDO_SOURCES = [[/팍스\s*푸드|팍스/, 'PAX_FOOD'], [/네이버/, 'NAVER'], [/쿠팡/, 'COUPANG'], [/식봄/, 'SIKBOM'], [/씨제이|CJ|온리원/i, 'CJ_FRESHWAY'],
+  [/쿠치나/, 'CUCINA_FOOD'], [/동양\s*팩/, 'DONGYANG_PACK'], [/배민/, 'BAEMIN_MART']];
+const _hdoGates = {};
+function _hdoIntentOf(raw) {
+  const s = String(raw ?? '').trim();
+  if (!s || s.length > 80 || /[\n,，、]/.test(s) || !_HDO_DONE_RE.test(s) || _HDO_NOT_RE.test(s)) return null;
+  const channel = (_HDO_CHANNELS.find(([re]) => re.test(s)) || [])[1] || (/직접/.test(s) ? '직접' : null);
+  const source = (_HDO_SOURCES.find(([re]) => re.test(s)) || [])[1] || null;
+  // 품목·수량: 주문처·채널·동사를 걷어 낸 나머지
+  let t = s;
+  for (const [re] of _HDO_SOURCES) t = t.replace(new RegExp(`(${re.source})\\s*(에서|에|으로|로|에다|한테)?`, re.flags), ' ');
+  for (const [re] of _HDO_CHANNELS) t = t.replace(new RegExp(`(${re.source})\\s*(으로|로)?`), ' ');
+  t = t.replace(/(내가|제가|대표가)?\s*직접/g, ' ').replace(/(이미|벌써|아까|오늘|어제|방금)\s*/g, ' ')
+    .replace(/\s*(주문|발주|오더)\s*(을|를)?\s*(했|해\s*놨|해\s*뒀|해\s*놓았|넣었|완료|함).*$/, '').replace(/\s*시켰.*$/, '').trim();
+  const m = /^(.+?)\s*([0-9]+(?:\.[0-9]+)?)\s*([가-힣a-zA-Z]{1,4})?$/.exec(t);
+  let name = (m ? m[1] : t).trim().replace(/\s*(은|는|이|가|을|를|도)$/, '').trim();
+  if (!name) return null;
+  return { name, qty: m ? Number(m[2]) : null, unit: m ? (m[3] || null) : null, source, channel };
+}
+function _hdoNote(h, raw) {
+  return `대표 직접 주문 · ${h.channel || '경로 미상'} · "${String(raw).trim().slice(0, 120)}"`;
+}
+function _hdoSourceLabel(code) { return code ? (_AGENT_SOURCE_LABEL[code] || code) : null; }
+// 받침에 맞는 조사: 카카오톡으로 / 네이버로 / 전화로 (ㄹ 받침은 '로')
+function _hdoRo(w) { const c = String(w ?? '').trim().slice(-1).charCodeAt(0) - 0xAC00; return (c >= 0 && c <= 11171 && c % 28 !== 0 && c % 28 !== 8) ? `${w}으로` : `${w}로`; }
+// 발주표 계획의 주문처 힌트: 계획(또는 품목)의 거래처 이름 → 정규 주문처 코드 (모르면 null)
+function _hdoPlanSource(plan, item) {
+  const vid = plan?.vendor_id ?? item?.vendor_id;
+  const name = vid ? ((_vendors || []).find(v => v.vendor_id === vid) || {}).vendor_name : null;
+  return name ? ((_HDO_SOURCES.find(([re]) => re.test(name)) || [])[1] || null) : null;
+}
+async function _hdoIntake(raw, h) {
+  const say = (msg, type = 'warn') => addResult(raw, msg + '\n— 아무것도 바꾸지 않았습니다.', type);
+  if (!_writerReady) return say('이미 주문한 것을 기록하려면 설정 → 입고 기록 로그인이 필요해요.');
+  const r = _lpResolveItem(h.name);
+  if (!r.item) return say(r.candidates?.length ? `"${h.name}"이 어느 품목인지 하나로 정하지 못했어요 (${r.candidates.slice(0, 3).join(', ')}). 품목 이름 그대로 다시 말해 주세요.` : `"${h.name}" 품목을 찾지 못했어요.`);
+  const item = r.item;
+  let qty = h.qty;
+  if (qty !== null && h.unit) {
+    const u = _lpUnitResolve(h.unit, qty, item);
+    if (!u.ok) return say(`${item.item_name}은 ${item.unit} 단위로 기록해요. "${h.unit}"을 ${item.unit}로 바꾸는 기준을 몰라 기록하지 않았어요.`);
+    qty = u.inv_qty;
+  }
+  // 지금 상태를 서버에서 다시 읽는다 (화면 캐시로 정하지 않는다)
+  if (typeof _loadPlanRecon === 'function') await _loadPlanRecon(SID);
+  const { data: rows, error } = await db.from('order_requests').select('id, item_id, item_name, qty, unit, status, vendor_id, created_at')
+    .eq('store_id', SID).eq('item_id', item.item_id).in('status', ['pending', 'ordered']);
+  if (error) return say('발주표를 읽지 못했어요. 잠시 후 다시 말해 주세요.', 'err');
+  const live = typeof _actionablePlans === 'function' ? _actionablePlans(rows) : (rows || []);
+  const plans = live.filter(x => x.status === 'pending' && Number(x.qty) > 0), ordered = live.filter(x => x.status === 'ordered');
+  const src = h.source;
+  const via = [_hdoSourceLabel(src), h.channel].filter(Boolean).join(' ');
+  const unit = item.unit || '';
+  if (plans.length > 1) return say(`발주표에 ${item.item_name} 계획이 ${plans.length}개 있어요 (${plans.map(p => `${_agentNum(p.qty)}${p.unit || unit}`).join(', ')}). 어느 것인지 발주표에서 하나로 정리한 뒤 다시 말해 주세요.`);
+  if (plans.length === 1) {
+    const p = plans[0];
+    if (qty !== null && Number(qty) !== Number(p.qty)) return say(`발주표에는 ${item.item_name} ${_agentNum(p.qty)}${p.unit || unit}, 말씀은 ${_agentNum(qty)}${unit}예요. 수량이 달라 기록하지 않았어요 (일부만 주문한 경우는 아직 따로 기록하지 않아요).`);
+    const planSrc = _hdoPlanSource(p, item);
+    const mismatch = src && planSrc && src !== planSrc;
+    const id = _newActionId();
+    _hdoGates[id] = { kind: 'CONFIRM', plan: p, item, source: src || planSrc || null, note: _hdoNote(h, raw), via, done: false };
+    const q = `발주표에 ${item.item_name} ${_agentNum(p.qty)}${p.unit || unit}가 있습니다.\n` +
+      (mismatch ? `발주표에는 ${_hdoSourceLabel(planSrc)}로 되어 있어요. ${_hdoSourceLabel(src)}에서 주문하신 걸로 기록할까요?` :
+        `${via ? _hdoRo(via) + ' ' : ''}직접 주문한 것으로 기록할까요?`) + '\n(기록 전에는 아무것도 바뀌지 않아요)';
+    addResult(raw, q, 'ok');
+    _purchaseAttach(`<button class="oai-create" onclick="_hdoDecide('${id}',true,this)">기록하기</button><button class="oai-edit" onclick="_hdoDecide('${id}',false,this)">아니요</button>`);
+    return;
+  }
+  if (ordered.length) return say(`${item.item_name}은 이미 주문 기록이 있어요 (${ordered.map(o => `${_agentNum(o.qty)}${o.unit || unit}`).join(', ')} · 입고 대기). 새로 기록하지 않았어요.`, 'ok');
+  // 발주표 계획도 진행 주문도 없음 → 수량·주문처를 말했을 때만 새 실제 주문
+  if (!(_writerCaps || []).includes('CREATE_AND_CONFIRM_ORDER')) return say(`발주표에 ${item.item_name} 계획이 없어요. 계획 없이 바로 기록하는 기능이 아직 준비되지 않았어요.`);
+  if (qty === null || !src) return say(`발주표에 ${item.item_name} 계획이 없어요. 수량과 주문처를 함께 말해 주시면 기록할게요 (예: "${item.item_name} 3${unit} 네이버에서 주문했어").`);
+  const id = _newActionId();
+  _hdoGates[id] = { kind: 'CREATE', item, qty, source: src, note: _hdoNote(h, raw), via, done: false };
+  addResult(raw, `발주표에 ${item.item_name} 계획은 없어요.\n${_hdoRo(via)} 직접 주문한 ${item.item_name} ${_agentNum(qty)}${unit}를 실제 주문으로 기록할까요?\n(기록 전에는 아무것도 바뀌지 않아요)`, 'ok');
+  _purchaseAttach(`<button class="oai-create" onclick="_hdoDecide('${id}',true,this)">기록하기</button><button class="oai-edit" onclick="_hdoDecide('${id}',false,this)">아니요</button>`);
+}
+async function _hdoDecide(id, yes, el) {
+  const g = _hdoGates[id];
+  if (!g || g.done) return;
+  g.done = true;
+  el?.closest('.order-action-inline')?.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  if (!yes) { _lpSystemCard('기록하지 않았어요 — 아무것도 바뀌지 않았습니다.'); return; }
+  let body;
+  if (g.kind === 'CONFIRM') {
+    // 누르는 사이에 바뀌지 않았는지 다시 확인 (여전히 발주표 계획인가)
+    const { data: cur } = await db.from('order_requests').select('id, status, qty').eq('id', g.plan.id).limit(1);
+    const c = (cur || [])[0];
+    if (!c || c.status !== 'pending' || Number(c.qty) !== Number(g.plan.qty)) { _lpSystemCard('그 사이 발주표가 바뀌어 기록하지 않았어요 — 다시 말해 주세요.'); return; }
+    const idf = (_writerCaps || []).includes('CONFIRM_ORDER_IDENTITY') ? { supply_source: g.source } : {};
+    body = await _writerAct('CONFIRM_ORDER', _writerFields('CONFIRM_ORDER', { order_id: g.plan.id, ...idf, note: g.note }));
+  } else {
+    body = await _writerAct('CREATE_AND_CONFIRM_ORDER', _writerFields('CREATE_AND_CONFIRM_ORDER', { item_id: g.item.item_id, ordered_qty: Number(g.qty), unit: g.item.unit,
+      supply_source: g.source, confirm: true, note: g.note }));
+  }
+  const what = `${g.item.item_name} ${_agentNum(g.kind === 'CONFIRM' ? g.plan.qty : g.qty)}${g.item.unit || ''}`;
+  const code = body && body.code;
+  if (code === 'CONFIRMED' || code === 'CREATED_AND_CONFIRMED') {
+    _lpSystemCard(`${what}를 ${g.via ? g.via + ' ' : ''}주문으로 기록했습니다.\n${g.kind === 'CONFIRM' ? '발주표에서는 처리했고, ' : ''}이제 입고 대기로 볼게요.\n주문번호와 도착 예정일은 아직 확인되지 않았습니다.`);
+  } else if (code === 'ALREADY_CONFIRMED') {
+    _lpSystemCard(`${what}는 이미 주문으로 기록돼 있어요 — 새로 기록하지 않았습니다.`);
+  } else if (body) {
+    _lpSystemCard(`기록하지 못했어요 — ${_writerResultMessage(body)}`);
+  }   // 응답을 못 받은 경우는 기록 확인 막대([다시 확인])가 이어 받는다
+}
+
 // 라우터 진입 (handleNaturalInput이 재고 파서보다 먼저 부른다). 발주요청이면 true — 재고·주문 경로로 가지 않는다.
 async function _purchaseRoute(raw) {
+  const hdo = typeof _hdoIntentOf === 'function' ? _hdoIntentOf(raw) : null;   // 이미 밖에서 주문한 사실 → 새 주문 요청·재고 입력으로 보내지 않는다
+  if (hdo) {
+    document.getElementById('parseLoading')?.remove();
+    const inp = document.getElementById('nlInput');
+    if (inp) inp.value = '';
+    await _hdoIntake(raw, hdo);
+    return true;
+  }
   if (/(발주|주문|부탁|요청|취소)/.test(raw) && !_purchase.loaded) await _refreshPurchase().catch(() => {});
   const lpIntent = _lpIntentOf(raw);
   if (lpIntent && !_purchase.loaded) await _refreshPurchase().catch(() => {});
