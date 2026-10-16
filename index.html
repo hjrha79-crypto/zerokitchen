@@ -5400,12 +5400,15 @@ async function renderOrder(opts) {
 
   try {
     // 1) pending + ordered 발주 요청 로드
-    const { data: pendingRows, error: oErr } = await db.from('order_requests')
-      .select('*').eq('store_id', SID).in('status', ['pending', 'ordered'])
-      .order('created_at', { ascending: false });
+    const [{ data: pendingRows, error: oErr }] = await Promise.all([
+      db.from('order_requests').select('*').eq('store_id', SID).in('status', ['pending', 'ordered']).order('created_at', { ascending: false }),
+      typeof _loadPlanRecon === 'function' ? _loadPlanRecon(SID) : null,   // 실제 주문으로 처리된 계획 — 함께 읽는다
+    ]);
     if (_storeChanged(ep)) return;
     if (oErr) throw oErr;
-    _orderRequests = (pendingRows || []).filter(r => Number(r.qty) > 0);
+    // 실제 주문으로 처리된 계획(pending)은 발주표·개수·복사에서 뺀다 — 원래 행은 그대로, 아래 이력 한 줄로만 보인다
+    const _reconciledPlans = typeof _isReconciledPlan === 'function' ? (pendingRows || []).filter(_isReconciledPlan) : [];
+    _orderRequests = (typeof _actionablePlans === 'function' ? _actionablePlans(pendingRows) : (pendingRows || [])).filter(r => Number(r.qty) > 0);
     // 전역 _orderedItemIds 갱신 (pending + ordered 품목)
     _orderedItemIds = new Set(_orderRequests.map(r => r.item_id));
     if (!(opts && opts.purchase === false) && typeof _refreshPurchaseHome === 'function') _refreshPurchaseHome(ep).catch(() => {});   // 발주요청 카드 — 기다리지 않는다 (첫 홈은 init 의 PRIMARY 가 이미 읽는다)
@@ -5627,6 +5630,7 @@ async function renderOrder(opts) {
       for (const r of _orderedRows) html += _receiveItemHtml(r);
       html += `</div></div></div>`;
     }
+    if (_reconciledPlans.length && typeof _planReconNoteHtml === 'function') html += _planReconNoteHtml(_reconciledPlans);
 
     list.innerHTML = html;
 
@@ -6716,13 +6720,39 @@ async function _deferAllOrders() {
   _renderOrderKeepScroll();
 }
 
+// 계획 → 실제 주문 충족 (get_plan_reconciliations): 실제 주문으로 처리된 발주표(pending) 계획은 다시 주문할 대상이 아니다.
+// 원래 행은 그대로 두고 (상태·수량 변경 없음) 발주표·개수·복사·중복 판단에서만 뺀다.
+// 서버에 기능이 없거나 못 읽으면 직전 목록(같은 매장) 또는 빈 목록 — 빈 목록이면 예전과 같다.
+// 발주표를 붙잡지 않도록 짧게만 기다린다 (1.5초): 늦으면 직전 목록으로 그린다.
+const _PLAN_RECON_MS = 1500;
+let _planRecon = { sid: null, map: new Map() };
+async function _loadPlanRecon(storeId) {
+  let rows = null;
+  try { rows = await _withTimeout(db.rpc('get_plan_reconciliations', { p_store_id: storeId }), _PLAN_RECON_MS).then(r => r.error ? null : r.data || [], () => null); } catch { rows = null; }
+  if (rows) _planRecon = { sid: storeId, map: new Map(rows.map(x => [Number(x.plan_order_id), x])) };
+  else if (_planRecon.sid !== storeId) _planRecon = { sid: storeId, map: new Map() };
+  return _planRecon.map;
+}
+function _isReconciledPlan(row) { return !!row && row.status === 'pending' && _planRecon.map.has(Number(row.id)); }
+function _actionablePlans(rows) { return (rows || []).filter(r => !_isReconciledPlan(r)); }
+// 발주표 아래 이력 한 줄: "다진 마늘 5개 → 식봄 주문 기록 #158로 처리됨" (버튼 없음 — 내부 번호는 "주문 기록 #"으로만 쓴다)
+function _planReconNoteHtml(rows) {
+  const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const lines = rows.map(r => {
+    const x = _planRecon.map.get(Number(r.id)) || {};
+    return `<div>${esc(r.item_name)} ${esc(_fmtQty(Number(r.qty)))}${esc(r.unit || '')} → ${x.supply_label ? esc(x.supply_label) + ' ' : ''}주문 기록 #${esc(x.actual_order_id)}로 처리됨</div>`;
+  });
+  return `<div class="v4-empty-hint" data-plan-recon="1" style="font-size:12px;text-align:left">✓ 실제 주문으로 처리된 계획${lines.join('')}</div>`;
+}
+
 // 중복 발주 방지: 같은 store_id+item_id로 pending/ordered 건이 있으면 INSERT 스킵
 // skipped=true일 때 existing 필드로 기존 row 정보를 반환하여 호출자가
-// 수량 업데이트 등 후속 처리를 결정할 수 있음.
+// 수량 업데이트 등 후속 처리를 결정할 수 있음. 실제 주문으로 처리된 계획(pending)은 기존 건으로 보지 않는다.
 async function _insertOrderIfNotDup(row) {
-  const { data: existing } = await db.from('order_requests')
+  const { data: found } = await db.from('order_requests')
     .select('id, qty, unit, status').eq('store_id', row.store_id).eq('item_id', row.item_id)
-    .in('status', ['pending', 'ordered']).limit(1);
+    .in('status', ['pending', 'ordered']).limit(20);
+  const existing = typeof _actionablePlans === 'function' ? _actionablePlans(found) : (found || []);
   if (existing?.length) return { data: null, error: null, skipped: true, existing: existing[0] };
   const { data, error } = await db.from('order_requests').insert(row).select();
   return { data, error, skipped: false };
@@ -7724,12 +7754,15 @@ function _lpResolveItem(name) {
 // 이미 주문된 미입고 (committed supply): 서버 projection(get_open_supply)의 진행 주문 + 주문 기록(order_requests ordered).
 // 둘 다 못 읽으면 null — "겹치는 주문 없음"으로 판단하지 않는다.
 async function _lpCommitted(storeId) {
-  const [os, or, dl] = await Promise.all([
+  const [os, orAll, dl] = await Promise.all([
     _withTimeout(db.rpc('get_open_supply', { p_store_id: storeId, p_item_id: null })).then(r => r.error ? null : r.data || [], () => null),
     _withTimeout(db.from('order_requests').select('id, item_id, qty, unit, status, created_at').eq('store_id', storeId).in('status', ['pending', 'ordered'])).then(r => r.error ? null : r.data || [], () => null),
     // 입고 예정일: 기존 배송 관찰(get_order_delivery)만 읽는다 — 못 읽어도 중복 판단은 그대로 (예정일 표시만 빠진다)
-    _withTimeout(db.rpc('get_order_delivery', { p_store_id: storeId, p_item_id: null })).then(r => r.error ? [] : r.data || [], () => [])
+    _withTimeout(db.rpc('get_order_delivery', { p_store_id: storeId, p_item_id: null })).then(r => r.error ? [] : r.data || [], () => []),
+    typeof _loadPlanRecon === 'function' ? Promise.resolve().then(() => _loadPlanRecon(storeId)).catch(() => null) : null   // 실제 주문으로 처리된 계획
   ]);
+  // 실제 주문으로 처리된 계획(pending)은 발주표에 있는 것으로 세지 않는다 — 실제 주문 쪽이 이미 진행 주문으로 잡힌다
+  const or = orAll && typeof _actionablePlans === 'function' ? _actionablePlans(orAll) : orAll;
   if (os === null && or === null) return null;
   const eta = new Map();
   for (const d of dl || []) eta.set(Number(d.order_id), _lpEtaOf(d));
@@ -7886,7 +7919,8 @@ function _lpShowGate(raw, c, arrival, withUser = true) {
 }
 // 발주표(pending)에 한 줄 추가 — 이미 주문된 행은 건드리지 않는다. 같은 품목이 발주표(pending)에 이미 있으면 추가하지 않는다.
 async function _lpInsertDraft(item, qty, unit) {
-  const { data: draft } = await db.from('order_requests').select('id').eq('store_id', SID).eq('item_id', item.item_id).eq('status', 'pending').limit(1);
+  const { data: found } = await db.from('order_requests').select('id, status').eq('store_id', SID).eq('item_id', item.item_id).eq('status', 'pending').limit(20);
+  const draft = typeof _actionablePlans === 'function' ? _actionablePlans(found) : (found || []);   // 실제 주문으로 처리된 계획은 발주표에 있는 것으로 보지 않는다
   if (draft?.length) return 'IN_DRAFT';
   const row = { store_id: SID, item_id: item.item_id, item_name: item.item_name, qty, status: 'pending' };
   if (item.unit) row.unit = item.unit; else if (unit) row.unit = unit;
